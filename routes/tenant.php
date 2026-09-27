@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\LicenseActivationController;
+use App\Http\Controllers\Tenant\LicensePublicKeyController;
+use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
@@ -34,4 +37,13 @@ Route::middleware($tenantMiddleware)
 
         Route::get('/subscription', SubscriptionStatusController::class)
             ->name('tenant.api.subscription');
+
+        Route::get('/license/public-key', LicensePublicKeyController::class)
+            ->name('tenant.api.license.public-key');
+
+        Route::post('/license/activate', LicenseActivationController::class)
+            ->name('tenant.api.license.activate');
+
+        Route::post('/license/lease', OfflineLeaseController::class)
+            ->name('tenant.api.license.lease');
     });

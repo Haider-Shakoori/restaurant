@@ -33,6 +33,19 @@
 
             @can('manage-platform')
                 <section class="rounded-2xl border border-slate-200 bg-white p-6">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h2 class="font-bold">License & Android devices</h2>
+                            <p class="mt-1 text-sm text-slate-500">Generate activation keys, revoke devices and inspect signed offline lease activity.</p>
+                        </div>
+                        <a href="/platform/restaurants/{{ $business->id }}/license"
+                           class="rounded-xl border border-slate-300 px-4 py-2.5 text-center text-sm font-semibold">
+                            Manage license
+                        </a>
+                    </div>
+                </section>
+
+                <section class="rounded-2xl border border-slate-200 bg-white p-6">
                     <h2 class="font-bold">Subscription actions</h2>
                     <p class="mt-1 text-sm text-slate-500">Trial starts only after successful provisioning. Renewal history is never overwritten.</p>
 
