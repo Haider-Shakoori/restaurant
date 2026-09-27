@@ -53,10 +53,12 @@ Restaurant operations must remain fast and usable during temporary connectivity 
 
 Tenant isolation, subscriptions, license leasing, restaurant onboarding, ordering, KOT/KDS, billing, inventory and Flutter offline synchronization are implemented incrementally in the numbered development batches.
 
-See [docs/architecture.md](docs/architecture.md) for the foundation boundaries and engineering rules.
+See [docs/architecture.md](docs/architecture.md) for the authoritative SaaS boundaries and [docs/architecture-blueprint.md](docs/architecture-blueprint.md) for the central/tenant ERD, API contracts, permissions, plan rules, provisioning/deployment runbook, staged backlog, and risk register.
 
 ## Current development status
 
-**Batch 1 — Laravel SaaS foundation: implemented on the Batch 1 feature branch.**
+**Batch 1 — Laravel SaaS foundation: merged into `main`.**
 
-Next: **Batch 2 — Multi-tenancy and tenant isolation.**
+Architecture baseline: **central SaaS database + one isolated database per restaurant tenant + domain-based identification + separate central/tenant migrations**.
+
+Next: **Batch 2 — Multi-database tenancy and tenant isolation.**
