@@ -9,6 +9,7 @@ use App\Http\Requests\Platform\StoreBusinessRequest;
 use App\Models\AdminUser;
 use App\Models\Business;
 use App\Models\Plan;
+use App\Services\Platform\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -78,19 +79,28 @@ class BusinessController extends Controller
             ->with('status', 'Restaurant record created in pending provisioning state.');
     }
 
-    public function show(Business $business): View
+    public function show(Business $business, SubscriptionService $subscriptions): View
     {
         $business->load([
             'plan.features',
             'assignedOperator',
             'tenant.domains',
             'provisioningEvents' => fn ($query) => $query->limit(30),
+            'subscriptions' => fn ($query) => $query->with('planPrice')->limit(30),
+            'subscriptionEvents' => fn ($query) => $query->limit(30),
         ]);
 
         return view('platform.businesses.show', [
             'business' => $business,
             'plans' => Plan::orderBy('sort_order')->orderBy('name')->get(),
             'operators' => AdminUser::where('is_active', true)->orderBy('name')->get(),
+            'subscriptionAccess' => $subscriptions->access($business),
+            'renewalPrices' => $business->plan
+                ? $business->plan->prices()->where('is_active', true)->get()
+                : collect(),
+            'trialUsed' => $business->subscriptions->contains(
+                fn ($subscription): bool => $subscription->source->value === 'trial'
+            ),
         ]);
     }
 
