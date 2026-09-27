@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PlatformRole;
 use App\Models\AdminUser;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -16,6 +17,8 @@ class DatabaseSeeder extends Seeder
             AdminUser::factory()->create([
                 'name' => 'BusinessOS Admin',
                 'email' => 'admin@example.test',
+                'role' => PlatformRole::SuperAdmin,
+                'is_active' => true,
             ]);
         }
     }
