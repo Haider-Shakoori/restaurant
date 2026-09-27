@@ -63,6 +63,8 @@ Architecture baseline: **central SaaS database + one isolated database per resta
 
 **Batch 2 — Multi-database tenancy and tenant isolation: implemented.**
 
-Batch 2 adds a central control-plane database boundary, one database per restaurant tenant, domain-based tenant resolution, tenant-specific users/sessions/cache/files, tenant-aware queue payloads, separate tenant migrations, and automated cross-tenant isolation tests.
+**Batch 3 — Platform Admin / central SaaS control plane: implemented.**
 
-Next: **Batch 3 — Platform Admin / central SaaS control plane.**
+Batch 3 adds central operator authentication/roles, restaurant commercial records, provisioning health/history, tenant infrastructure visibility, configurable plans/features, reserved-subdomain controls, and a responsive Platform Admin UI. Tenant operational data remains isolated from the central application.
+
+Next: **Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement.**
