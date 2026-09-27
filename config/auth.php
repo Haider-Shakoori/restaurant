@@ -1,6 +1,7 @@
 <?php
 
-use App\Models\User;
+use App\Models\AdminUser;
+use App\Models\TenantUser;
 
 return [
 
@@ -17,7 +18,7 @@ return [
 
     'defaults' => [
         'guard' => env('AUTH_GUARD', 'web'),
-        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
+        'passwords' => env('AUTH_PASSWORD_BROKER', 'admins'),
     ],
 
     /*
@@ -40,7 +41,11 @@ return [
     'guards' => [
         'web' => [
             'driver' => 'session',
-            'provider' => 'users',
+            'provider' => 'admins',
+        ],
+        'tenant' => [
+            'driver' => 'session',
+            'provider' => 'tenant_users',
         ],
     ],
 
@@ -62,9 +67,13 @@ return [
     */
 
     'providers' => [
-        'users' => [
+        'admins' => [
             'driver' => 'eloquent',
-            'model' => env('AUTH_MODEL', User::class),
+            'model' => env('AUTH_MODEL', AdminUser::class),
+        ],
+        'tenant_users' => [
+            'driver' => 'eloquent',
+            'model' => TenantUser::class,
         ],
 
         // 'users' => [
@@ -93,9 +102,15 @@ return [
     */
 
     'passwords' => [
-        'users' => [
-            'provider' => 'users',
-            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+        'admins' => [
+            'provider' => 'admins',
+            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'admin_password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+        'tenant_users' => [
+            'provider' => 'tenant_users',
+            'table' => 'password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],
