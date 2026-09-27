@@ -1,0 +1,16 @@
+@import 'tailwindcss';
+
+@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
+@source '../../storage/framework/views/*.php';
+
+@theme {
+    --font-sans: ui-sans-serif, system-ui, sans-serif, 'Segoe UI', Arial, sans-serif;
+}
+
+:root {
+    color-scheme: light;
+}
+
+html[dir='rtl'] body {
+    font-family: Tahoma, Arial, sans-serif;
+}
