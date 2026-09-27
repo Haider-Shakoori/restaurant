@@ -3,6 +3,7 @@
 use App\Http\Controllers\Platform\Auth\LoginController;
 use App\Http\Controllers\Platform\BusinessController;
 use App\Http\Controllers\Platform\DashboardController;
+use App\Http\Controllers\Platform\LicenseController;
 use App\Http\Controllers\Platform\OperatorController;
 use App\Http\Controllers\Platform\PlanController;
 use App\Http\Controllers\Platform\PlanPriceController;
@@ -41,8 +42,12 @@ foreach (config('tenancy.central_domains', []) as $domain) {
                 Route::post('/restaurants/{business}/trial/start', [SubscriptionController::class, 'startTrial']);
                 Route::post('/restaurants/{business}/subscription/renew', [SubscriptionController::class, 'renew']);
                 Route::post('/restaurants/{business}/subscription/cancel', [SubscriptionController::class, 'cancel']);
+                Route::post('/restaurants/{business}/license/generate', [LicenseController::class, 'generate']);
+                Route::post('/restaurants/{business}/licenses/{licenseKey}/revoke', [LicenseController::class, 'revoke']);
+                Route::post('/restaurants/{business}/devices/{deviceActivation}/revoke', [LicenseController::class, 'revokeDevice']);
             });
 
+            Route::get('/restaurants/{business}/license', [LicenseController::class, 'show']);
             Route::get('/restaurants/{business}', [BusinessController::class, 'show']);
 
             Route::middleware('can:manage-operators')->group(function (): void {

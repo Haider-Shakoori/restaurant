@@ -12,10 +12,11 @@
     ],
     "license": "MIT",
     "require": {
-        "php": "^8.3",
+        "ext-sodium": "*",
         "laravel/framework": "^13.17",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
+        "php": "^8.3",
         "stancl/tenancy": "^3.10.1"
     },
     "require-dev": {

@@ -77,4 +77,19 @@ class Business extends Model
     {
         return $this->hasMany(SubscriptionEvent::class)->latest('occurred_at');
     }
+
+    public function licenseKeys(): HasMany
+    {
+        return $this->hasMany(LicenseKey::class)->latest('version');
+    }
+
+    public function devices(): HasMany
+    {
+        return $this->hasMany(DeviceActivation::class)->latest('activated_at');
+    }
+
+    public function licenseEvents(): HasMany
+    {
+        return $this->hasMany(LicenseEvent::class)->latest('occurred_at');
+    }
 }
