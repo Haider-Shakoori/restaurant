@@ -20,7 +20,11 @@ class DashboardController extends Controller
             'restaurants' => Business::count(),
             'trial' => Business::where('status', BusinessStatus::Trial)->count(),
             'active' => Business::where('status', BusinessStatus::Active)->count(),
+            'due' => Business::where('status', BusinessStatus::Due)->count(),
             'expired' => Business::where('status', BusinessStatus::Expired)->count(),
+            'expiring_soon' => Business::whereNotNull('subscription_ends_at')
+                ->whereBetween('subscription_ends_at', [now(), now()->addDays(7)])
+                ->count(),
             'provisioning_failed' => Business::where('provisioning_state', ProvisioningState::Failed)->count(),
             'tenants' => Tenant::count(),
             'active_plans' => Plan::where('is_active', true)->count(),
