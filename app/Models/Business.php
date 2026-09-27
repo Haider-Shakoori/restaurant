@@ -67,4 +67,14 @@ class Business extends Model
     {
         return $this->hasMany(ProvisioningEvent::class)->latest('occurred_at');
     }
+
+    public function subscriptions(): HasMany
+    {
+        return $this->hasMany(Subscription::class)->latest('starts_at');
+    }
+
+    public function subscriptionEvents(): HasMany
+    {
+        return $this->hasMany(SubscriptionEvent::class)->latest('occurred_at');
+    }
 }
