@@ -61,4 +61,8 @@ See [docs/architecture.md](docs/architecture.md) for the authoritative SaaS boun
 
 Architecture baseline: **central SaaS database + one isolated database per restaurant tenant + domain-based identification + separate central/tenant migrations**.
 
-Next: **Batch 2 — Multi-database tenancy and tenant isolation.**
+**Batch 2 — Multi-database tenancy and tenant isolation: implemented.**
+
+Batch 2 adds a central control-plane database boundary, one database per restaurant tenant, domain-based tenant resolution, tenant-specific users/sessions/cache/files, tenant-aware queue payloads, separate tenant migrations, and automated cross-tenant isolation tests.
+
+Next: **Batch 3 — Platform Admin / central SaaS control plane.**
