@@ -1,11 +1,48 @@
 <?php
 
+use App\Http\Controllers\Platform\Auth\LoginController;
+use App\Http\Controllers\Platform\BusinessController;
+use App\Http\Controllers\Platform\DashboardController;
+use App\Http\Controllers\Platform\OperatorController;
+use App\Http\Controllers\Platform\PlanController;
+use App\Http\Controllers\Platform\TenantController;
 use Illuminate\Support\Facades\Route;
 
 foreach (config('tenancy.central_domains', []) as $domain) {
     Route::domain($domain)->group(function (): void {
-        Route::get('/', function () {
-            return view('welcome');
+        Route::get('/', fn () => view('welcome'));
+
+        Route::middleware('guest')->group(function (): void {
+            Route::get('/platform/login', [LoginController::class, 'create']);
+            Route::post('/platform/login', [LoginController::class, 'store']);
+        });
+
+        Route::middleware(['auth', 'platform.active'])->prefix('platform')->group(function (): void {
+            Route::get('/', DashboardController::class);
+            Route::post('/logout', [LoginController::class, 'destroy']);
+
+            Route::get('/restaurants', [BusinessController::class, 'index']);
+            Route::get('/tenants', [TenantController::class, 'index']);
+
+            Route::middleware('can:manage-platform')->group(function (): void {
+                Route::get('/restaurants/create', [BusinessController::class, 'create']);
+                Route::post('/restaurants', [BusinessController::class, 'store']);
+                Route::put('/restaurants/{business}', [BusinessController::class, 'update']);
+
+                Route::get('/plans', [PlanController::class, 'index']);
+                Route::get('/plans/create', [PlanController::class, 'create']);
+                Route::post('/plans', [PlanController::class, 'store']);
+                Route::put('/plans/{plan}', [PlanController::class, 'update']);
+            });
+
+            Route::get('/restaurants/{business}', [BusinessController::class, 'show']);
+
+            Route::middleware('can:manage-operators')->group(function (): void {
+                Route::get('/operators', [OperatorController::class, 'index']);
+                Route::get('/operators/create', [OperatorController::class, 'create']);
+                Route::post('/operators', [OperatorController::class, 'store']);
+                Route::patch('/operators/{adminUser}/toggle', [OperatorController::class, 'toggle']);
+            });
         });
     });
 }
