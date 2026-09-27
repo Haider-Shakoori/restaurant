@@ -41,12 +41,14 @@ jobs:
       - name: Laravel Pint
         run: vendor/bin/pint --test
 
-      - name: Cache production configuration
+      - name: Cache production configuration and views
         run: |
           php artisan config:cache
           php artisan config:clear
           php artisan route:cache
           php artisan route:clear
+          php artisan view:cache
+          php artisan view:clear
 
       - name: Migration smoke test
         run: php artisan migrate:fresh --force
