@@ -67,4 +67,8 @@ Architecture baseline: **central SaaS database + one isolated database per resta
 
 Batch 3 adds central operator authentication/roles, restaurant commercial records, provisioning health/history, tenant infrastructure visibility, configurable plans/features, reserved-subdomain controls, and a responsive Platform Admin UI. Tenant operational data remains isolated from the central application.
 
-Next: **Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement.**
+**Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement: implemented.**
+
+Batch 4 adds configurable plan prices, immutable subscription-period snapshots, the provisioning-gated 7-day trial, early/late/custom renewal rules, hourly lifecycle refresh, tenant HTTP 423 locking, a recovery/status API, and server-side feature enforcement from the active subscription snapshot.
+
+Next: **Batch 5 — license generation, activation and signed offline lease foundation.**

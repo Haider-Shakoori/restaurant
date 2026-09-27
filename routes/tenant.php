@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\SubscriptionStatusController;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
@@ -17,7 +18,7 @@ Route::middleware(['web', ...$tenantMiddleware])->group(function (): void {
             'service' => 'BusinessOS Restaurant',
             'tenant_id' => tenant('id'),
         ]);
-    })->name('tenant.home');
+    })->middleware('subscription.active')->name('tenant.home');
 });
 
 Route::middleware($tenantMiddleware)
@@ -30,4 +31,7 @@ Route::middleware($tenantMiddleware)
                 'tenant_id' => tenant('id'),
             ]);
         })->name('tenant.api.health');
+
+        Route::get('/subscription', SubscriptionStatusController::class)
+            ->name('tenant.api.subscription');
     });

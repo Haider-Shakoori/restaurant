@@ -23,4 +23,24 @@ class PlanFeature extends Model
     {
         return $this->belongsTo(Plan::class);
     }
+
+    public function resolvedValue(): mixed
+    {
+        $value = data_get($this->value, 'value');
+
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $normalized = strtolower(trim($value));
+
+        return match (true) {
+            $normalized === 'true' => true,
+            $normalized === 'false' => false,
+            $normalized === 'null' => null,
+            is_numeric($normalized) && str_contains($normalized, '.') => (float) $normalized,
+            is_numeric($normalized) => (int) $normalized,
+            default => $value,
+        };
+    }
 }

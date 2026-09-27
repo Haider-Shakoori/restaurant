@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Platform;
 
+use App\Enums\BillingCycle;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Platform\StorePlanRequest;
 use App\Models\Plan;
@@ -14,13 +15,16 @@ class PlanController extends Controller
     public function index(): View
     {
         $plans = Plan::query()
-            ->with('features')
+            ->with(['features', 'prices'])
             ->withCount('businesses')
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get();
 
-        return view('platform.plans.index', compact('plans'));
+        return view('platform.plans.index', [
+            'plans' => $plans,
+            'billingCycles' => BillingCycle::cases(),
+        ]);
     }
 
     public function create(): View
