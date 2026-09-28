@@ -14,8 +14,11 @@ class DiningTable extends Model
     use HasUlids;
 
     public const STATUS_AVAILABLE = 'available';
+
     public const STATUS_OCCUPIED = 'occupied';
+
     public const STATUS_RESERVED = 'reserved';
+
     public const STATUS_DISABLED = 'disabled';
 
     protected $connection = 'tenant';

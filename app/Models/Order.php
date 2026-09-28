@@ -27,11 +27,17 @@ class Order extends Model
     use HasUlids;
 
     public const STATUS_DRAFT = 'draft';
+
     public const STATUS_SUBMITTED = 'submitted';
+
     public const STATUS_PREPARING = 'preparing';
+
     public const STATUS_READY = 'ready';
+
     public const STATUS_SERVED = 'served';
+
     public const STATUS_BILLED = 'billed';
+
     public const STATUS_CANCELLED = 'cancelled';
 
     public const ACTIVE_STATUSES = [
