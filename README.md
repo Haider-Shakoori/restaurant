@@ -52,6 +52,6 @@ Copy .env.example to .env, install Composer dependencies, generate an applicatio
 - Batch 3 — Platform Admin / central SaaS control plane: merged.
 - Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement: merged.
 - Batch 5 — license activation and signed offline lease foundation: merged.
-- Batch 6 — tables, menu and waiter ordering: in development on batch/06-tables-menu-waiter-ordering.
+- Batch 6 — tables, menu and waiter ordering: merged.
 
-Next after Batch 6: **Batch 7 — KOT/KDS and kitchen execution**.
+Next: **Batch 7 — KOT/KDS and kitchen execution**.
