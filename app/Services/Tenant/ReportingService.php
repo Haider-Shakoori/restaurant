@@ -50,6 +50,60 @@ class ReportingService
         })->all();
     }
 
+    public function accountLedger(
+        ChartAccount $account,
+        ?string $branchId,
+        string $from,
+        string $to,
+    ): array {
+        $lines = JournalLine::query()
+            ->with(['entry.branch'])
+            ->where('account_id', $account->id)
+            ->whereHas('entry', function ($query) use ($branchId, $from, $to): void {
+                $query
+                    ->whereIn('status', [JournalEntry::STATUS_POSTED, JournalEntry::STATUS_REVERSED])
+                    ->whereBetween('entry_date', [$from, $to])
+                    ->when($branchId, fn ($query) => $query->where('branch_id', $branchId));
+            })
+            ->get()
+            ->sortBy([
+                fn (JournalLine $line) => $line->entry->entry_date->format('Y-m-d'),
+                fn (JournalLine $line) => $line->entry->posted_at->timestamp,
+            ]);
+
+        $runningMinor = 0;
+        $rows = [];
+
+        foreach ($lines as $line) {
+            $debitMinor = Money::toMinor((string) $line->debit);
+            $creditMinor = Money::toMinor((string) $line->credit);
+            $runningMinor += $account->normal_balance === 'debit'
+                ? $debitMinor - $creditMinor
+                : $creditMinor - $debitMinor;
+
+            $rows[] = [
+                'entry_id' => $line->entry->id,
+                'entry_number' => $line->entry->entry_number,
+                'date' => $line->entry->entry_date->format('Y-m-d'),
+                'description' => $line->entry->description,
+                'source_type' => $line->entry->source_type,
+                'source_id' => $line->entry->source_id,
+                'debit' => $line->debit,
+                'credit' => $line->credit,
+                'running_balance' => Money::fromMinor($runningMinor),
+            ];
+        }
+
+        return [
+            'account' => $account,
+            'from' => $from,
+            'to' => $to,
+            'branch_id' => $branchId,
+            'closing_balance' => Money::fromMinor($runningMinor),
+            'lines' => $rows,
+        ];
+    }
+
     public function incomeStatement(?string $branchId, string $from, string $to): array
     {
         $trial = collect($this->trialBalance($branchId, $from, $to));
