@@ -23,6 +23,7 @@ class BusinessController extends Controller
             ->with(['plan', 'assignedOperator', 'tenant.domains'])
             ->when($request->filled('q'), function ($query) use ($request): void {
                 $q = '%'.$request->string('q')->trim().'%';
+
                 $query->where(function ($query) use ($q): void {
                     $query->where('name', 'like', $q)
                         ->orWhere('contact_name', 'like', $q)
@@ -31,8 +32,14 @@ class BusinessController extends Controller
                         ->orWhere('requested_subdomain', 'like', $q);
                 });
             })
-            ->when($request->filled('status'), fn ($query) => $query->where('status', $request->string('status')))
-            ->when($request->filled('provisioning_state'), fn ($query) => $query->where('provisioning_state', $request->string('provisioning_state')))
+            ->when(
+                $request->filled('status'),
+                fn ($query) => $query->where('status', $request->string('status'))
+            )
+            ->when(
+                $request->filled('provisioning_state'),
+                fn ($query) => $query->where('provisioning_state', $request->string('provisioning_state'))
+            )
             ->latest()
             ->paginate(20)
             ->withQueryString();
