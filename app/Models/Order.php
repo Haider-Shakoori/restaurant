@@ -82,4 +82,9 @@ class Order extends Model
     {
         return $this->hasMany(OrderEvent::class)->orderBy('occurred_at');
     }
+
+    public function kitchenTickets(): HasMany
+    {
+        return $this->hasMany(KitchenTicket::class)->orderBy('queued_at');
+    }
 }

@@ -18,7 +18,11 @@ class OrderController extends Controller
         $user = $request->user();
 
         $orders = Order::query()
-            ->with(['table.diningArea', 'waiter'])
+            ->with([
+                'table.diningArea',
+                'waiter',
+                'kitchenTickets.station',
+            ])
             ->withCount('items')
             ->when($user->role === 'waiter', fn ($query) => $query->where('waiter_id', $user->id))
             ->whereIn('status', Order::ACTIVE_STATUSES)
@@ -44,7 +48,14 @@ class OrderController extends Controller
         $this->authorizeOrder($request, $order);
 
         return response()->json([
-            'data' => $order->load(['table.diningArea.branch', 'waiter', 'items', 'events']),
+            'data' => $order->load([
+                'table.diningArea.branch',
+                'waiter',
+                'items',
+                'events',
+                'kitchenTickets.station',
+                'kitchenTickets.items',
+            ]),
         ]);
     }
 

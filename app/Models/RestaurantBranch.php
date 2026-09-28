@@ -25,4 +25,9 @@ class RestaurantBranch extends Model
     {
         return $this->hasMany(DiningArea::class, 'branch_id');
     }
+
+    public function kitchenStations(): HasMany
+    {
+        return $this->hasMany(KitchenStation::class, 'branch_id');
+    }
 }
