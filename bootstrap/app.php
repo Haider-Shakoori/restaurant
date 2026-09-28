@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureActivePlatformAdmin;
+use App\Http\Middleware\EnsureTenantRole;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\RequirePlanFeature;
 use Illuminate\Foundation\Application;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'platform.active' => EnsureActivePlatformAdmin::class,
             'subscription.active' => EnsureTenantSubscriptionActive::class,
             'plan.feature' => RequirePlanFeature::class,
+            'tenant.role' => EnsureTenantRole::class,
         ]);
 
         $middleware->redirectGuestsTo('/platform/login');
