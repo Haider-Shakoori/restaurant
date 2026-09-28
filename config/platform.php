@@ -1,8 +1,6 @@
 <?php
 
 return [
-    'trial_days' => (int) env('PLATFORM_TRIAL_DAYS', 7),
-
     'provisioning' => [
         'stale_after_minutes' => (int) env('PLATFORM_PROVISIONING_STALE_MINUTES', 30),
     ],
