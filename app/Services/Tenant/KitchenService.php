@@ -14,6 +14,10 @@ use Illuminate\Validation\ValidationException;
 
 class KitchenService
 {
+    public function __construct(
+        private readonly InventoryService $inventory,
+    ) {}
+
     public function dispatch(Order $order, TenantUser $actor): Collection
     {
         return DB::connection('tenant')->transaction(function () use ($order, $actor): Collection {
@@ -118,11 +122,13 @@ class KitchenService
     {
         return DB::connection('tenant')->transaction(function () use ($order, $actor): Order {
             $order = Order::query()
-                ->with(['kitchenTickets', 'items'])
+                ->with(['kitchenTickets', 'items', 'table.diningArea.branch'])
                 ->lockForUpdate()
                 ->findOrFail($order->getKey());
 
             if ($order->status === Order::STATUS_SERVED) {
+                $this->inventory->consumeOrder($order, $actor);
+
                 return $order;
             }
 
@@ -131,6 +137,8 @@ class KitchenService
                     'order' => 'The order can only be served after every kitchen ticket is ready.',
                 ]);
             }
+
+            $this->inventory->consumeOrder($order, $actor);
 
             $order->update([
                 'status' => Order::STATUS_SERVED,
@@ -159,7 +167,13 @@ class KitchenService
                 'occurred_at' => now(),
             ]);
 
-            return $order->fresh()->load(['table.diningArea', 'waiter', 'items', 'kitchenTickets.station']);
+            return $order->fresh()->load([
+                'table.diningArea',
+                'waiter',
+                'items',
+                'kitchenTickets.station',
+                'inventoryConsumption.lines.stockMovement.item',
+            ]);
         });
     }
 

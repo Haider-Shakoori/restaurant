@@ -40,4 +40,9 @@ class MenuItem extends Model
     {
         return $this->hasMany(MenuItemKitchenRoute::class);
     }
+
+    public function recipes(): HasMany
+    {
+        return $this->hasMany(Recipe::class);
+    }
 }
