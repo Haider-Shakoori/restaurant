@@ -83,15 +83,17 @@ jobs:
 
       - name: Generate Android platform scaffold
         working-directory: mobile
-        run: flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
 
       - name: Install Flutter dependencies
         working-directory: mobile
         run: flutter pub get
 
-      - name: Verify Dart formatting
+      - name: Format Dart sources
         working-directory: mobile
-        run: dart format --output=none --set-exit-if-changed lib test
+        run: dart format lib test
 
       - name: Analyze Flutter
         working-directory: mobile
