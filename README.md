@@ -4,7 +4,7 @@ BusinessOS Restaurant is a multi-tenant SaaS restaurant management and waiter or
 
 The primary workflow is:
 
-**Waiter → Table → Order → Kitchen/KOT → Preparation → Ready → Serve → Bill → Payment → Table Close**
+**Waiter → Table → Order → KOT/KDS → Preparation → Ready → Serve → Bill → Payment → Table Close**
 
 This is not a public food-delivery or customer self-ordering application.
 
@@ -23,27 +23,13 @@ This is not a public food-delivery or customer self-ordering application.
 
 See docs/architecture.md and docs/architecture-blueprint.md.
 
-## Restaurant ordering foundation
+## Restaurant operations
 
-Batch 6 adds the first operational restaurant flow:
+Batch 6 established branches, dining areas/tables, menu, waiter authentication, retry-safe orders and submitted-order handling.
 
-- branches and dining areas;
-- dining tables and occupancy state;
-- menu categories/items;
-- tenant waiter authentication and roles;
-- draft orders and order items;
-- transactional one-active-order-per-table enforcement;
-- retry-safe client order/line identifiers;
-- exact AFN price snapshots and totals;
-- order audit events;
-- waiter ownership enforcement;
-- submit-order transition for the upcoming KOT/KDS batch.
+Batch 7 adds branch-aware kitchen stations, menu-to-station routing, automatic KOT splitting, General Kitchen fallback, KDS queue/status APIs, kitchen audit events and the submitted → preparing → ready → served lifecycle.
 
-See docs/batch-06-ordering.md.
-
-## Local setup
-
-Copy .env.example to .env, install Composer dependencies, generate an application key, create the local SQLite database, migrate, install frontend dependencies, build assets and run php artisan test.
+See docs/batch-06-ordering.md and docs/batch-07-kot-kds.md.
 
 ## Current development status
 
@@ -53,5 +39,6 @@ Copy .env.example to .env, install Composer dependencies, generate an applicatio
 - Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement: merged.
 - Batch 5 — license activation and signed offline lease foundation: merged.
 - Batch 6 — tables, menu and waiter ordering: merged.
+- Batch 7 — KOT/KDS and kitchen execution: in development on batch/07-kot-kds-kitchen-execution.
 
-Next: **Batch 7 — KOT/KDS and kitchen execution**.
+Next after Batch 7: **Batch 8 — cashier/POS, payments and daily closing**.
