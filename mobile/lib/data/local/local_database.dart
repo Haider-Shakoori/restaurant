@@ -293,8 +293,8 @@ class LocalDatabase implements SyncStore {
     OutboxMutation mutation, {
     required String message,
     required DateTime retryAt,
-  }) {
-    return _db.update(
+  }) async {
+    await _db.update(
       'outbox',
       <String, Object?>{
         'attempts': mutation.attempts + 1,
@@ -307,8 +307,8 @@ class LocalDatabase implements SyncStore {
   }
 
   @override
-  Future<void> setSystemState(String key, String value) {
-    return _db.insert(
+  Future<void> setSystemState(String key, String value) async {
+    await _db.insert(
       'settings',
       <String, Object?>{'key': key, 'value': value},
       conflictAlgorithm: ConflictAlgorithm.replace,
@@ -643,8 +643,8 @@ class LocalDatabase implements SyncStore {
   Future<void> _upsertCategory(
     DatabaseExecutor txn,
     Map<String, Object?> category,
-  ) {
-    return txn.insert(
+  ) async {
+    await txn.insert(
       'menu_categories',
       <String, Object?>{
         'id': category['id']!.toString(),
@@ -660,8 +660,8 @@ class LocalDatabase implements SyncStore {
     DatabaseExecutor txn,
     Map<String, Object?> item,
     String? categoryId,
-  ) {
-    return txn.insert(
+  ) async {
+    await txn.insert(
       'menu_items',
       <String, Object?>{
         'id': item['id']!.toString(),
@@ -683,7 +683,7 @@ class LocalDatabase implements SyncStore {
   Future<void> _upsertTable(
     DatabaseExecutor txn,
     Map<String, Object?> table,
-  ) {
+  ) async {
     final area = table['area'] is Map<Object?, Object?>
         ? Map<String, Object?>.from(table['area']! as Map<Object?, Object?>)
         : <String, Object?>{};
@@ -691,7 +691,7 @@ class LocalDatabase implements SyncStore {
         ? Map<String, Object?>.from(table['branch']! as Map<Object?, Object?>)
         : <String, Object?>{};
 
-    return txn.insert(
+    await txn.insert(
       'dining_tables',
       <String, Object?>{
         'id': table['id']!.toString(),
@@ -793,8 +793,8 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
     required String operation,
     required Map<String, Object?> payload,
-  }) {
-    return txn.insert(
+  }) async {
+    await txn.insert(
       'outbox',
       <String, Object?>{
         'mutation_id': mutationId,
@@ -811,8 +811,8 @@ class LocalDatabase implements SyncStore {
     DatabaseExecutor txn,
     String key,
     String value,
-  ) {
-    return txn.insert(
+  ) async {
+    await txn.insert(
       'settings',
       <String, Object?>{'key': key, 'value': value},
       conflictAlgorithm: ConflictAlgorithm.replace,

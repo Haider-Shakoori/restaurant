@@ -90,9 +90,11 @@ class SyncEngine {
         switch (result['status']) {
           case 'accepted':
             await _store.applyAcceptedResult(result);
+            break;
           case 'conflict':
           case 'rejected':
             await _store.markConflict(mutation, result);
+            break;
           default:
             await _markRetry(mutation, 'unknown_server_result');
         }
