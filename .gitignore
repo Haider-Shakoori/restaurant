@@ -21,6 +21,12 @@
 /storage/*.key
 /storage/pail
 /vendor
+/mobile/.dart_tool/
+/mobile/.flutter-plugins
+/mobile/.flutter-plugins-dependencies
+/mobile/.packages
+/mobile/build/
+/mobile/android/
 _ide_helper.php
 Homestead.json
 Homestead.yaml
