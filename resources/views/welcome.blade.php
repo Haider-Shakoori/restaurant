@@ -122,6 +122,14 @@
                     <a href="/start-trial" class="rounded-xl bg-emerald-400 px-3.5 py-2 text-sm font-black text-slate-950 hover:bg-emerald-300">{{ $t['trial'] }}</a>
                 </div>
             </div>
+            <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 pb-3 sm:hidden">
+                <div class="flex rounded-xl border border-slate-800 bg-slate-900/70 p-1" dir="ltr">
+                    @foreach (['en' => 'EN', 'fa' => 'دری', 'ps' => 'پښتو'] as $code => $label)
+                        <a href="/?lang={{ $code }}" class="rounded-lg px-2.5 py-1.5 text-xs font-black {{ $language === $code ? 'bg-slate-700 text-white' : 'text-slate-400' }}">{{ $label }}</a>
+                    @endforeach
+                </div>
+                <a href="/platform/login" class="rounded-xl border border-slate-800 px-3 py-2 text-xs font-black text-slate-200">{{ $t['login'] }}</a>
+            </div>
         </header>
 
         <main class="relative">
