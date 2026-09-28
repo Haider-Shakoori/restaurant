@@ -148,6 +148,24 @@ class PlatformAdminTest extends TestCase
         ]);
     }
 
+    public function test_plan_create_screen_shows_distinct_entitlement_examples(): void
+    {
+        $admin = AdminUser::factory()->create([
+            'role' => PlatformRole::SuperAdmin,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($admin)
+            ->get('http://localhost/platform/plans/create')
+            ->assertOk()
+            ->assertSee('Feature')
+            ->assertSee('Value')
+            ->assertSee('max_waiters')
+            ->assertSee('max_devices')
+            ->assertSee('max_branches')
+            ->assertSee('inventory');
+    }
+
     public function test_super_admin_can_create_operator(): void
     {
         $admin = AdminUser::factory()->create([

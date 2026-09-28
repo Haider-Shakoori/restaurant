@@ -31,14 +31,35 @@
             </label>
         </div>
 
+        @php
+            $entitlementExamples = [
+                ['key' => 'max_waiters', 'value' => '10'],
+                ['key' => 'max_devices', 'value' => '5'],
+                ['key' => 'max_branches', 'value' => '1'],
+                ['key' => 'inventory', 'value' => 'true'],
+            ];
+        @endphp
+
         <div class="mt-6">
             <p class="mb-3 font-semibold">Initial feature entitlements</p>
-            @for ($i = 0; $i < 4; $i++)
+            <div class="mb-2 grid grid-cols-2 gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <span>Feature</span>
+                <span>Value</span>
+            </div>
+            @foreach ($entitlementExamples as $i => $example)
                 <div class="mb-2 grid grid-cols-2 gap-2">
-                    <input name="features[{{ $i }}][key]" placeholder="e.g. max_waiters" class="rounded-xl border border-slate-300 px-4 py-2.5">
-                    <input name="features[{{ $i }}][value]" placeholder="e.g. 10" class="rounded-xl border border-slate-300 px-4 py-2.5">
+                    <input
+                        name="features[{{ $i }}][key]"
+                        placeholder="{{ $example['key'] }}"
+                        class="rounded-xl border border-slate-300 px-4 py-2.5"
+                    >
+                    <input
+                        name="features[{{ $i }}][value]"
+                        placeholder="{{ $example['value'] }}"
+                        class="rounded-xl border border-slate-300 px-4 py-2.5"
+                    >
                 </div>
-            @endfor
+            @endforeach
         </div>
 
         <div class="mt-6 flex gap-3">
