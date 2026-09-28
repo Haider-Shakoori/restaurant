@@ -2,14 +2,17 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\AccountingReportController;
 use App\Http\Controllers\Tenant\ApplyBillDiscountController;
 use App\Http\Controllers\Tenant\BillController;
 use App\Http\Controllers\Tenant\BillPaymentController;
 use App\Http\Controllers\Tenant\BootstrapController;
 use App\Http\Controllers\Tenant\CashierSessionController;
+use App\Http\Controllers\Tenant\ChartAccountController;
 use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DiningTableController;
 use App\Http\Controllers\Tenant\InventoryItemController;
+use App\Http\Controllers\Tenant\JournalEntryController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
 use App\Http\Controllers\Tenant\KitchenStationController;
 use App\Http\Controllers\Tenant\KitchenTicketController;
@@ -17,6 +20,7 @@ use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
+use App\Http\Controllers\Tenant\OperatingExpenseController;
 use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
@@ -28,6 +32,7 @@ use App\Http\Controllers\Tenant\StockMovementController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
 use App\Http\Controllers\Tenant\SupplierController;
+use App\Http\Controllers\Tenant\SupplierPaymentController;
 use App\Http\Controllers\Tenant\TenantAuthController;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
@@ -206,6 +211,61 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/menu/items/{menuItem}/recipes', [RecipeController::class, 'store'])
                     ->name('tenant.api.recipes.store');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,accountant')->group(function (): void {
+                Route::get('/accounting/accounts', [ChartAccountController::class, 'index'])
+                    ->name('tenant.api.accounting.accounts.index');
+
+                Route::get('/accounting/journals', [JournalEntryController::class, 'index'])
+                    ->name('tenant.api.accounting.journals.index');
+
+                Route::get('/accounting/journals/{journalEntry}', [JournalEntryController::class, 'show'])
+                    ->name('tenant.api.accounting.journals.show');
+
+                Route::get('/accounting/expenses', [OperatingExpenseController::class, 'index'])
+                    ->name('tenant.api.accounting.expenses.index');
+
+                Route::post('/accounting/expenses', [OperatingExpenseController::class, 'store'])
+                    ->name('tenant.api.accounting.expenses.store');
+
+                Route::get('/accounting/supplier-payments', [SupplierPaymentController::class, 'index'])
+                    ->name('tenant.api.accounting.supplier-payments.index');
+
+                Route::post('/accounting/supplier-payments', [SupplierPaymentController::class, 'store'])
+                    ->name('tenant.api.accounting.supplier-payments.store');
+
+                Route::get('/accounting/reports/trial-balance', [AccountingReportController::class, 'trialBalance'])
+                    ->name('tenant.api.accounting.reports.trial-balance');
+
+                Route::get('/accounting/reports/income-statement', [AccountingReportController::class, 'incomeStatement'])
+                    ->name('tenant.api.accounting.reports.income-statement');
+
+                Route::get('/accounting/reports/balance-sheet', [AccountingReportController::class, 'balanceSheet'])
+                    ->name('tenant.api.accounting.reports.balance-sheet');
+
+                Route::get('/accounting/reports/receivables', [AccountingReportController::class, 'receivables'])
+                    ->name('tenant.api.accounting.reports.receivables');
+
+                Route::get('/accounting/reports/payables', [AccountingReportController::class, 'payables'])
+                    ->name('tenant.api.accounting.reports.payables');
+
+                Route::get('/accounting/reports/management-summary', [AccountingReportController::class, 'managementSummary'])
+                    ->name('tenant.api.accounting.reports.management-summary');
+
+                Route::get('/accounting/reports/ledger/{chartAccount}', [AccountingReportController::class, 'ledger'])
+                    ->name('tenant.api.accounting.reports.ledger');
+            });
+
+            Route::middleware('tenant.role:owner,admin,accountant')->group(function (): void {
+                Route::post('/accounting/accounts', [ChartAccountController::class, 'store'])
+                    ->name('tenant.api.accounting.accounts.store');
+
+                Route::post('/accounting/journals', [JournalEntryController::class, 'store'])
+                    ->name('tenant.api.accounting.journals.store');
+
+                Route::post('/accounting/journals/{journalEntry}/reverse', [JournalEntryController::class, 'reverse'])
+                    ->name('tenant.api.accounting.journals.reverse');
             });
         });
     });
