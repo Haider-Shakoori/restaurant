@@ -22,7 +22,9 @@ return Application::configure(basePath: dirname(__DIR__))
             'plan.feature' => RequirePlanFeature::class,
         ]);
 
-        $middleware->redirectGuestsTo('/platform/login');
+        $middleware->redirectGuestsTo(
+            fn (Request $request): string => tenancy()->initialized ? '/login' : '/platform/login',
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
