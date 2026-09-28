@@ -41,7 +41,7 @@ class BusinessProvisioningTest extends TestCase
             'is_active' => true,
         ]);
 
-        $plan = Plan::factory()->create(['is_active' => true]);
+        $plan = Plan::create([\n            'code' => 'basic',\n            'name' => 'Basic',\n            'is_active' => true,\n            'sort_order' => 10,\n        ]);
 
         $business = Business::create([
             'plan_id' => $plan->id,
@@ -83,7 +83,7 @@ class BusinessProvisioningTest extends TestCase
             'is_active' => true,
         ]);
 
-        $plan = Plan::factory()->create(['is_active' => true]);
+        $plan = Plan::create([\n            'code' => 'basic',\n            'name' => 'Basic',\n            'is_active' => true,\n            'sort_order' => 10,\n        ]);
 
         $business = Business::create([
             'plan_id' => $plan->id,
