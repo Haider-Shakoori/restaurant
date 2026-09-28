@@ -95,4 +95,9 @@ class Order extends Model
     {
         return $this->hasOne(Bill::class);
     }
+
+    public function inventoryConsumption(): HasOne
+    {
+        return $this->hasOne(InventoryConsumption::class);
+    }
 }

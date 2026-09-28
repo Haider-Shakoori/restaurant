@@ -9,6 +9,7 @@ use App\Http\Controllers\Tenant\BootstrapController;
 use App\Http\Controllers\Tenant\CashierSessionController;
 use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DiningTableController;
+use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
 use App\Http\Controllers\Tenant\KitchenStationController;
 use App\Http\Controllers\Tenant\KitchenTicketController;
@@ -18,11 +19,15 @@ use App\Http\Controllers\Tenant\MenuController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
+use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
+use App\Http\Controllers\Tenant\RecipeController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
+use App\Http\Controllers\Tenant\StockMovementController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
+use App\Http\Controllers\Tenant\SupplierController;
 use App\Http\Controllers\Tenant\TenantAuthController;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
@@ -163,6 +168,44 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/daily-closings/finalize', [DailyClosingController::class, 'finalize'])
                     ->name('tenant.api.daily-closings.finalize');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
+                Route::get('/inventory/items', [InventoryItemController::class, 'index'])
+                    ->name('tenant.api.inventory.items.index');
+
+                Route::post('/inventory/items', [InventoryItemController::class, 'store'])
+                    ->name('tenant.api.inventory.items.store');
+
+                Route::post('/inventory/items/{inventoryItem}/adjustments', [InventoryItemController::class, 'adjust'])
+                    ->name('tenant.api.inventory.items.adjust');
+
+                Route::get('/inventory/movements', [StockMovementController::class, 'index'])
+                    ->name('tenant.api.inventory.movements.index');
+
+                Route::get('/suppliers', [SupplierController::class, 'index'])
+                    ->name('tenant.api.suppliers.index');
+
+                Route::post('/suppliers', [SupplierController::class, 'store'])
+                    ->name('tenant.api.suppliers.store');
+
+                Route::get('/purchasing/orders', [PurchaseOrderController::class, 'index'])
+                    ->name('tenant.api.purchasing.orders.index');
+
+                Route::post('/purchasing/orders', [PurchaseOrderController::class, 'store'])
+                    ->name('tenant.api.purchasing.orders.store');
+
+                Route::get('/purchasing/orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])
+                    ->name('tenant.api.purchasing.orders.show');
+
+                Route::post('/purchasing/orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])
+                    ->name('tenant.api.purchasing.orders.receive');
+
+                Route::get('/recipes', [RecipeController::class, 'index'])
+                    ->name('tenant.api.recipes.index');
+
+                Route::post('/menu/items/{menuItem}/recipes', [RecipeController::class, 'store'])
+                    ->name('tenant.api.recipes.store');
             });
         });
     });

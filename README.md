@@ -29,9 +29,11 @@ Batch 6 established branches, dining areas/tables, menu, waiter authentication, 
 
 Batch 7 added branch-aware kitchen stations, menu-to-station routing, automatic KOT splitting, General Kitchen fallback, KDS queue/status APIs, kitchen audit events and the submitted → preparing → ready → served lifecycle.
 
-Batch 8 adds cashier sessions, bill snapshots, discounts, split payments, table settlement, cashier variance and immutable versioned daily closing snapshots.
+Batch 8 added cashier sessions, bill snapshots, discounts, split payments, table settlement, cashier variance and immutable versioned daily closing snapshots.
 
-See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md and docs/batch-08-cashier-pos-daily-closing.md.
+Batch 9 adds suppliers, ingredient inventory, purchase-unit conversion, purchase orders/GRNs, immutable stock movements, branch recipes and serve-time automatic ingredient consumption.
+
+See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md, docs/batch-08-cashier-pos-daily-closing.md and docs/batch-09-inventory-purchasing-recipes.md.
 
 ## Current development status
 
@@ -43,5 +45,6 @@ See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md and docs/batch-08-cashie
 - Batch 6 — tables, menu and waiter ordering: merged.
 - Batch 7 — KOT/KDS and kitchen execution: merged.
 - Batch 8 — cashier/POS, payments and daily closing: merged.
+- Batch 9 — inventory, purchasing and recipes: in development on batch/09-inventory-purchasing-recipes.
 
-Next: **Batch 9 — inventory, purchasing and recipes**.
+Next after Batch 9: **Batch 10 — accounting and reporting**.
