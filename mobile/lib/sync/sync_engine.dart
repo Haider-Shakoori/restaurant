@@ -10,7 +10,7 @@ class SyncEngine {
     required SyncApi api,
     required SyncStore store,
     required CredentialStore credentials,
-    required OfflineLeaseVerifier leaseVerifier,
+    required LeaseValidator leaseVerifier,
   }) : _api = api,
        _store = store,
        _credentials = credentials,
@@ -19,7 +19,7 @@ class SyncEngine {
   final SyncApi _api;
   final SyncStore _store;
   final CredentialStore _credentials;
-  final OfflineLeaseVerifier _leaseVerifier;
+  final LeaseValidator _leaseVerifier;
 
   bool _running = false;
 
@@ -181,8 +181,8 @@ class SyncEngine {
   }
 
   Future<void> _markRetry(OutboxMutation mutation, String message) {
-    final exponent = mutation.attempts.clamp(0, 6);
-    final seconds = (5 * (1 << exponent)).clamp(5, 300);
+    final exponent = mutation.attempts.clamp(0, 6).toInt();
+    final seconds = (5 * (1 << exponent)).clamp(5, 300).toInt();
 
     return _store.markRetry(
       mutation,

@@ -17,7 +17,7 @@ class OfflineOrderRepository {
   OfflineOrderRepository({
     required LocalDatabase database,
     required CredentialStore credentials,
-    required OfflineLeaseVerifier leaseVerifier,
+    required LeaseValidator leaseVerifier,
     Uuid? uuid,
   }) : _database = database,
        _credentials = credentials,
@@ -26,7 +26,7 @@ class OfflineOrderRepository {
 
   final LocalDatabase _database;
   final CredentialStore _credentials;
-  final OfflineLeaseVerifier _leaseVerifier;
+  final LeaseValidator _leaseVerifier;
   final Uuid _uuid;
 
   Future<String> createOrder({

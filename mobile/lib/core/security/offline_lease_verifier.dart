@@ -15,7 +15,17 @@ class LeaseVerificationResult {
   final DateTime? expiresAt;
 }
 
-class OfflineLeaseVerifier {
+abstract interface class LeaseValidator {
+  Future<LeaseVerificationResult> verify({
+    required Map<String, Object?> signedLease,
+    required String publicKey,
+    String? expectedDeviceId,
+    String? expectedTenantId,
+    DateTime? now,
+  });
+}
+
+class OfflineLeaseVerifier implements LeaseValidator {
   OfflineLeaseVerifier({Ed25519? algorithm})
     : _algorithm = algorithm ?? Ed25519();
 
