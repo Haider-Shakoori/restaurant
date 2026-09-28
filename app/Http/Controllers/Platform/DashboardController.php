@@ -18,6 +18,7 @@ class DashboardController extends Controller
     {
         $metrics = [
             'restaurants' => Business::count(),
+            'provisioning' => Business::where('status', BusinessStatus::Provisioning)->count(),
             'trial' => Business::where('status', BusinessStatus::Trial)->count(),
             'active' => Business::where('status', BusinessStatus::Active)->count(),
             'expired' => Business::where('status', BusinessStatus::Expired)->count(),
