@@ -10,6 +10,7 @@ return [
 
     'provisioning' => [
         'stale_after_minutes' => (int) env('PLATFORM_PROVISIONING_STALE_MINUTES', 30),
+        'tenant_domain_suffix' => env('PLATFORM_TENANT_DOMAIN_SUFFIX', 'restaurant.businessos.af'),
     ],
 
     'reserved_subdomains' => [
