@@ -10,3 +10,5 @@ linter:
   rules:
     avoid_print: true
     unawaited_futures: true
+    prefer_initializing_formals: false
+    prefer_interpolation_to_compose_strings: false

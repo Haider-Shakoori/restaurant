@@ -56,7 +56,7 @@ class SecureCredentialStore implements CredentialStore {
       _storage.read(key: _leaseKey),
     ]);
 
-    if (values.any((value) => value == null || value!.isEmpty)) {
+    if (values.any((value) => value == null || value.isEmpty)) {
       return null;
     }
 

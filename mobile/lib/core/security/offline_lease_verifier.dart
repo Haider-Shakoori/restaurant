@@ -16,6 +16,7 @@ class LeaseVerificationResult {
 }
 
 abstract interface class LeaseValidator {
+  @override
   Future<LeaseVerificationResult> verify({
     required Map<String, Object?> signedLease,
     required String publicKey,

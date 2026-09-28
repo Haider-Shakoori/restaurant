@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 class AppStrings {
-  const AppStrings._(this.locale);
+  const AppStrings(this.locale);
 
   final Locale locale;
 
