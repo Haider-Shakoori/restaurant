@@ -37,6 +37,9 @@ use App\Http\Controllers\Tenant\SyncBootstrapController;
 use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
+use App\Http\Controllers\Tenant\TenantPortalController;
+use App\Http\Controllers\Tenant\TenantPortalSetupController;
+use App\Http\Controllers\Tenant\TenantWebAuthController;
 use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Support\Facades\Route;
 
@@ -44,13 +47,68 @@ $tenantMiddleware = [
     InitializeRestaurantTenancy::class,
 ];
 
-Route::middleware(['web', ...$tenantMiddleware])->group(function (): void {
-    Route::get('/', function () {
-        return response()->json([
-            'service' => 'BusinessOS Restaurant',
-            'tenant_id' => tenant('id'),
-        ]);
-    })->middleware('subscription.active')->name('tenant.home');
+Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(function (): void {
+    Route::get('/login', [TenantWebAuthController::class, 'create'])->name('tenant.web.login');
+    Route::post('/login', [TenantWebAuthController::class, 'store'])
+        ->middleware('throttle:10,1')
+        ->name('tenant.web.login.store');
+
+    Route::middleware('auth:tenant')->group(function (): void {
+        Route::post('/logout', [TenantWebAuthController::class, 'destroy'])->name('tenant.web.logout');
+
+        Route::middleware('subscription.active')->group(function (): void {
+            Route::get('/', fn () => redirect('/dashboard'))->name('tenant.home');
+            Route::get('/dashboard', [TenantPortalController::class, 'dashboard'])->name('tenant.web.dashboard');
+            Route::get('/menu', [TenantPortalController::class, 'menu'])->name('tenant.web.menu');
+
+            Route::middleware('tenant.role:owner,admin,manager,waiter')->group(function (): void {
+                Route::get('/tables', [TenantPortalController::class, 'tables'])->name('tenant.web.tables');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
+                Route::get('/orders', [TenantPortalController::class, 'orders'])->name('tenant.web.orders');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
+                Route::get('/kitchen', [TenantPortalController::class, 'kitchen'])->name('tenant.web.kitchen');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,cashier')->group(function (): void {
+                Route::get('/pos', [TenantPortalController::class, 'pos'])->name('tenant.web.pos');
+                Route::get('/daily-closing', [TenantPortalController::class, 'closing'])->name('tenant.web.closing');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
+                Route::get('/inventory', [TenantPortalController::class, 'inventory'])->name('tenant.web.inventory');
+                Route::get('/purchasing', [TenantPortalController::class, 'purchasing'])->name('tenant.web.purchasing');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
+                Route::get('/accounting', [TenantPortalController::class, 'accounting'])->name('tenant.web.accounting');
+            });
+
+            Route::middleware('tenant.role:owner,admin')->group(function (): void {
+                Route::get('/users', [TenantPortalController::class, 'users'])->name('tenant.web.users');
+                Route::get('/settings', [TenantPortalController::class, 'settings'])->name('tenant.web.settings');
+
+                Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
+                Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
+                Route::post('/setup/station', [TenantPortalSetupController::class, 'station']);
+                Route::post('/setup/user', [TenantPortalSetupController::class, 'user']);
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
+                Route::post('/setup/table', [TenantPortalSetupController::class, 'table']);
+                Route::post('/setup/menu/category', [TenantPortalSetupController::class, 'category']);
+                Route::post('/setup/menu/item', [TenantPortalSetupController::class, 'menuItem']);
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
+                Route::post('/setup/inventory/item', [TenantPortalSetupController::class, 'inventoryItem']);
+                Route::post('/setup/supplier', [TenantPortalSetupController::class, 'supplier']);
+            });
+        });
+    });
 });
 
 Route::middleware($tenantMiddleware)
