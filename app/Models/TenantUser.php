@@ -8,7 +8,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['public_id', 'name', 'email', 'phone', 'password', 'is_active'])]
+#[Fillable(['public_id', 'name', 'email', 'phone', 'password', 'is_active', 'role'])]
 #[Hidden(['password', 'remember_token'])]
 class TenantUser extends Authenticatable
 {
@@ -25,5 +25,10 @@ class TenantUser extends Authenticatable
             'password' => 'hashed',
             'is_active' => 'boolean',
         ];
+    }
+
+    public function hasAnyRole(array $roles): bool
+    {
+        return in_array($this->role, $roles, true);
     }
 }
