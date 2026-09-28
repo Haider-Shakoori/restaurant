@@ -5,6 +5,7 @@ namespace App\Services\Tenant;
 use App\Models\Bill;
 use App\Models\ChartAccount;
 use App\Models\DailyClosing;
+use App\Models\JournalEntry;
 use App\Models\JournalLine;
 use App\Models\Supplier;
 use App\Support\Money;
@@ -206,7 +207,10 @@ class ReportingService
     {
         return JournalLine::query()
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
-            ->where('journal_entries.status', 'posted')
+            ->whereIn('journal_entries.status', [
+                JournalEntry::STATUS_POSTED,
+                JournalEntry::STATUS_REVERSED,
+            ])
             ->whereBetween('journal_entries.entry_date', [$from, $to])
             ->when($branchId, fn ($query) => $query->where('journal_entries.branch_id', $branchId));
     }

@@ -117,6 +117,15 @@ class InventoryService
             $clientAdjustmentId,
             $reason,
         ): StockMovement {
+            $idempotencyKey = 'adjustment:'.$branch->id.':'.$clientAdjustmentId;
+            $existing = StockMovement::query()
+                ->where('idempotency_key', $idempotencyKey)
+                ->first();
+
+            if ($existing) {
+                return $existing->load(['branch', 'item', 'actor']);
+            }
+
             $movement = $this->recordMovement(
                 $branch,
                 $item,
@@ -125,7 +134,7 @@ class InventoryService
                 $quantityDelta,
                 'manual_adjustment',
                 $clientAdjustmentId,
-                'adjustment:'.$branch->id.':'.$clientAdjustmentId,
+                $idempotencyKey,
                 notes: $reason,
             );
 

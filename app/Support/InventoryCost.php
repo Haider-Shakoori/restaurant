@@ -2,8 +2,6 @@
 
 namespace App\Support;
 
-use InvalidArgumentException;
-
 final class InventoryCost
 {
     public const UNIT_SCALE = 6;
@@ -18,7 +16,7 @@ final class InventoryCost
 
         $valueMinor = Money::toMinor($value);
         $numerator = $valueMinor * 100000000;
-        $negative = $numerator < 0 xor $quantityScaled < 0;
+        $negative = (($numerator < 0) xor ($quantityScaled < 0));
         $absoluteNumerator = abs($numerator);
         $absoluteQuantity = abs($quantityScaled);
         $scaled = intdiv($absoluteNumerator + intdiv($absoluteQuantity, 2), $absoluteQuantity);
@@ -36,12 +34,5 @@ final class InventoryCost
         $minor = intdiv(abs($product) + intdiv($divisor, 2), $divisor);
 
         return Money::fromMinor($negative ? -$minor : $minor);
-    }
-
-    public static function validateNonNegativeValue(string|int $value): void
-    {
-        if (Money::toMinor($value) < 0) {
-            throw new InvalidArgumentException('Inventory value cannot be negative for a receipt.');
-        }
     }
 }

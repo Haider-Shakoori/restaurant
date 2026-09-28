@@ -57,9 +57,7 @@ class AccountingService
     {
         $this->ensureSystemAccounts();
 
-        return ChartAccount::query()
-            ->where('system_key', $key)
-            ->firstOrFail();
+        return ChartAccount::query()->where('system_key', $key)->firstOrFail();
     }
 
     public function post(
@@ -84,9 +82,7 @@ class AccountingService
             $lines,
             $idempotencyKey,
         ): JournalEntry {
-            $existing = JournalEntry::query()
-                ->where('idempotency_key', $idempotencyKey)
-                ->first();
+            $existing = JournalEntry::query()->where('idempotency_key', $idempotencyKey)->first();
 
             if ($existing) {
                 return $existing->load('lines.account');
@@ -144,6 +140,53 @@ class AccountingService
         });
     }
 
+    public function reverse(JournalEntry $entry, TenantUser $actor, string $reason): JournalEntry
+    {
+        return DB::connection('tenant')->transaction(function () use ($entry, $actor, $reason): JournalEntry {
+            $entry = JournalEntry::query()->with('lines')->lockForUpdate()->findOrFail($entry->getKey());
+
+            if ($entry->status === JournalEntry::STATUS_REVERSED) {
+                $existing = JournalEntry::query()
+                    ->where('reversal_of_id', $entry->id)
+                    ->first();
+
+                if ($existing) {
+                    return $existing->load('lines.account');
+                }
+            }
+
+            if ($entry->reversal_of_id) {
+                throw ValidationException::withMessages([
+                    'journal' => 'A reversal journal cannot itself be reversed.',
+                ]);
+            }
+
+            $reversal = $this->post(
+                $entry->branch_id,
+                $actor,
+                'journal_entry',
+                $entry->id,
+                'reversal',
+                'Reversal of '.$entry->entry_number.': '.$reason,
+                now()->format('Y-m-d'),
+                $entry->lines->map(fn (JournalLine $line) => [
+                    'account_id' => $line->account_id,
+                    'debit' => $line->credit,
+                    'credit' => $line->debit,
+                    'memo' => 'Reversal: '.$reason,
+                    'counterparty_type' => $line->counterparty_type,
+                    'counterparty_id' => $line->counterparty_id,
+                ])->all(),
+                'journal-reversal:'.$entry->id,
+            );
+
+            $reversal->update(['reversal_of_id' => $entry->id]);
+            $entry->update(['status' => JournalEntry::STATUS_REVERSED]);
+
+            return $reversal->fresh()->load('lines.account');
+        });
+    }
+
     public function counterpartyBalanceMinor(
         string $systemKey,
         string $counterpartyType,
@@ -154,7 +197,10 @@ class AccountingService
 
         $totals = JournalLine::query()
             ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
-            ->where('journal_entries.status', JournalEntry::STATUS_POSTED)
+            ->whereIn('journal_entries.status', [
+                JournalEntry::STATUS_POSTED,
+                JournalEntry::STATUS_REVERSED,
+            ])
             ->where('journal_lines.account_id', $account->id)
             ->where('journal_lines.counterparty_type', $counterpartyType)
             ->where('journal_lines.counterparty_id', $counterpartyId)
@@ -225,32 +271,12 @@ class AccountingService
             now()->format('Y-m-d'),
             $deltaMinor > 0
                 ? [
-                    [
-                        'account_id' => $discount->id,
-                        'debit' => $amount,
-                        'counterparty_type' => 'bill',
-                        'counterparty_id' => $bill->id,
-                    ],
-                    [
-                        'account_id' => $ar->id,
-                        'credit' => $amount,
-                        'counterparty_type' => 'bill',
-                        'counterparty_id' => $bill->id,
-                    ],
+                    ['account_id' => $discount->id, 'debit' => $amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
+                    ['account_id' => $ar->id, 'credit' => $amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
                 ]
                 : [
-                    [
-                        'account_id' => $ar->id,
-                        'debit' => $amount,
-                        'counterparty_type' => 'bill',
-                        'counterparty_id' => $bill->id,
-                    ],
-                    [
-                        'account_id' => $discount->id,
-                        'credit' => $amount,
-                        'counterparty_type' => 'bill',
-                        'counterparty_id' => $bill->id,
-                    ],
+                    ['account_id' => $ar->id, 'debit' => $amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
+                    ['account_id' => $discount->id, 'credit' => $amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
                 ],
             'bill-discount-event:'.$eventId,
         );
@@ -277,18 +303,8 @@ class AccountingService
             'Payment for '.$bill->bill_number,
             $payment->received_at->format('Y-m-d'),
             [
-                [
-                    'account_id' => $paymentAccount->id,
-                    'debit' => $payment->amount,
-                    'counterparty_type' => 'bill',
-                    'counterparty_id' => $bill->id,
-                ],
-                [
-                    'account_id' => $this->systemAccount('accounts_receivable')->id,
-                    'credit' => $payment->amount,
-                    'counterparty_type' => 'bill',
-                    'counterparty_id' => $bill->id,
-                ],
+                ['account_id' => $paymentAccount->id, 'debit' => $payment->amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
+                ['account_id' => $this->systemAccount('accounts_receivable')->id, 'credit' => $payment->amount, 'counterparty_type' => 'bill', 'counterparty_id' => $bill->id],
             ],
             'payment:'.$payment->id.':posted',
         );
@@ -308,18 +324,8 @@ class AccountingService
             'Goods receipt '.$receipt->receipt_number,
             $receipt->received_at->format('Y-m-d'),
             [
-                [
-                    'account_id' => $this->systemAccount('inventory_asset')->id,
-                    'debit' => $total,
-                    'counterparty_type' => 'supplier',
-                    'counterparty_id' => $receipt->supplier_id,
-                ],
-                [
-                    'account_id' => $this->systemAccount('accounts_payable')->id,
-                    'credit' => $total,
-                    'counterparty_type' => 'supplier',
-                    'counterparty_id' => $receipt->supplier_id,
-                ],
+                ['account_id' => $this->systemAccount('inventory_asset')->id, 'debit' => $total, 'counterparty_type' => 'supplier', 'counterparty_id' => $receipt->supplier_id],
+                ['account_id' => $this->systemAccount('accounts_payable')->id, 'credit' => $total, 'counterparty_type' => 'supplier', 'counterparty_id' => $receipt->supplier_id],
             ],
             'goods-receipt:'.$receipt->id.':posted',
         );
@@ -343,18 +349,8 @@ class AccountingService
             'Recipe consumption for order '.$consumption->order_id,
             $consumption->consumed_at->format('Y-m-d'),
             [
-                [
-                    'account_id' => $this->systemAccount('cost_of_goods_sold')->id,
-                    'debit' => $cost,
-                    'counterparty_type' => 'order',
-                    'counterparty_id' => $consumption->order_id,
-                ],
-                [
-                    'account_id' => $this->systemAccount('inventory_asset')->id,
-                    'credit' => $cost,
-                    'counterparty_type' => 'order',
-                    'counterparty_id' => $consumption->order_id,
-                ],
+                ['account_id' => $this->systemAccount('cost_of_goods_sold')->id, 'debit' => $cost, 'counterparty_type' => 'order', 'counterparty_id' => $consumption->order_id],
+                ['account_id' => $this->systemAccount('inventory_asset')->id, 'credit' => $cost, 'counterparty_type' => 'order', 'counterparty_id' => $consumption->order_id],
             ],
             'inventory-consumption:'.$consumption->id.':posted',
         );
