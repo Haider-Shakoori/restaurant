@@ -39,6 +39,6 @@ See docs/batch-06-ordering.md and docs/batch-07-kot-kds.md.
 - Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement: merged.
 - Batch 5 — license activation and signed offline lease foundation: merged.
 - Batch 6 — tables, menu and waiter ordering: merged.
-- Batch 7 — KOT/KDS and kitchen execution: in development on batch/07-kot-kds-kitchen-execution.
+- Batch 7 — KOT/KDS and kitchen execution: merged.
 
-Next after Batch 7: **Batch 8 — cashier/POS, payments and daily closing**.
+Next: **Batch 8 — cashier/POS, payments and daily closing**.
