@@ -32,6 +32,39 @@
             </section>
 
             @can('manage-platform')
+                @if ($business->provisioning_state->value !== 'ready')
+                    <section class="rounded-2xl border border-emerald-200 bg-emerald-50 p-6">
+                        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <p class="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Provisioning action</p>
+                                <h2 class="mt-1 text-lg font-black text-slate-950">
+                                    {{ $business->provisioning_state->value === 'failed' ? 'Retry restaurant provisioning' : 'Approve & provision restaurant' }}
+                                </h2>
+                                <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                                    Creates the isolated tenant database, runs tenant migrations, attaches
+                                    <span class="font-mono text-xs">{{ $business->requested_subdomain ?: 'subdomain-required' }}.{{ config('platform.provisioning.tenant_domain_suffix') }}</span>,
+                                    and marks this restaurant Ready. The 7-day trial will remain stopped until provisioning succeeds.
+                                </p>
+                                @if (! $business->plan_id || ! $business->requested_subdomain)
+                                    <p class="mt-3 text-sm font-semibold text-amber-700">
+                                        {{ ! $business->plan_id ? 'Assign a plan first. ' : '' }}
+                                        {{ ! $business->requested_subdomain ? 'Set a restaurant subdomain first.' : '' }}
+                                    </p>
+                                @endif
+                            </div>
+
+                            <form method="POST" action="/platform/restaurants/{{ $business->id }}/provision"
+                                  onsubmit="return confirm('Approve and provision this restaurant now? This will create its tenant database and domain record.')">
+                                @csrf
+                                <button @disabled(! $business->plan_id || ! $business->requested_subdomain)
+                                        class="w-full rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 shadow-sm hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40 lg:w-auto">
+                                    {{ $business->provisioning_state->value === 'failed' ? 'Retry provisioning' : 'Approve & Provision Restaurant' }}
+                                </button>
+                            </form>
+                        </div>
+                    </section>
+                @endif
+
                 <section class="rounded-2xl border border-slate-200 bg-white p-6">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
