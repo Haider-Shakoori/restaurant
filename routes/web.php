@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Platform\Auth\LoginController;
 use App\Http\Controllers\Platform\BusinessController;
+use App\Http\Controllers\Platform\BusinessProvisioningController;
 use App\Http\Controllers\Platform\DashboardController;
 use App\Http\Controllers\Platform\LicenseController;
 use App\Http\Controllers\Platform\OperatorController;
@@ -43,6 +44,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
                 Route::get('/restaurants/create', [BusinessController::class, 'create']);
                 Route::post('/restaurants', [BusinessController::class, 'store']);
                 Route::put('/restaurants/{business}', [BusinessController::class, 'update']);
+                Route::post('/restaurants/{business}/provision', BusinessProvisioningController::class);
 
                 Route::get('/plans', [PlanController::class, 'index']);
                 Route::get('/plans/create', [PlanController::class, 'create']);
