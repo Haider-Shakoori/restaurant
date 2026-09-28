@@ -144,7 +144,7 @@
                     <div class="mt-8 flex flex-wrap gap-2 text-xs font-bold text-slate-300">
                         <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">AFN</span>
                         <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">English · دری · پښتو</span>
-                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">Offline-first</span>
+                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">Offline-first waiter app</span>
                         <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">Low-bandwidth optimized</span>
                     </div>
                 </div>
