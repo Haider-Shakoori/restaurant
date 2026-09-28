@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'client_order_id',
@@ -37,6 +38,8 @@ class Order extends Model
     public const STATUS_SERVED = 'served';
 
     public const STATUS_BILLED = 'billed';
+
+    public const STATUS_CLOSED = 'closed';
 
     public const STATUS_CANCELLED = 'cancelled';
 
@@ -86,5 +89,10 @@ class Order extends Model
     public function kitchenTickets(): HasMany
     {
         return $this->hasMany(KitchenTicket::class)->orderBy('queued_at');
+    }
+
+    public function bill(): HasOne
+    {
+        return $this->hasOne(Bill::class);
     }
 }

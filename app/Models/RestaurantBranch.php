@@ -30,4 +30,19 @@ class RestaurantBranch extends Model
     {
         return $this->hasMany(KitchenStation::class, 'branch_id');
     }
+
+    public function cashierSessions(): HasMany
+    {
+        return $this->hasMany(CashierSession::class, 'branch_id');
+    }
+
+    public function bills(): HasMany
+    {
+        return $this->hasMany(Bill::class, 'branch_id');
+    }
+
+    public function dailyClosings(): HasMany
+    {
+        return $this->hasMany(DailyClosing::class, 'branch_id');
+    }
 }
