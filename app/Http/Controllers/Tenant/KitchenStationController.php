@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Tenant;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Tenant\StoreKitchenStationRequest;
 use App\Models\KitchenStation;
+use App\Models\RestaurantBranch;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 
 class KitchenStationController extends Controller
 {
@@ -25,6 +27,12 @@ class KitchenStationController extends Controller
     public function store(StoreKitchenStationRequest $request): JsonResponse
     {
         $data = $request->validated();
+
+        if (! RestaurantBranch::query()->whereKey($data['branch_id'])->where('is_active', true)->exists()) {
+            throw ValidationException::withMessages([
+                'branch_id' => 'The selected branch does not exist or is inactive.',
+            ]);
+        }
 
         $station = KitchenStation::query()->create([
             'branch_id' => $data['branch_id'],

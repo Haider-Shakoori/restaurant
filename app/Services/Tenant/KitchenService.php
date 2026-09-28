@@ -206,13 +206,13 @@ class KitchenService
             $ticket->items()->update(['status' => $to]);
 
             $this->event($ticket, $actor, $eventType, $from, $to);
-            $this->synchronizeOrderStatus($ticket->order);
+            $this->synchronizeOrderStatus($ticket->order, $actor);
 
             return $ticket->fresh()->load(['station', 'items', 'order.table.diningArea']);
         });
     }
 
-    private function synchronizeOrderStatus(Order $order): void
+    private function synchronizeOrderStatus(Order $order, TenantUser $actor): void
     {
         $statuses = $order->kitchenTickets()->pluck('status');
 
@@ -228,6 +228,7 @@ class KitchenService
                 $from = $order->status;
                 $order->update(['status' => Order::STATUS_READY]);
                 $order->events()->create([
+                    'actor_user_id' => $actor->getKey(),
                     'event_type' => 'order.ready',
                     'from_status' => $from,
                     'to_status' => Order::STATUS_READY,
@@ -240,6 +241,13 @@ class KitchenService
 
         if ($statuses->contains(KitchenTicket::STATUS_PREPARING) && $order->status === Order::STATUS_SUBMITTED) {
             $order->update(['status' => Order::STATUS_PREPARING]);
+            $order->events()->create([
+                'actor_user_id' => $actor->getKey(),
+                'event_type' => 'order.preparing',
+                'from_status' => Order::STATUS_SUBMITTED,
+                'to_status' => Order::STATUS_PREPARING,
+                'occurred_at' => now(),
+            ]);
         }
     }
 
