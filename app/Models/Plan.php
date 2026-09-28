@@ -29,4 +29,15 @@ class Plan extends Model
     {
         return $this->hasMany(Business::class);
     }
+
+    public function entitlementSnapshot(): array
+    {
+        $this->loadMissing('features');
+
+        return $this->features
+            ->mapWithKeys(fn (PlanFeature $feature): array => [
+                $feature->feature_key => $feature->resolvedValue(),
+            ])
+            ->all();
+    }
 }
