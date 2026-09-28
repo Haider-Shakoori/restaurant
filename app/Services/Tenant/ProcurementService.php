@@ -20,6 +20,8 @@ class ProcurementService
 {
     public function __construct(
         private readonly InventoryService $inventory,
+        private readonly InventoryValuationService $valuation,
+        private readonly AccountingService $accounting,
     ) {}
 
     public function createPurchaseOrder(
@@ -137,6 +139,8 @@ class ProcurementService
                 'notes' => $data['notes'] ?? null,
             ]);
 
+            $receiptTotalMinor = 0;
+
             foreach ($data['lines'] as $receivedLine) {
                 /** @var PurchaseOrderLine|null $poLine */
                 $poLine = $purchaseOrder->lines->firstWhere('id', $receivedLine['purchase_order_line_id']);
@@ -175,6 +179,7 @@ class ProcurementService
                     (string) $poLine->unit_cost,
                     $purchaseQuantity,
                 );
+                $receiptTotalMinor += Money::toMinor($lineTotal);
 
                 $receiptLine = $receipt->lines()->create([
                     'purchase_order_line_id' => $poLine->id,
@@ -199,6 +204,13 @@ class ProcurementService
                     'Purchase order receipt '.$purchaseOrder->po_number,
                 );
 
+                $this->valuation->receive(
+                    $purchaseOrder->branch,
+                    $poLine->item,
+                    $baseQuantity,
+                    $lineTotal,
+                );
+
                 $poLine->update(['received_base_quantity' => $newReceived]);
             }
 
@@ -216,7 +228,15 @@ class ProcurementService
                 'completed_at' => $fullyReceived ? now() : null,
             ]);
 
-            return $receipt->load(['lines.item', 'purchaseOrder', 'supplier', 'branch']);
+            $receipt = $receipt->load(['lines.item', 'purchaseOrder', 'supplier', 'branch']);
+
+            $this->accounting->postGoodsReceipt(
+                $receipt,
+                $actor,
+                Money::fromMinor($receiptTotalMinor),
+            );
+
+            return $receipt;
         });
     }
 }

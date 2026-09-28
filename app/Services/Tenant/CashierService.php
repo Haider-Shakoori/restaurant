@@ -12,6 +12,10 @@ use Illuminate\Validation\ValidationException;
 
 class CashierService
 {
+    public function __construct(
+        private readonly AccountingService $accounting,
+    ) {}
+
     public function openSession(
         RestaurantBranch $branch,
         TenantUser $cashier,
@@ -80,14 +84,23 @@ class CashierService
 
             $expected = Money::add((string) $session->opening_cash, $cashCollected);
             $declared = Money::fromMinor(Money::toMinor($declaredCash));
+            $variance = Money::subtract($declared, $expected);
 
             $session->update([
                 'status' => CashierSession::STATUS_CLOSED,
                 'expected_cash' => $expected,
                 'declared_cash' => $declared,
-                'cash_variance' => Money::subtract($declared, $expected),
+                'cash_variance' => $variance,
                 'closed_at' => now(),
             ]);
+
+            $this->accounting->postCashVariance(
+                $session->branch_id,
+                $actor,
+                $session->id,
+                $variance,
+                now()->format('Y-m-d'),
+            );
 
             return $session->fresh()->load(['branch', 'cashier']);
         });

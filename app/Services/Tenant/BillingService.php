@@ -3,6 +3,7 @@
 namespace App\Services\Tenant;
 
 use App\Models\Bill;
+use App\Models\BillEvent;
 use App\Models\CashierSession;
 use App\Models\DiningTable;
 use App\Models\Order;
@@ -15,6 +16,10 @@ use Illuminate\Validation\ValidationException;
 
 class BillingService
 {
+    public function __construct(
+        private readonly AccountingService $accounting,
+    ) {}
+
     public function createBill(Order $order, TenantUser $actor): Bill
     {
         return DB::connection('tenant')->transaction(function () use ($order, $actor): Bill {
@@ -72,6 +77,8 @@ class BillingService
                 'order_id' => $order->id,
             ]);
 
+            $this->accounting->postBillIssued($bill->fresh(), $actor);
+
             return $bill->load(['lines', 'payments', 'order.table']);
         });
     }
@@ -104,6 +111,7 @@ class BillingService
                 ]);
             }
 
+            $oldDiscount = (string) $bill->discount_amount;
             $subtotal = (string) $bill->subtotal;
 
             if ($type === 'fixed') {
@@ -139,12 +147,20 @@ class BillingService
                 'balance_due' => $total,
             ]);
 
-            $this->billEvent($bill, $actor, 'bill.discount_applied', [
+            $event = $this->billEvent($bill, $actor, 'bill.discount_applied', [
                 'type' => $type,
                 'value' => $value,
                 'amount' => $discount,
                 'reason' => $reason,
             ]);
+
+            $this->accounting->postDiscountDelta(
+                $bill->fresh(),
+                $actor,
+                $oldDiscount,
+                $discount,
+                $event->id,
+            );
 
             if (Money::toMinor($total) === 0) {
                 $this->settleBill($bill, $actor);
@@ -239,6 +255,8 @@ class BillingService
                 'amount' => $payment->amount,
             ]);
 
+            $this->accounting->postPayment($payment->load('bill'), $actor);
+
             if (Money::toMinor($balance) === 0) {
                 $this->settleBill($bill, $actor);
             }
@@ -263,9 +281,7 @@ class BillingService
             'closed_at' => now(),
         ]);
 
-        $table->update([
-            'status' => DiningTable::STATUS_AVAILABLE,
-        ]);
+        $table->update(['status' => DiningTable::STATUS_AVAILABLE]);
 
         $this->billEvent($bill, $actor, 'bill.paid', [
             'paid_amount' => $bill->fresh()->paid_amount,
@@ -281,9 +297,13 @@ class BillingService
         ]);
     }
 
-    private function billEvent(Bill $bill, TenantUser $actor, string $eventType, array $payload = []): void
-    {
-        $bill->events()->create([
+    private function billEvent(
+        Bill $bill,
+        TenantUser $actor,
+        string $eventType,
+        array $payload = [],
+    ): BillEvent {
+        return $bill->events()->create([
             'actor_user_id' => $actor->getKey(),
             'event_type' => $eventType,
             'payload' => $payload ?: null,

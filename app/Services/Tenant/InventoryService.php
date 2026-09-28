@@ -10,12 +10,18 @@ use App\Models\Recipe;
 use App\Models\RestaurantBranch;
 use App\Models\StockMovement;
 use App\Models\TenantUser;
+use App\Support\Money;
 use App\Support\Quantity;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class InventoryService
 {
+    public function __construct(
+        private readonly InventoryValuationService $valuation,
+        private readonly AccountingService $accounting,
+    ) {}
+
     public function recordMovement(
         RestaurantBranch $branch,
         InventoryItem $item,
@@ -103,17 +109,40 @@ class InventoryService
         string $clientAdjustmentId,
         string $reason,
     ): StockMovement {
-        return $this->recordMovement(
+        return DB::connection('tenant')->transaction(function () use (
             $branch,
             $item,
             $actor,
-            StockMovement::TYPE_ADJUSTMENT,
             $quantityDelta,
-            'manual_adjustment',
             $clientAdjustmentId,
-            'adjustment:'.$branch->id.':'.$clientAdjustmentId,
-            notes: $reason,
-        );
+            $reason,
+        ): StockMovement {
+            $movement = $this->recordMovement(
+                $branch,
+                $item,
+                $actor,
+                StockMovement::TYPE_ADJUSTMENT,
+                $quantityDelta,
+                'manual_adjustment',
+                $clientAdjustmentId,
+                'adjustment:'.$branch->id.':'.$clientAdjustmentId,
+                notes: $reason,
+            );
+
+            $valueDelta = $this->valuation->adjust(
+                $branch,
+                $item,
+                $quantityDelta,
+            );
+
+            $this->accounting->postInventoryAdjustment(
+                $movement,
+                $actor,
+                $valueDelta,
+            );
+
+            return $movement;
+        });
     }
 
     public function consumeOrder(Order $order, TenantUser $actor): InventoryConsumption
@@ -156,6 +185,8 @@ class InventoryService
                 'consumed_at' => now(),
             ]);
 
+            $costMinor = 0;
+
             foreach ($order->items as $orderItem) {
                 if (! $orderItem->menu_item_id) {
                     continue;
@@ -172,6 +203,13 @@ class InventoryService
                         (string) $recipeItem->quantity_base,
                         (string) $orderItem->quantity,
                     );
+
+                    $ingredientCost = $this->valuation->consume(
+                        $branch,
+                        $recipeItem->inventoryItem,
+                        $quantity,
+                    );
+                    $costMinor += Money::toMinor($ingredientCost);
 
                     $movement = $this->recordMovement(
                         $branch,
@@ -195,6 +233,12 @@ class InventoryService
                     ]);
                 }
             }
+
+            $this->accounting->postInventoryConsumption(
+                $consumption,
+                $actor,
+                Money::fromMinor($costMinor),
+            );
 
             return $consumption->load(['lines.stockMovement.item']);
         });

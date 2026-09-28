@@ -7,6 +7,8 @@ use App\Models\ChartAccount;
 use App\Models\GoodsReceipt;
 use App\Models\InventoryConsumption;
 use App\Models\JournalEntry;
+use App\Models\JournalLine;
+use App\Models\StockMovement;
 use App\Models\TenantPayment;
 use App\Models\TenantUser;
 use App\Support\Money;
@@ -31,6 +33,7 @@ class AccountingService
         'cost_of_goods_sold' => ['5000', 'Cost of Goods Sold', ChartAccount::TYPE_EXPENSE, 'debit', false],
         'operating_expense' => ['6000', 'Operating Expenses', ChartAccount::TYPE_EXPENSE, 'debit', false],
         'cash_over_short' => ['6100', 'Cash Over / Short', ChartAccount::TYPE_EXPENSE, 'debit', false],
+        'inventory_adjustment' => ['6110', 'Inventory Adjustment', ChartAccount::TYPE_EXPENSE, 'debit', false],
     ];
 
     public function ensureSystemAccounts(): void
@@ -139,6 +142,32 @@ class AccountingService
 
             return $entry->load('lines.account');
         });
+    }
+
+    public function counterpartyBalanceMinor(
+        string $systemKey,
+        string $counterpartyType,
+        string $counterpartyId,
+        ?string $branchId = null,
+    ): int {
+        $account = $this->systemAccount($systemKey);
+
+        $totals = JournalLine::query()
+            ->join('journal_entries', 'journal_entries.id', '=', 'journal_lines.journal_entry_id')
+            ->where('journal_entries.status', JournalEntry::STATUS_POSTED)
+            ->where('journal_lines.account_id', $account->id)
+            ->where('journal_lines.counterparty_type', $counterpartyType)
+            ->where('journal_lines.counterparty_id', $counterpartyId)
+            ->when($branchId, fn ($query) => $query->where('journal_entries.branch_id', $branchId))
+            ->selectRaw('COALESCE(SUM(journal_lines.debit), 0) as debits, COALESCE(SUM(journal_lines.credit), 0) as credits')
+            ->first();
+
+        $debits = Money::toMinor((string) $totals->debits);
+        $credits = Money::toMinor((string) $totals->credits);
+
+        return $account->normal_balance === 'debit'
+            ? $debits - $credits
+            : $credits - $debits;
     }
 
     public function postBillIssued(Bill $bill, TenantUser $actor): JournalEntry
@@ -328,6 +357,42 @@ class AccountingService
                 ],
             ],
             'inventory-consumption:'.$consumption->id.':posted',
+        );
+    }
+
+    public function postInventoryAdjustment(
+        StockMovement $movement,
+        TenantUser $actor,
+        string $valueDelta,
+    ): ?JournalEntry {
+        $minor = Money::toMinor($valueDelta);
+
+        if ($minor === 0) {
+            return null;
+        }
+
+        $amount = Money::fromMinor(abs($minor));
+        $inventory = $this->systemAccount('inventory_asset');
+        $adjustment = $this->systemAccount('inventory_adjustment');
+
+        return $this->post(
+            $movement->branch_id,
+            $actor,
+            'stock_movement',
+            $movement->id,
+            'adjustment',
+            'Inventory adjustment for '.$movement->item->name,
+            $movement->occurred_at->format('Y-m-d'),
+            $minor > 0
+                ? [
+                    ['account_id' => $inventory->id, 'debit' => $amount],
+                    ['account_id' => $adjustment->id, 'credit' => $amount],
+                ]
+                : [
+                    ['account_id' => $adjustment->id, 'debit' => $amount],
+                    ['account_id' => $inventory->id, 'credit' => $amount],
+                ],
+            'stock-movement:'.$movement->id.':valuation-adjustment',
         );
     }
 
