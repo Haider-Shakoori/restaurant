@@ -49,7 +49,7 @@ class TenantPortalController extends Controller
                 ->latest('opened_at')
                 ->limit(8)
                 ->get(),
-            'recentPayments' => TenantPayment::query()->latest('paid_at')->limit(6)->get(),
+            'recentPayments' => TenantPayment::query()->latest('received_at')->limit(6)->get(),
             'openCashierSessions' => CashierSession::query()
                 ->with(['branch', 'cashier'])
                 ->where('status', CashierSession::STATUS_OPEN)
