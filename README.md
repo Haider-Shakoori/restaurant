@@ -25,15 +25,11 @@ See docs/architecture.md and docs/architecture-blueprint.md.
 
 ## Restaurant operations
 
-Batch 6 established branches, dining areas/tables, menu, waiter authentication, retry-safe orders and submitted-order handling.
+Batches 6–9 established waiter ordering, KOT/KDS, cashier/POS, daily closing, purchasing, ingredient inventory and recipe consumption.
 
-Batch 7 added branch-aware kitchen stations, menu-to-station routing, automatic KOT splitting, General Kitchen fallback, KDS queue/status APIs, kitchen audit events and the submitted → preparing → ready → served lifecycle.
+Batch 10 adds source-document double-entry accounting, perpetual inventory valuation, expenses, supplier payments, journal reversals, P&L, balance sheet, trial balance, ledgers, receivables/payables and management reporting.
 
-Batch 8 added cashier sessions, bill snapshots, discounts, split payments, table settlement, cashier variance and immutable versioned daily closing snapshots.
-
-Batch 9 adds suppliers, ingredient inventory, purchase-unit conversion, purchase orders/GRNs, immutable stock movements, branch recipes and serve-time automatic ingredient consumption.
-
-See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md, docs/batch-08-cashier-pos-daily-closing.md and docs/batch-09-inventory-purchasing-recipes.md.
+See docs/batch-10-accounting-reporting.md for the accounting contract.
 
 ## Current development status
 
@@ -46,5 +42,6 @@ See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md, docs/batch-08-cashier-p
 - Batch 7 — KOT/KDS and kitchen execution: merged.
 - Batch 8 — cashier/POS, payments and daily closing: merged.
 - Batch 9 — inventory, purchasing and recipes: merged.
+- Batch 10 — accounting and reporting: in development on batch/10-accounting-reporting.
 
-Next: **Batch 10 — accounting and reporting**.
+Next after Batch 10: **Batch 11 — Flutter/offline sync hardening**.
