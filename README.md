@@ -57,6 +57,15 @@ See [docs/architecture.md](docs/architecture.md) for the foundation boundaries a
 
 ## Current development status
 
-**Batch 1 — Laravel SaaS foundation: implemented on the Batch 1 feature branch.**
+- **Batch 1 — Laravel SaaS foundation:** complete.
+- **Batch 2 — Multi-database tenancy and tenant isolation:** complete.
+- **Batch 3 — Platform Admin / central SaaS control plane:** complete.
+- **Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement:** complete.
+- **Batch 5 — license activation and signed offline lease foundation:** complete.
+- **Batch 6 — restaurant onboarding and branches:** implemented and under verification.
 
-Next: **Batch 2 — Multi-tenancy and tenant isolation.**
+Batch 6 adds tenant restaurant login, tenant-only restaurant/branch data, resumable 13-step onboarding state, Afghanistan defaults and RTL localization, primary-branch safeguards, and plan-based branch limits.
+
+See [docs/batch-06-onboarding-branches.md](docs/batch-06-onboarding-branches.md) for the exact Batch 6 scope.
+
+Next: **Batch 7 — Tenant users, roles and permissions.**
