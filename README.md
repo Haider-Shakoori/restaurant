@@ -42,6 +42,6 @@ See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md and docs/batch-08-cashie
 - Batch 5 — license activation and signed offline lease foundation: merged.
 - Batch 6 — tables, menu and waiter ordering: merged.
 - Batch 7 — KOT/KDS and kitchen execution: merged.
-- Batch 8 — cashier/POS, payments and daily closing: in development on batch/08-cashier-pos-daily-closing.
+- Batch 8 — cashier/POS, payments and daily closing: merged.
 
-Next after Batch 8: **Batch 9 — inventory, purchasing and recipes**.
+Next: **Batch 9 — inventory, purchasing and recipes**.
