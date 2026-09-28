@@ -1,0 +1,58 @@
+name: Installable Android Release
+
+on:
+  push:
+    branches:
+      - release/android-installable-2026-09-28
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform scaffold
+        working-directory: mobile
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+
+      - name: Install Flutter dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Analyze and test
+        working-directory: mobile
+        run: |
+          dart format lib test
+          flutter analyze
+          flutter test
+
+      - name: Build release-mode APK
+        working-directory: mobile
+        run: flutter build apk --release
+
+      - name: Generate checksum
+        working-directory: mobile
+        run: sha256sum build/app/outputs/flutter-apk/app-release.apk > build/app/outputs/flutter-apk/app-release.apk.sha256
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: businessos-restaurant-installable-release
+          path: |
+            mobile/build/app/outputs/flutter-apk/app-release.apk
+            mobile/build/app/outputs/flutter-apk/app-release.apk.sha256
+          retention-days: 30
+          if-no-files-found: error
