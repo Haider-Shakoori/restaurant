@@ -8,16 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable([
-    'menu_category_id',
-    'sku',
-    'name',
-    'description',
-    'price',
-    'is_available',
-    'sort_order',
-])]
-class MenuItem extends Model
+#[Fillable(['branch_id', 'code', 'name', 'sort_order', 'is_active'])]
+class KitchenStation extends Model
 {
     use HasUlids;
 
@@ -25,19 +17,21 @@ class MenuItem extends Model
 
     protected function casts(): array
     {
-        return [
-            'price' => 'decimal:2',
-            'is_available' => 'boolean',
-        ];
+        return ['is_active' => 'boolean'];
     }
 
-    public function category(): BelongsTo
+    public function branch(): BelongsTo
     {
-        return $this->belongsTo(MenuCategory::class, 'menu_category_id');
+        return $this->belongsTo(RestaurantBranch::class, 'branch_id');
     }
 
-    public function kitchenRoutes(): HasMany
+    public function routes(): HasMany
     {
         return $this->hasMany(MenuItemKitchenRoute::class);
+    }
+
+    public function tickets(): HasMany
+    {
+        return $this->hasMany(KitchenTicket::class);
     }
 }

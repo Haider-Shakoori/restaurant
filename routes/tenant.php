@@ -4,12 +4,18 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Tenant\BootstrapController;
 use App\Http\Controllers\Tenant\DiningTableController;
+use App\Http\Controllers\Tenant\KitchenRouteController;
+use App\Http\Controllers\Tenant\KitchenStationController;
+use App\Http\Controllers\Tenant\KitchenTicketController;
 use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
+use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
+use App\Http\Controllers\Tenant\ServeOrderController;
+use App\Http\Controllers\Tenant\StartKitchenTicketController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
 use App\Http\Controllers\Tenant\TenantAuthController;
@@ -71,17 +77,49 @@ Route::middleware($tenantMiddleware)
             Route::get('/tables', [DiningTableController::class, 'index'])
                 ->name('tenant.api.tables');
 
+            Route::get('/kitchen/stations', [KitchenStationController::class, 'index'])
+                ->name('tenant.api.kitchen.stations.index');
+
+            Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
+                Route::post('/kitchen/stations', [KitchenStationController::class, 'store'])
+                    ->name('tenant.api.kitchen.stations.store');
+
+                Route::post('/menu/items/{menuItem}/kitchen-route', [KitchenRouteController::class, 'store'])
+                    ->name('tenant.api.kitchen.routes.store');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
+                Route::get('/kitchen/tickets', [KitchenTicketController::class, 'index'])
+                    ->name('tenant.api.kitchen.tickets.index');
+
+                Route::get('/kitchen/tickets/{kitchenTicket}', [KitchenTicketController::class, 'show'])
+                    ->name('tenant.api.kitchen.tickets.show');
+
+                Route::post('/kitchen/tickets/{kitchenTicket}/start', StartKitchenTicketController::class)
+                    ->name('tenant.api.kitchen.tickets.start');
+
+                Route::post('/kitchen/tickets/{kitchenTicket}/ready', ReadyKitchenTicketController::class)
+                    ->name('tenant.api.kitchen.tickets.ready');
+            });
+
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
                 Route::get('/orders', [OrderController::class, 'index'])
                     ->name('tenant.api.orders.index');
+
                 Route::post('/orders', [OrderController::class, 'store'])
                     ->name('tenant.api.orders.store');
+
                 Route::get('/orders/{order}', [OrderController::class, 'show'])
                     ->name('tenant.api.orders.show');
+
                 Route::post('/orders/{order}/items', [OrderItemController::class, 'store'])
                     ->name('tenant.api.orders.items.store');
+
                 Route::post('/orders/{order}/submit', SubmitOrderController::class)
                     ->name('tenant.api.orders.submit');
+
+                Route::post('/orders/{order}/serve', ServeOrderController::class)
+                    ->name('tenant.api.orders.serve');
             });
         });
     });

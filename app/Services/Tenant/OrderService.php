@@ -12,6 +12,10 @@ use Illuminate\Validation\ValidationException;
 
 class OrderService
 {
+    public function __construct(
+        private readonly KitchenService $kitchen,
+    ) {}
+
     public function open(TenantUser $waiter, array $data): Order
     {
         return DB::connection('tenant')->transaction(function () use ($waiter, $data): Order {
@@ -136,8 +140,19 @@ class OrderService
         return DB::connection('tenant')->transaction(function () use ($order, $actor): Order {
             $order = Order::query()->withCount('items')->lockForUpdate()->findOrFail($order->getKey());
 
-            if ($order->status === Order::STATUS_SUBMITTED) {
-                return $order->load(['table.diningArea', 'waiter', 'items']);
+            if (in_array($order->status, [
+                Order::STATUS_SUBMITTED,
+                Order::STATUS_PREPARING,
+                Order::STATUS_READY,
+            ], true)) {
+                $this->kitchen->dispatch($order, $actor);
+
+                return $order->fresh()->load([
+                    'table.diningArea',
+                    'waiter',
+                    'items',
+                    'kitchenTickets.station',
+                ]);
             }
 
             if ($order->status !== Order::STATUS_DRAFT) {
@@ -160,8 +175,14 @@ class OrderService
             ]);
 
             $this->event($order, $actor, 'order.submitted', $from, Order::STATUS_SUBMITTED);
+            $this->kitchen->dispatch($order, $actor);
 
-            return $order->fresh()->load(['table.diningArea', 'waiter', 'items']);
+            return $order->fresh()->load([
+                'table.diningArea',
+                'waiter',
+                'items',
+                'kitchenTickets.station',
+            ]);
         });
     }
 
