@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\ChartAccount;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\InventoryItem;

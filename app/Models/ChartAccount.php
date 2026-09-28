@@ -21,9 +21,13 @@ class ChartAccount extends Model
     use HasUlids;
 
     public const TYPE_ASSET = 'asset';
+
     public const TYPE_LIABILITY = 'liability';
+
     public const TYPE_EQUITY = 'equity';
+
     public const TYPE_REVENUE = 'revenue';
+
     public const TYPE_EXPENSE = 'expense';
 
     protected $connection = 'tenant';

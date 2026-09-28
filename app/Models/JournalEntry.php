@@ -27,6 +27,7 @@ class JournalEntry extends Model
     use HasUlids;
 
     public const STATUS_POSTED = 'posted';
+
     public const STATUS_REVERSED = 'reversed';
 
     protected $connection = 'tenant';
