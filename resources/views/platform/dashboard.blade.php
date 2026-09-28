@@ -2,12 +2,13 @@
 
 @section('title', 'Dashboard')
 @section('heading', 'Platform Dashboard')
-@section('subheading', 'Central SaaS health, restaurant lifecycle and provisioning visibility.')
+@section('subheading', 'Central SaaS customer, tenant infrastructure and provisioning visibility.')
 
 @section('content')
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         @foreach ([
             ['Restaurants', $metrics['restaurants']],
+            ['Provisioning', $metrics['provisioning']],
             ['Active', $metrics['active']],
             ['Trial', $metrics['trial']],
             ['Expired', $metrics['expired']],
@@ -64,7 +65,7 @@
         <section class="rounded-2xl border border-slate-200 bg-white">
             <div class="border-b border-slate-200 px-5 py-4">
                 <h2 class="font-bold">Provisioning activity</h2>
-                <p class="text-sm text-slate-500">Central event history only.</p>
+                <p class="text-sm text-slate-500">Central infrastructure history only.</p>
             </div>
             <div class="divide-y divide-slate-100">
                 @forelse ($recentEvents as $event)
