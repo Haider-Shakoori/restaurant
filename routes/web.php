@@ -10,6 +10,7 @@ use App\Http\Controllers\Platform\PlanController;
 use App\Http\Controllers\Platform\PlanPriceController;
 use App\Http\Controllers\Platform\SubscriptionController;
 use App\Http\Controllers\Platform\TenantController;
+use App\Http\Controllers\Platform\TenantOwnerAccessController;
 use App\Http\Controllers\PublicTrialController;
 use Illuminate\Support\Facades\Route;
 
@@ -45,6 +46,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
                 Route::post('/restaurants', [BusinessController::class, 'store']);
                 Route::put('/restaurants/{business}', [BusinessController::class, 'update']);
                 Route::post('/restaurants/{business}/provision', BusinessProvisioningController::class);
+                Route::post('/restaurants/{business}/owner-access/reset', TenantOwnerAccessController::class);
 
                 Route::get('/plans', [PlanController::class, 'index']);
                 Route::get('/plans/create', [PlanController::class, 'create']);
