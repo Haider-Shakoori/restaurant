@@ -42,6 +42,7 @@ use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 $tenantMiddleware = [
@@ -54,7 +55,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
         ->middleware('throttle:10,1')
         ->name('tenant.web.login.store');
 
-    Route::get('/', function (\Illuminate\Http\Request $request, EnsureTenantSubscriptionActive $subscription) {
+    Route::get('/', function (Request $request, EnsureTenantSubscriptionActive $subscription) {
         if (! $request->expectsJson()) {
             return auth('tenant')->check() ? redirect('/dashboard') : redirect('/login');
         }
