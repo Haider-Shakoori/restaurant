@@ -45,6 +45,6 @@ See docs/batch-10-accounting-reporting.md and docs/batch-11-flutter-offline-sync
 - Batch 8 — cashier/POS, payments and daily closing: merged.
 - Batch 9 — inventory, purchasing and recipes: merged.
 - Batch 10 — accounting and reporting: merged.
-- Batch 11 — Flutter offline sync hardening: in development on batch/11-flutter-offline-sync.
+- Batch 11 — Flutter offline sync hardening: merged.
 
-Next after Batch 11: **Batch 12 — production deployment and full regression**.
+Next: **Batch 12 — production deployment and full regression**.
