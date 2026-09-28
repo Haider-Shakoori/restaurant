@@ -5,24 +5,10 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../connection/connection_resolver.dart';
+import 'api_exception.dart';
 import '../models/session_credentials.dart';
 
-class ApiException implements Exception {
-  const ApiException({
-    required this.code,
-    required this.message,
-    this.statusCode,
-    this.payload,
-  });
-
-  final String code;
-  final String message;
-  final int? statusCode;
-  final Object? payload;
-
-  @override
-  String toString() => 'ApiException($code, $message)';
-}
+export 'api_exception.dart';
 
 abstract interface class SyncApi {
   Future<Map<String, Object?>> refreshLease(SessionCredentials credentials);

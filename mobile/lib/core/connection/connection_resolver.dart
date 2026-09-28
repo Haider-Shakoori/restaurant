@@ -1,4 +1,4 @@
-import '../api/mobile_api_client.dart';
+import '../api/api_exception.dart';
 import 'connection_mode.dart';
 
 class ServerHealth {

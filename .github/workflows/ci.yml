@@ -87,6 +87,10 @@ jobs:
           flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
           rm -f test/widget_test.dart
 
+      - name: Configure Android local-network HTTP support
+        working-directory: mobile
+        run: dart run tool/configure_android.dart
+
       - name: Install Flutter dependencies
         working-directory: mobile
         run: flutter pub get

@@ -1,4 +1,5 @@
 import 'package:businessos_restaurant_waiter/core/api/mobile_api_client.dart';
+import 'package:businessos_restaurant_waiter/core/connection/connection_mode.dart';
 import 'package:businessos_restaurant_waiter/core/models/session_credentials.dart';
 import 'package:businessos_restaurant_waiter/core/security/offline_lease_verifier.dart';
 import 'package:businessos_restaurant_waiter/core/security/secure_credential_store.dart';
@@ -213,6 +214,11 @@ class _MemoryCredentials implements CredentialStore {
     required String deviceUid,
     required String publicKey,
     required Map<String, Object?> lease,
+    ConnectionMode connectionMode = ConnectionMode.cloud,
+    ConnectionChannel activeChannel = ConnectionChannel.cloud,
+    String? localBaseUrl,
+    String? cloudBaseUrl,
+    String? tenantId,
   }) async {}
 
   @override
