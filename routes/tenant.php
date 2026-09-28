@@ -40,6 +40,7 @@ use App\Http\Controllers\Tenant\TenantAuthController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Support\Facades\Route;
 
@@ -53,11 +54,21 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
         ->middleware('throttle:10,1')
         ->name('tenant.web.login.store');
 
+    Route::get('/', function (\Illuminate\Http\Request $request, EnsureTenantSubscriptionActive $subscription) {
+        if (! $request->expectsJson()) {
+            return auth('tenant')->check() ? redirect('/dashboard') : redirect('/login');
+        }
+
+        return $subscription->handle($request, fn () => response()->json([
+            'service' => 'BusinessOS Restaurant',
+            'tenant_id' => tenant('id'),
+        ]));
+    })->name('tenant.home');
+
     Route::middleware('auth:tenant')->group(function (): void {
         Route::post('/logout', [TenantWebAuthController::class, 'destroy'])->name('tenant.web.logout');
 
         Route::middleware('subscription.active')->group(function (): void {
-            Route::get('/', fn () => redirect('/dashboard'))->name('tenant.home');
             Route::get('/dashboard', [TenantPortalController::class, 'dashboard'])->name('tenant.web.dashboard');
             Route::get('/menu', [TenantPortalController::class, 'menu'])->name('tenant.web.menu');
 
