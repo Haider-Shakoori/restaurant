@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\Tenant;
+use App\Tenancy\CpanelMySQLDatabaseManager;
 use App\Tenancy\Bootstrappers\CacheTenancyBootstrapper as RestaurantCacheTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
@@ -67,8 +68,8 @@ return [
          */
         'managers' => [
             'sqlite' => SQLiteDatabaseManager::class,
-            'mysql' => MySQLDatabaseManager::class,
-            'mariadb' => MySQLDatabaseManager::class,
+            'mysql' => CpanelMySQLDatabaseManager::class,
+            'mariadb' => CpanelMySQLDatabaseManager::class,
             'pgsql' => PostgreSQLDatabaseManager::class,
 
         /**
