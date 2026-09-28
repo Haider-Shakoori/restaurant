@@ -8,55 +8,50 @@ The primary workflow is:
 
 This is not a public food-delivery or customer self-ordering application.
 
-## Foundation
+## Architecture
 
-Batch 1 establishes:
+- Laravel 13 / PHP 8.3.
+- Central BusinessOS SaaS control plane.
+- One isolated database per restaurant tenant.
+- Domain/subdomain-based tenant identification.
+- Tenant-isolated cache, files, sessions and queued jobs.
+- Configurable plans, seven-day hosted trial and subscription enforcement.
+- One-time restaurant license keys and per-device activation.
+- Ed25519-signed, time-bounded offline leases for the Android waiter app.
+- AFN, Asia/Kabul, English/Dari/Pashto and RTL-ready defaults.
+- Tailwind CSS 4 + Alpine.js with low-bandwidth defaults.
 
-- Laravel 13 application foundation.
-- Blade-first architecture with Tailwind CSS.
-- Alpine.js for lightweight interaction.
-- Laravel Sanctum API authentication foundation.
-- Versioned REST API under `/api/v1`.
-- AFN and Asia/Kabul defaults.
-- English, Dari and Pashto locale metadata with RTL readiness.
-- Low-bandwidth configuration defaults.
-- Database-backed queue/cache/session defaults with Redis compatibility.
-- Automated tests, formatting checks, Composer audit and frontend build in CI.
+See docs/architecture.md and docs/architecture-blueprint.md.
+
+## Restaurant ordering foundation
+
+Batch 6 adds the first operational restaurant flow:
+
+- branches and dining areas;
+- dining tables and occupancy state;
+- menu categories/items;
+- tenant waiter authentication and roles;
+- draft orders and order items;
+- transactional one-active-order-per-table enforcement;
+- retry-safe client order/line identifiers;
+- exact AFN price snapshots and totals;
+- order audit events;
+- waiter ownership enforcement;
+- submit-order transition for the upcoming KOT/KDS batch.
+
+See docs/batch-06-ordering.md.
 
 ## Local setup
 
-```bash
-cp .env.example .env
-composer install
-php artisan key:generate
-touch database/database.sqlite
-php artisan migrate
-npm ci
-npm run build
-php artisan test
-```
-
-For local development:
-
-```bash
-composer dev
-```
-
-Health endpoints:
-
-- Framework health: `GET /up`
-- API health: `GET /api/v1/health`
-
-## Product principles
-
-Restaurant operations must remain fast and usable during temporary connectivity failures. Mobile-originated transactional records will use ULID/UUID identifiers, synchronization will be idempotent, and financial records will not be destructively rewritten after finalization.
-
-Tenant isolation, subscriptions, license leasing, restaurant onboarding, ordering, KOT/KDS, billing, inventory and Flutter offline synchronization are implemented incrementally in the numbered development batches.
-
-See [docs/architecture.md](docs/architecture.md) for the foundation boundaries and engineering rules.
+Copy .env.example to .env, install Composer dependencies, generate an application key, create the local SQLite database, migrate, install frontend dependencies, build assets and run php artisan test.
 
 ## Current development status
 
-**Batch 1 — Laravel SaaS foundation: implemented on the Batch 1 feature branch.**
+- Batch 1 — Laravel SaaS foundation: merged.
+- Batch 2 — Multi-database tenancy and tenant isolation: merged.
+- Batch 3 — Platform Admin / central SaaS control plane: merged.
+- Batch 4 — subscriptions, seven-day trial lifecycle and plan enforcement: merged.
+- Batch 5 — license activation and signed offline lease foundation: merged.
+- Batch 6 — tables, menu and waiter ordering: in development on batch/06-tables-menu-waiter-ordering.
 
-Next: **Batch 2 — Multi-tenancy and tenant isolation.**
+Next after Batch 6: **Batch 7 — KOT/KDS and kitchen execution**.
