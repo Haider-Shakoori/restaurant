@@ -1,0 +1,27 @@
+name: Build Restaurant Web Assets
+
+on:
+  push:
+    branches:
+      - deploy/restaurant-web-assets-20260928
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: restaurant-web-assets
+          path: public/build/
+          retention-days: 3
+          if-no-files-found: error
