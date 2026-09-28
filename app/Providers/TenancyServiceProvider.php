@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Http\Middleware\InitializeRestaurantTenancy;
+use App\Http\Middleware\UseTenantWebGuard;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
@@ -126,6 +128,9 @@ class TenancyServiceProvider extends ServiceProvider
     protected function makeTenancyMiddlewareHighestPriority()
     {
         $tenancyMiddleware = [
+            InitializeRestaurantTenancy::class,
+            UseTenantWebGuard::class,
+
             // Even higher priority than the initialization middleware
             Middleware\PreventAccessFromCentralDomains::class,
 
