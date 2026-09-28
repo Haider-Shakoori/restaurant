@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 use App\Models\Tenant;
-use App\Tenancy\CpanelMySQLDatabaseManager;
 use App\Tenancy\Bootstrappers\CacheTenancyBootstrapper as RestaurantCacheTenancyBootstrapper;
+use App\Tenancy\CpanelMySQLDatabaseManager;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
@@ -71,16 +71,16 @@ return [
             'mariadb' => CpanelMySQLDatabaseManager::class,
             'pgsql' => PostgreSQLDatabaseManager::class,
 
-            /**
-             * Use this database manager for MySQL to have a DB user created for each tenant database.
-             * You can customize the grants given to these users by changing the $grants property.
-             */
+        /**
+         * Use this database manager for MySQL to have a DB user created for each tenant database.
+         * You can customize the grants given to these users by changing the $grants property.
+         */
             // 'mysql' => Stancl\Tenancy\TenantDatabaseManagers\PermissionControlledMySQLDatabaseManager::class,
 
-            /**
-             * Disable the pgsql manager above, and enable the one below if you
-             * want to separate tenant DBs by schemas rather than databases.
-             */
+        /**
+         * Disable the pgsql manager above, and enable the one below if you
+         * want to separate tenant DBs by schemas rather than databases.
+         */
             // 'pgsql' => Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLSchemaManager::class, // Separate by schema instead of database
         ],
     ],
