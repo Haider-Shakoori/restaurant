@@ -9,11 +9,22 @@ use App\Http\Controllers\Platform\PlanController;
 use App\Http\Controllers\Platform\PlanPriceController;
 use App\Http\Controllers\Platform\SubscriptionController;
 use App\Http\Controllers\Platform\TenantController;
+use App\Http\Controllers\PublicTrialController;
 use Illuminate\Support\Facades\Route;
 
 foreach (config('tenancy.central_domains', []) as $domain) {
     Route::domain($domain)->group(function (): void {
-        Route::get('/', fn () => view('welcome'));
+        Route::get('/', function () {
+            if (auth()->check()) {
+                return redirect('/platform');
+            }
+
+            return view('welcome');
+        });
+
+        Route::get('/start-trial', [PublicTrialController::class, 'create']);
+        Route::post('/start-trial', [PublicTrialController::class, 'store'])
+            ->middleware('throttle:5,1');
 
         Route::middleware('guest')->group(function (): void {
             Route::get('/platform/login', [LoginController::class, 'create']);
@@ -23,6 +34,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
         Route::middleware(['auth', 'platform.active'])->prefix('platform')->group(function (): void {
             Route::get('/', DashboardController::class);
             Route::post('/logout', [LoginController::class, 'destroy']);
+            Route::get('/system-health', fn () => view('platform.system-health'));
 
             Route::get('/restaurants', [BusinessController::class, 'index']);
             Route::get('/tenants', [TenantController::class, 'index']);
