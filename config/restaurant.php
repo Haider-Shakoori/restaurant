@@ -21,5 +21,14 @@ return [
         'sync_batch_size' => (int) env('RESTAURANT_SYNC_BATCH_SIZE', 100),
     ],
 
+    'local_server' => [
+        'enabled' => (bool) env('RESTAURANT_LOCAL_SERVER_ENABLED', false),
+        'tenant_id' => env('RESTAURANT_LOCAL_TENANT_ID'),
+        'allowed_hosts' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('RESTAURANT_LOCAL_ALLOWED_HOSTS', ''))
+        ))),
+    ],
+
     'release' => env('APP_RELEASE', 'development'),
 ];
