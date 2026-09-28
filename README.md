@@ -49,4 +49,4 @@ See docs/batch-10-accounting-reporting.md and docs/batch-11-flutter-offline-sync
 - Batch 10 — accounting and reporting: merged.
 - Batch 11 — Flutter offline sync hardening: merged.
 
-Batch 12 — production deployment, three connection modes and full regression: in development.
+Batch 12 — three connection modes: merged. Production deployment and full regression: in development.
