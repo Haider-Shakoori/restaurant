@@ -65,6 +65,45 @@
                     </section>
                 @endif
 
+                @if ($business->provisioning_state->value === 'ready')
+                    <section class="rounded-2xl border border-slate-200 bg-white p-6">
+                        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <h2 class="font-bold">Restaurant web access</h2>
+                                <p class="mt-1 text-sm text-slate-500">
+                                    Create or reset the owner login for
+                                    <span class="font-mono text-xs">{{ $business->tenant?->domains->first()?->domain ?? 'the tenant domain' }}</span>.
+                                </p>
+                            </div>
+                            <form method="POST" action="/platform/restaurants/{{ $business->id }}/owner-access/reset"
+                                  onsubmit="return confirm('Create a new temporary owner password? The previous owner password will stop working.')">
+                                @csrf
+                                <button @disabled(! $business->email)
+                                        class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                                    Create / Reset Owner Login
+                                </button>
+                            </form>
+                        </div>
+
+                        @if (! $business->email)
+                            <p class="mt-3 text-sm font-semibold text-amber-700">Add the restaurant owner email in Commercial details first.</p>
+                        @endif
+
+                        @if (session('owner_credentials'))
+                            @php($credentials = session('owner_credentials'))
+                            <div class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                <p class="font-black text-emerald-900">Temporary owner credentials — copy these now</p>
+                                <div class="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                                    <div><span class="block text-xs uppercase text-emerald-700">Login URL</span><span class="font-mono break-all">https://{{ $credentials['domain'] }}/login</span></div>
+                                    <div><span class="block text-xs uppercase text-emerald-700">Email</span><span class="font-mono break-all">{{ $credentials['email'] }}</span></div>
+                                    <div><span class="block text-xs uppercase text-emerald-700">Temporary password</span><span class="font-mono break-all">{{ $credentials['password'] }}</span></div>
+                                </div>
+                                <p class="mt-3 text-xs text-emerald-800">This password is shown only in this response. Reset owner access again if it is lost.</p>
+                            </div>
+                        @endif
+                    </section>
+                @endif
+
                 <section class="rounded-2xl border border-slate-200 bg-white p-6">
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>
