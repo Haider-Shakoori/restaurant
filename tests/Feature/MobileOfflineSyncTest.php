@@ -13,6 +13,7 @@ use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\Order;
 use App\Models\Plan;
+use App\Models\RestaurantBranch;
 use App\Models\SyncMutation;
 use App\Models\Tenant;
 use App\Models\TenantUser;
@@ -370,7 +371,7 @@ class MobileOfflineSyncTest extends TestCase
             'role' => 'waiter',
         ]);
 
-        $branch = \App\Models\RestaurantBranch::query()->create([
+        $branch = RestaurantBranch::query()->create([
             'code' => 'MAIN',
             'name' => 'Main Branch',
             'is_active' => true,
