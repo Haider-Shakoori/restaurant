@@ -1,32 +1,44 @@
+import '../../data/local/local_database.dart';
 import '../api/mobile_api_client.dart';
+import '../connection/connection_mode.dart';
+import '../connection/connection_resolver.dart';
 import '../security/offline_lease_verifier.dart';
 import '../security/secure_credential_store.dart';
-import '../../data/local/local_database.dart';
 
 class SessionService {
   SessionService({
     required MobileApiClient api,
+    required ConnectionResolver connectionResolver,
     required CredentialStore credentials,
     required OfflineLeaseVerifier leaseVerifier,
     required LocalDatabase database,
   }) : _api = api,
+       _connectionResolver = connectionResolver,
        _credentials = credentials,
        _leaseVerifier = leaseVerifier,
        _database = database;
 
   final MobileApiClient _api;
+  final ConnectionResolver _connectionResolver;
   final CredentialStore _credentials;
   final OfflineLeaseVerifier _leaseVerifier;
   final LocalDatabase _database;
 
-  Future<void> activateAndLogin({
-    required String tenantUrl,
+  Future<ConnectionTarget> activateAndLogin({
+    required ConnectionMode connectionMode,
+    String? localUrl,
+    String? cloudUrl,
     required String licenseKey,
     required String email,
     required String password,
     String deviceName = 'BusinessOS Waiter',
   }) async {
-    final baseUrl = _normalizeBaseUrl(tenantUrl);
+    final target = await _connectionResolver.resolve(
+      mode: connectionMode,
+      localUrl: localUrl,
+      cloudUrl: cloudUrl,
+    );
+    final baseUrl = target.baseUrl;
     final deviceUid = await _credentials.deviceUid();
     final keyResponse = await _api.publicKey(baseUrl);
     final publicKey = keyResponse['public_key']!.toString();
@@ -51,12 +63,14 @@ class SessionService {
       signedLease: lease,
       publicKey: publicKey,
       expectedDeviceId: deviceId,
+      expectedTenantId: target.tenantId,
     );
 
     if (!verified.valid) {
       throw ApiException(
         code: 'invalid_offline_lease',
-        message: 'The activation lease could not be verified: ' + verified.reason,
+        message:
+            'The activation lease could not be verified: ' + verified.reason,
       );
     }
 
@@ -67,6 +81,11 @@ class SessionService {
       deviceUid: deviceUid,
       publicKey: publicKey,
       lease: lease,
+      connectionMode: target.mode,
+      activeChannel: target.channel,
+      localBaseUrl: target.localBaseUrl,
+      cloudBaseUrl: target.cloudBaseUrl,
+      tenantId: target.tenantId,
     );
 
     final login = await _api.login(
@@ -88,32 +107,11 @@ class SessionService {
 
     final bootstrap = await _api.syncBootstrap(session);
     await _database.applyBootstrap(bootstrap);
+
+    return target;
   }
 
   Future<void> logoutLocal() async {
     await _credentials.clearSession();
-  }
-
-  String _normalizeBaseUrl(String input) {
-    var value = input.trim();
-
-    if (!value.contains('://')) {
-      value = 'https://' + value;
-    }
-
-    final uri = Uri.parse(value);
-    final localDev = uri.host == 'localhost' ||
-        uri.host == '127.0.0.1' ||
-        uri.host == '10.0.2.2' ||
-        uri.host.endsWith('.test');
-
-    if (uri.scheme != 'https' && !localDev) {
-      throw const ApiException(
-        code: 'https_required',
-        message: 'Restaurant server URL must use HTTPS.',
-      );
-    }
-
-    return value.replaceFirst(RegExp(r'/+$'), '');
   }
 }

@@ -19,10 +19,50 @@ class AppStrings {
     ps: 'د ګارسون وسیله ونښلوئ',
   );
 
-  String get restaurantUrl => _value(
-    en: 'Restaurant server',
-    fa: 'سرور رستورانت',
-    ps: 'د رستورانت سرور',
+  String get connectionMode => _value(
+    en: 'Connection mode',
+    fa: 'حالت اتصال',
+    ps: 'د نښلونې حالت',
+  );
+
+  String get local => _value(en: 'Local', fa: 'محلی', ps: 'محلي');
+
+  String get cloud => _value(en: 'Cloud', fa: 'ابری', ps: 'کلاوډ');
+
+  String get automatic => _value(
+    en: 'Automatic',
+    fa: 'خودکار',
+    ps: 'اتومات',
+  );
+
+  String get localServer => _value(
+    en: 'Local server IP / hostname',
+    fa: 'آی‌پی / نام سرور محلی',
+    ps: 'محلي سرور IP / نوم',
+  );
+
+  String get cloudServer => _value(
+    en: 'Cloud restaurant server',
+    fa: 'سرور ابری رستورانت',
+    ps: 'د رستورانت کلاوډ سرور',
+  );
+
+  String get automaticHint => _value(
+    en: 'Automatic tries the local restaurant server first, then cloud.',
+    fa: 'حالت خودکار ابتدا سرور محلی و سپس سرور ابری را امتحان می‌کند.',
+    ps: 'اتومات لومړی محلي سرور او بیا کلاوډ ازمويي.',
+  );
+
+  String get connectedLocal => _value(
+    en: 'Local network',
+    fa: 'شبکه محلی',
+    ps: 'محلي شبکه',
+  );
+
+  String get connectedCloud => _value(
+    en: 'Cloud',
+    fa: 'ابر',
+    ps: 'کلاوډ',
   );
 
   String get licenseKey => _value(

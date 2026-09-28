@@ -1,4 +1,5 @@
 import '../core/api/mobile_api_client.dart';
+import '../core/connection/connection_resolver.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
 import '../core/session/session_service.dart';
@@ -12,6 +13,7 @@ class AppDependencies {
     required this.database,
     required this.credentials,
     required this.api,
+    required this.connectionResolver,
     required this.leaseVerifier,
     required this.session,
     required this.syncEngine,
@@ -22,6 +24,7 @@ class AppDependencies {
   final LocalDatabase database;
   final CredentialStore credentials;
   final MobileApiClient api;
+  final ConnectionResolver connectionResolver;
   final OfflineLeaseVerifier leaseVerifier;
   final SessionService session;
   final SyncEngine syncEngine;
@@ -32,9 +35,11 @@ class AppDependencies {
     final database = await LocalDatabase.open();
     final credentials = SecureCredentialStore();
     final api = MobileApiClient();
+    final connectionResolver = ConnectionResolver(probe: api);
     final leaseVerifier = OfflineLeaseVerifier();
     final session = SessionService(
       api: api,
+      connectionResolver: connectionResolver,
       credentials: credentials,
       leaseVerifier: leaseVerifier,
       database: database,
@@ -56,6 +61,7 @@ class AppDependencies {
       database: database,
       credentials: credentials,
       api: api,
+      connectionResolver: connectionResolver,
       leaseVerifier: leaseVerifier,
       session: session,
       syncEngine: syncEngine,

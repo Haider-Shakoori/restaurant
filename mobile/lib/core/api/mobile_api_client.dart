@@ -4,24 +4,11 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../connection/connection_resolver.dart';
+import 'api_exception.dart';
 import '../models/session_credentials.dart';
 
-class ApiException implements Exception {
-  const ApiException({
-    required this.code,
-    required this.message,
-    this.statusCode,
-    this.payload,
-  });
-
-  final String code;
-  final String message;
-  final int? statusCode;
-  final Object? payload;
-
-  @override
-  String toString() => 'ApiException($code, $message)';
-}
+export 'api_exception.dart';
 
 abstract interface class SyncApi {
   Future<Map<String, Object?>> refreshLease(SessionCredentials credentials);
@@ -40,7 +27,7 @@ abstract interface class SyncApi {
   });
 }
 
-class MobileApiClient implements SyncApi {
+class MobileApiClient implements SyncApi, ServerProbe {
   MobileApiClient({
     http.Client? client,
     this.timeout = const Duration(seconds: 15),
@@ -48,6 +35,21 @@ class MobileApiClient implements SyncApi {
 
   final http.Client _client;
   final Duration timeout;
+
+  @override
+  Future<ServerHealth> probe(String baseUrl) async {
+    final response = await _request(
+      'GET',
+      _uri(baseUrl, '/api/v1/health'),
+      timeoutOverride: const Duration(seconds: 3),
+    );
+
+    return ServerHealth(
+      baseUrl: baseUrl,
+      tenantId: response['tenant_id']?.toString() ?? '',
+      service: response['service']?.toString() ?? '',
+    );
+  }
 
   Future<Map<String, Object?>> publicKey(String baseUrl) {
     return _request(
@@ -172,6 +174,7 @@ class MobileApiClient implements SyncApi {
     Uri uri, {
     Map<String, String> headers = const <String, String>{},
     Map<String, Object?>? body,
+    Duration? timeoutOverride,
   }) async {
     try {
       final request = http.Request(method, uri)
@@ -185,7 +188,9 @@ class MobileApiClient implements SyncApi {
         request.body = jsonEncode(body);
       }
 
-      final streamed = await _client.send(request).timeout(timeout);
+      final streamed = await _client
+          .send(request)
+          .timeout(timeoutOverride ?? timeout);
       final response = await http.Response.fromStream(streamed);
       final decoded = response.body.isEmpty
           ? <String, Object?>{}

@@ -69,3 +69,14 @@ When the server returns a subscription lock, the local store records the lock an
 Batch 11 keeps Flutter business logic in source control and generates the standard Android platform scaffold in CI with Flutter's own project generator. CI then runs formatting, analysis, tests and an Android debug APK build.
 
 Batch 12 owns the production Android packaging/signing and deployment artifacts.
+
+
+## Three connection modes
+
+The waiter setup screen supports Local, Cloud and Automatic connection modes.
+
+Local connects directly to an Apache/Laravel restaurant server on the same LAN. Cloud connects to the restaurant HTTPS tenant endpoint. Automatic probes Local first and uses Cloud only when Local is unavailable during connection establishment.
+
+Private/local HTTP is allowed only for LAN/local hosts. Public HTTP is rejected and cloud requires HTTPS.
+
+The active route is stored with the device session and shown on the table dashboard. Automatic does not silently switch a live authenticated session between independent databases; if the selected server later disappears, SQLite/outbox operation continues offline until that same authority returns. True runtime local-to-cloud failover requires replicated tenant state and credentials to avoid split-brain orders.

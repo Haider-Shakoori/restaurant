@@ -31,6 +31,8 @@ Batch 10 added source-document double-entry accounting, perpetual inventory valu
 
 Batch 11 adds the Flutter waiter client plus device-bound durable offline synchronization, local SQLite/outbox operation, deterministic conflicts, resumable incremental pull and signed offline-lease enforcement.
 
+Batch 12 adds three waiter connection modes: Local LAN, Cloud and Automatic local-first selection. Single-restaurant local installations can expose the same tenant API through a configured Apache/LAN IP without changing the operational API contract.
+
 See docs/batch-10-accounting-reporting.md and docs/batch-11-flutter-offline-sync.md.
 
 ## Current development status
@@ -47,4 +49,4 @@ See docs/batch-10-accounting-reporting.md and docs/batch-11-flutter-offline-sync
 - Batch 10 — accounting and reporting: merged.
 - Batch 11 — Flutter offline sync hardening: merged.
 
-Next: **Batch 12 — production deployment and full regression**.
+Batch 12 — production deployment, three connection modes and full regression: in development.

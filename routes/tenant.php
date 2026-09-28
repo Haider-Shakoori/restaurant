@@ -37,13 +37,11 @@ use App\Http\Controllers\Tenant\SyncBootstrapController;
 use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
+use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Support\Facades\Route;
-use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
-use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 
 $tenantMiddleware = [
-    InitializeTenancyByDomain::class,
-    PreventAccessFromCentralDomains::class,
+    InitializeRestaurantTenancy::class,
 ];
 
 Route::middleware(['web', ...$tenantMiddleware])->group(function (): void {
