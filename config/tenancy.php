@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 use App\Models\Tenant;
 use App\Tenancy\Bootstrappers\CacheTenancyBootstrapper as RestaurantCacheTenancyBootstrapper;
+use App\Tenancy\CpanelMySQLDatabaseManager;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
 use Stancl\Tenancy\Database\Models\Domain;
-use Stancl\Tenancy\TenantDatabaseManagers\MySQLDatabaseManager;
 use Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLDatabaseManager;
 use Stancl\Tenancy\TenantDatabaseManagers\SQLiteDatabaseManager;
 use Stancl\Tenancy\UUIDGenerator;
@@ -67,8 +67,8 @@ return [
          */
         'managers' => [
             'sqlite' => SQLiteDatabaseManager::class,
-            'mysql' => MySQLDatabaseManager::class,
-            'mariadb' => MySQLDatabaseManager::class,
+            'mysql' => CpanelMySQLDatabaseManager::class,
+            'mariadb' => CpanelMySQLDatabaseManager::class,
             'pgsql' => PostgreSQLDatabaseManager::class,
 
         /**
