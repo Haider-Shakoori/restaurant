@@ -16,7 +16,19 @@ class InitializeRestaurantTenancy
         }
 
         $host = strtolower($request->getHost());
+        $tenant = $this->resolveTenant($host);
 
+        tenancy()->initialize($tenant);
+
+        try {
+            return $next($request);
+        } finally {
+            tenancy()->end();
+        }
+    }
+
+    private function resolveTenant(string $host): Tenant
+    {
         if ($this->isConfiguredLocalHost($host)) {
             $tenantId = trim((string) config('restaurant.local_server.tenant_id'));
 
@@ -26,9 +38,7 @@ class InitializeRestaurantTenancy
 
             abort_unless($tenant, 503, 'Configured local restaurant tenant was not found.');
 
-            tenancy()->initialize($tenant);
-
-            return $next($request);
+            return $tenant;
         }
 
         $centralDomains = array_map(
@@ -44,9 +54,7 @@ class InitializeRestaurantTenancy
 
         abort_unless($tenant, 404);
 
-        tenancy()->initialize($tenant);
-
-        return $next($request);
+        return $tenant;
     }
 
     private function isConfiguredLocalHost(string $host): bool
