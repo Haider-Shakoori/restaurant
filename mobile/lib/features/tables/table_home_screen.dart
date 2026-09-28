@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
+import '../../core/connection/connection_mode.dart';
+import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/order_screen.dart';
 
@@ -27,6 +29,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   int _pending = 0;
   int _conflicts = 0;
   String? _syncError;
+  SessionCredentials? _session;
   bool _syncing = false;
 
   @override
@@ -43,6 +46,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       db.pendingCount(),
       db.conflictCount(),
       db.systemState('last_sync_error'),
+      widget.dependencies.credentials.readSession(),
     ]);
 
     if (!mounted) {
@@ -59,6 +63,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       _pending = values[2]! as int;
       _conflicts = values[3]! as int;
       _syncError = values[4] as String?;
+      _session = values[5] as SessionCredentials?;
     });
   }
 
@@ -138,6 +143,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.strings;
+    final session = _session;
 
     return Scaffold(
       appBar: AppBar(
@@ -177,6 +183,23 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (session != null)
+                  Chip(
+                    avatar: Icon(
+                      session.activeChannel == ConnectionChannel.local
+                          ? Icons.lan_outlined
+                          : Icons.cloud_outlined,
+                      size: 18,
+                    ),
+                    label: Text(
+                      (session.connectionMode == ConnectionMode.automatic
+                              ? s.automatic + ' · '
+                              : '') +
+                          (session.activeChannel == ConnectionChannel.local
+                              ? s.connectedLocal
+                              : s.connectedCloud),
+                    ),
+                  ),
                 Chip(
                   avatar: const Icon(Icons.cloud_upload_outlined, size: 18),
                   label: Text(s.offlineQueued + ': $_pending'),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
 import '../../core/api/mobile_api_client.dart';
+import '../../core/connection/connection_mode.dart';
 
 class SetupScreen extends StatefulWidget {
   const SetupScreen({
@@ -21,17 +22,20 @@ class SetupScreen extends StatefulWidget {
 }
 
 class _SetupScreenState extends State<SetupScreen> {
-  final _server = TextEditingController();
+  final _localServer = TextEditingController();
+  final _cloudServer = TextEditingController();
   final _license = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
 
+  ConnectionMode _mode = ConnectionMode.automatic;
   bool _working = false;
   String? _error;
 
   @override
   void dispose() {
-    _server.dispose();
+    _localServer.dispose();
+    _cloudServer.dispose();
     _license.dispose();
     _email.dispose();
     _password.dispose();
@@ -50,7 +54,9 @@ class _SetupScreenState extends State<SetupScreen> {
 
     try {
       await widget.dependencies.session.activateAndLogin(
-        tenantUrl: _server.text,
+        connectionMode: _mode,
+        localUrl: _localServer.text,
+        cloudUrl: _cloudServer.text,
         licenseKey: _license.text,
         email: _email.text,
         password: _password.text,
@@ -58,18 +64,16 @@ class _SetupScreenState extends State<SetupScreen> {
       widget.dependencies.syncCoordinator.start();
       widget.onConnected();
     } on ApiException catch (error) {
-      setState(() {
-        _error = error.message;
-      });
+      if (mounted) {
+        setState(() => _error = error.message);
+      }
     } on Object catch (error) {
-      setState(() {
-        _error = error.toString();
-      });
+      if (mounted) {
+        setState(() => _error = error.toString());
+      }
     } finally {
       if (mounted) {
-        setState(() {
-          _working = false;
-        });
+        setState(() => _working = false);
       }
     }
   }
@@ -77,6 +81,8 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   Widget build(BuildContext context) {
     final s = widget.strings;
+    final showLocal = _mode != ConnectionMode.cloud;
+    final showCloud = _mode != ConnectionMode.local;
 
     return Scaffold(
       body: SafeArea(
@@ -84,7 +90,7 @@ class _SetupScreenState extends State<SetupScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
+              constraints: const BoxConstraints(maxWidth: 520),
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -99,17 +105,75 @@ class _SetupScreenState extends State<SetupScreen> {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                       const SizedBox(height: 24),
-                      TextField(
-                        controller: _server,
-                        keyboardType: TextInputType.url,
-                        autocorrect: false,
-                        decoration: InputDecoration(
-                          labelText: s.restaurantUrl,
-                          hintText: 'restaurant.businessos.af',
-                          border: const OutlineInputBorder(),
-                        ),
+                      Text(
+                        s.connectionMode,
+                        style: Theme.of(context).textTheme.titleSmall,
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 8),
+                      SegmentedButton<ConnectionMode>(
+                        segments: [
+                          ButtonSegment(
+                            value: ConnectionMode.local,
+                            icon: const Icon(Icons.lan_outlined),
+                            label: Text(s.local),
+                          ),
+                          ButtonSegment(
+                            value: ConnectionMode.cloud,
+                            icon: const Icon(Icons.cloud_outlined),
+                            label: Text(s.cloud),
+                          ),
+                          ButtonSegment(
+                            value: ConnectionMode.automatic,
+                            icon: const Icon(Icons.alt_route),
+                            label: Text(s.automatic),
+                          ),
+                        ],
+                        selected: <ConnectionMode>{_mode},
+                        onSelectionChanged: _working
+                            ? null
+                            : (selection) {
+                                setState(() {
+                                  _mode = selection.first;
+                                  _error = null;
+                                });
+                              },
+                      ),
+                      if (_mode == ConnectionMode.automatic) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          s.automaticHint,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                      if (showLocal) ...[
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: _localServer,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: s.localServer,
+                            hintText: '192.168.1.10',
+                            prefixIcon: const Icon(Icons.lan_outlined),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
+                      if (showCloud) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _cloudServer,
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: s.cloudServer,
+                            hintText: 'restaurant.businessos.af',
+                            prefixIcon: const Icon(Icons.cloud_outlined),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
                       TextField(
                         controller: _license,
                         autocorrect: false,
