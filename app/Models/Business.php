@@ -25,10 +25,6 @@ use Stancl\Tenancy\Database\Concerns\CentralConnection;
     'status',
     'provisioning_state',
     'provisioning_error',
-    'trial_starts_at',
-    'trial_ends_at',
-    'subscription_ends_at',
-    'first_activated_at',
     'last_health_at',
 ])]
 class Business extends Model
@@ -40,10 +36,6 @@ class Business extends Model
         return [
             'status' => BusinessStatus::class,
             'provisioning_state' => ProvisioningState::class,
-            'trial_starts_at' => 'datetime',
-            'trial_ends_at' => 'datetime',
-            'subscription_ends_at' => 'datetime',
-            'first_activated_at' => 'datetime',
             'last_health_at' => 'datetime',
         ];
     }
