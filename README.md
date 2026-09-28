@@ -42,6 +42,6 @@ See docs/batch-10-accounting-reporting.md for the accounting contract.
 - Batch 7 — KOT/KDS and kitchen execution: merged.
 - Batch 8 — cashier/POS, payments and daily closing: merged.
 - Batch 9 — inventory, purchasing and recipes: merged.
-- Batch 10 — accounting and reporting: in development on batch/10-accounting-reporting.
+- Batch 10 — accounting and reporting: merged.
 
-Next after Batch 10: **Batch 11 — Flutter/offline sync hardening**.
+Next: **Batch 11 — Flutter/offline sync hardening**.
