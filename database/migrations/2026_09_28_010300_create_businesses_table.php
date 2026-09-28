@@ -25,11 +25,7 @@ return new class extends Migration
             $table->string('status')->default(BusinessStatus::Provisioning->value)->index();
             $table->string('provisioning_state')->default(ProvisioningState::Pending->value)->index();
             $table->text('provisioning_error')->nullable();
-            $table->timestamp('trial_starts_at')->nullable();
-            $table->timestamp('trial_ends_at')->nullable()->index();
-            $table->timestamp('subscription_ends_at')->nullable()->index();
-            $table->timestamp('first_activated_at')->nullable();
-            $table->timestamp('last_health_at')->nullable();
+            $table->timestamp('last_health_at')->nullable()->index();
             $table->timestamps();
 
             $table->foreign('tenant_id')->references('id')->on('tenants')->nullOnDelete();
