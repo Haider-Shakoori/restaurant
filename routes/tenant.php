@@ -2,7 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Tenant\ApplyBillDiscountController;
+use App\Http\Controllers\Tenant\BillController;
+use App\Http\Controllers\Tenant\BillPaymentController;
 use App\Http\Controllers\Tenant\BootstrapController;
+use App\Http\Controllers\Tenant\CashierSessionController;
+use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DiningTableController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
 use App\Http\Controllers\Tenant\KitchenStationController;
@@ -86,6 +91,9 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/menu/items/{menuItem}/kitchen-route', [KitchenRouteController::class, 'store'])
                     ->name('tenant.api.kitchen.routes.store');
+
+                Route::post('/daily-closings/{dailyClosing}/reopen', [DailyClosingController::class, 'reopen'])
+                    ->name('tenant.api.daily-closings.reopen');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
@@ -120,6 +128,41 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/orders/{order}/serve', ServeOrderController::class)
                     ->name('tenant.api.orders.serve');
+            });
+
+            Route::middleware('tenant.role:owner,admin,manager,cashier')->group(function (): void {
+                Route::get('/cashier/sessions', [CashierSessionController::class, 'index'])
+                    ->name('tenant.api.cashier.sessions.index');
+
+                Route::post('/cashier/sessions', [CashierSessionController::class, 'store'])
+                    ->name('tenant.api.cashier.sessions.store');
+
+                Route::post('/cashier/sessions/{cashierSession}/close', [CashierSessionController::class, 'close'])
+                    ->name('tenant.api.cashier.sessions.close');
+
+                Route::get('/pos/bills', [BillController::class, 'index'])
+                    ->name('tenant.api.bills.index');
+
+                Route::post('/orders/{order}/bill', [BillController::class, 'store'])
+                    ->name('tenant.api.bills.store');
+
+                Route::get('/pos/bills/{bill}', [BillController::class, 'show'])
+                    ->name('tenant.api.bills.show');
+
+                Route::post('/pos/bills/{bill}/discount', ApplyBillDiscountController::class)
+                    ->name('tenant.api.bills.discount');
+
+                Route::post('/pos/bills/{bill}/payments', [BillPaymentController::class, 'store'])
+                    ->name('tenant.api.bills.payments.store');
+
+                Route::get('/daily-closings', [DailyClosingController::class, 'index'])
+                    ->name('tenant.api.daily-closings.index');
+
+                Route::get('/daily-closings/{dailyClosing}', [DailyClosingController::class, 'show'])
+                    ->name('tenant.api.daily-closings.show');
+
+                Route::post('/daily-closings/finalize', [DailyClosingController::class, 'finalize'])
+                    ->name('tenant.api.daily-closings.finalize');
             });
         });
     });
