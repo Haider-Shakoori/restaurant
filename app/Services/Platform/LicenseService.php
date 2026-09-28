@@ -212,6 +212,44 @@ class LicenseService
         );
     }
 
+    public function authenticateDevice(
+        Business $business,
+        string $deviceId,
+        string $deviceSecret,
+        ?string $appVersion = null,
+    ): DeviceActivation {
+        $device = DeviceActivation::query()
+            ->with(['licenseKey', 'business'])
+            ->where('business_id', $business->id)
+            ->whereKey($deviceId)
+            ->where('status', DeviceStatus::Active)
+            ->first();
+
+        if (! $device || ! hash_equals($device->credential_hash, $this->hashDeviceSecret($deviceSecret))) {
+            throw ValidationException::withMessages([
+                'device_secret' => 'The device credential is invalid or revoked.',
+            ]);
+        }
+
+        if ($device->licenseKey->status !== LicenseStatus::Active) {
+            throw ValidationException::withMessages([
+                'device_secret' => 'The license used by this device has been revoked.',
+            ]);
+        }
+
+        $device->update([
+            'app_version' => $appVersion ?: $device->app_version,
+            'last_seen_at' => now(),
+            'last_verified_at' => now(),
+        ]);
+
+        $device->licenseKey->update([
+            'last_used_at' => now(),
+        ]);
+
+        return $device->fresh(['licenseKey', 'business']);
+    }
+
     /**
      * @return array<string, mixed>
      */

@@ -33,6 +33,9 @@ use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
 use App\Http\Controllers\Tenant\SupplierController;
 use App\Http\Controllers\Tenant\SupplierPaymentController;
+use App\Http\Controllers\Tenant\SyncBootstrapController;
+use App\Http\Controllers\Tenant\SyncPullController;
+use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
@@ -85,6 +88,17 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            Route::middleware('tenant.role:owner,admin,manager,waiter')->group(function (): void {
+                Route::get('/sync/bootstrap', SyncBootstrapController::class)
+                    ->name('tenant.api.sync.bootstrap');
+
+                Route::post('/sync/push', SyncPushController::class)
+                    ->name('tenant.api.sync.push');
+
+                Route::get('/sync/pull', SyncPullController::class)
+                    ->name('tenant.api.sync.pull');
+            });
 
             Route::get('/menu', [MenuController::class, 'index'])
                 ->name('tenant.api.menu');

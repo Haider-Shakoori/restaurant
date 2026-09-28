@@ -1,0 +1,607 @@
+<?php
+
+namespace App\Services\Tenant;
+
+use App\Models\DeviceActivation;
+use App\Models\DiningArea;
+use App\Models\DiningTable;
+use App\Models\MenuCategory;
+use App\Models\MenuItem;
+use App\Models\Order;
+use App\Models\SyncChange;
+use App\Models\SyncMutation;
+use App\Models\TenantUser;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+
+class MobileSyncService
+{
+    public const OP_ORDER_OPEN = 'order.open';
+
+    public const OP_ORDER_ITEM_ADD = 'order.item.add';
+
+    public const OP_ORDER_SUBMIT = 'order.submit';
+
+    public function __construct(
+        private readonly OrderService $orders,
+        private readonly SyncDeviceService $devices,
+    ) {}
+
+    public function bootstrap(TenantUser $user, DeviceActivation $device): array
+    {
+        $state = $this->devices->state($device, $user);
+        $cursor = (int) (SyncChange::query()->max('sequence') ?? 0);
+
+        $state->update([
+            'last_pull_cursor' => $cursor,
+            'last_pull_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+
+        return [
+            'schema_version' => 1,
+            'server_time' => now()->utc()->toIso8601String(),
+            'cursor' => $cursor,
+            'sync_batch_size' => max(1, (int) config('restaurant.performance.sync_batch_size', 100)),
+            'tenant_id' => tenant('id'),
+            'device_id' => $device->id,
+            'user' => $this->userSnapshot($user),
+            'menu' => $this->menuSnapshot(),
+            'tables' => $this->tableSnapshot(),
+            'orders' => $this->activeOrderSnapshot($user),
+        ];
+    }
+
+    public function push(
+        TenantUser $user,
+        DeviceActivation $device,
+        array $mutations,
+    ): array {
+        $results = [];
+
+        foreach ($mutations as $mutation) {
+            $results[] = $this->processMutation($user, $device, $mutation);
+        }
+
+        $state = $this->devices->state($device, $user);
+        $state->update([
+            'last_push_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+
+        return [
+            'server_time' => now()->utc()->toIso8601String(),
+            'results' => $results,
+            'pull_cursor' => (int) (SyncChange::query()->max('sequence') ?? 0),
+        ];
+    }
+
+    public function pull(
+        TenantUser $user,
+        DeviceActivation $device,
+        int $cursor,
+        int $limit,
+    ): array {
+        $limit = max(1, min(
+            $limit,
+            max(1, (int) config('restaurant.performance.sync_batch_size', 100)),
+        ));
+
+        $changes = SyncChange::query()
+            ->where('sequence', '>', $cursor)
+            ->orderBy('sequence')
+            ->limit($limit)
+            ->get();
+
+        $lastScanned = $changes->isEmpty()
+            ? $cursor
+            : (int) $changes->last()->sequence;
+
+        $visible = [];
+
+        foreach ($changes as $change) {
+            $snapshot = $this->visibleChange($user, $change);
+
+            if ($snapshot !== null) {
+                $visible[] = $snapshot;
+            }
+        }
+
+        $hasMore = SyncChange::query()
+            ->where('sequence', '>', $lastScanned)
+            ->exists();
+
+        $state = $this->devices->state($device, $user);
+        $state->update([
+            'last_pull_cursor' => $lastScanned,
+            'last_pull_at' => now(),
+            'last_seen_at' => now(),
+        ]);
+
+        return [
+            'server_time' => now()->utc()->toIso8601String(),
+            'cursor' => $lastScanned,
+            'has_more' => $hasMore,
+            'changes' => $visible,
+        ];
+    }
+
+    private function processMutation(
+        TenantUser $user,
+        DeviceActivation $device,
+        array $mutation,
+    ): array {
+        $mutationId = (string) $mutation['mutation_id'];
+        $operation = (string) $mutation['operation'];
+        $payload = (array) $mutation['payload'];
+        $requestHash = $this->mutationHash($operation, $payload);
+
+        $existing = SyncMutation::query()
+            ->where('central_device_id', $device->id)
+            ->where('mutation_id', $mutationId)
+            ->first();
+
+        if ($existing) {
+            if (! hash_equals($existing->request_hash, $requestHash)) {
+                return [
+                    'mutation_id' => $mutationId,
+                    'status' => SyncMutation::STATUS_REJECTED,
+                    'code' => 'mutation_id_reused',
+                    'message' => 'This mutation ID was already used with different content.',
+                ];
+            }
+
+            return $existing->response ?? [
+                'mutation_id' => $mutationId,
+                'status' => $existing->status,
+                'code' => $existing->error_code,
+                'message' => $existing->error_message,
+            ];
+        }
+
+        try {
+            $result = DB::connection('tenant')->transaction(function () use (
+                $user,
+                $device,
+                $mutation,
+                $mutationId,
+                $operation,
+                $payload,
+                $requestHash,
+            ): array {
+                $accepted = $this->dispatchMutation($user, $operation, $payload);
+
+                $response = [
+                    'mutation_id' => $mutationId,
+                    'status' => SyncMutation::STATUS_ACCEPTED,
+                    'operation' => $operation,
+                    ...$accepted,
+                ];
+
+                SyncMutation::query()->create([
+                    'central_device_id' => $device->id,
+                    'tenant_user_id' => $user->getKey(),
+                    'mutation_id' => $mutationId,
+                    'operation' => $operation,
+                    'entity_type' => $accepted['entity_type'] ?? null,
+                    'entity_id' => $accepted['entity_id'] ?? null,
+                    'status' => SyncMutation::STATUS_ACCEPTED,
+                    'request_hash' => $requestHash,
+                    'response' => $response,
+                    'client_occurred_at' => $mutation['occurred_at'] ?? null,
+                    'processed_at' => now(),
+                ]);
+
+                return $response;
+            });
+
+            return $result;
+        } catch (ValidationException $exception) {
+            return $this->recordFailure(
+                $user,
+                $device,
+                $mutation,
+                $requestHash,
+                SyncMutation::STATUS_CONFLICT,
+                $this->conflictCode($exception),
+                collect($exception->errors())->flatten()->first() ?: 'Synchronization conflict.',
+            );
+        } catch (ModelNotFoundException) {
+            return $this->recordFailure(
+                $user,
+                $device,
+                $mutation,
+                $requestHash,
+                SyncMutation::STATUS_CONFLICT,
+                'dependency_missing',
+                'A referenced server record does not exist yet.',
+            );
+        }
+    }
+
+    private function dispatchMutation(TenantUser $user, string $operation, array $payload): array
+    {
+        return match ($operation) {
+            self::OP_ORDER_OPEN => $this->openOrder($user, $payload),
+            self::OP_ORDER_ITEM_ADD => $this->addOrderItem($user, $payload),
+            self::OP_ORDER_SUBMIT => $this->submitOrder($user, $payload),
+            default => throw ValidationException::withMessages([
+                'operation' => 'Unsupported offline operation.',
+            ]),
+        };
+    }
+
+    private function openOrder(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'client_order_id' => ['required', 'string', 'max:40'],
+            'dining_table_id' => ['required', 'string', 'max:40'],
+            'guest_count' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ])->validate();
+
+        $order = $this->orders->open($user, $data);
+        $this->authorizeOrder($user, $order);
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $order->id,
+            'client_entity_id' => $order->client_order_id,
+            'data' => $this->orderSnapshot($order->fresh()),
+        ];
+    }
+
+    private function addOrderItem(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'client_order_id' => ['required', 'string', 'max:40'],
+            'client_line_id' => ['required', 'string', 'max:40'],
+            'menu_item_id' => ['required', 'string', 'max:40'],
+            'quantity' => ['required', 'integer', 'min:1', 'max:999'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ])->validate();
+
+        $order = Order::query()
+            ->where('client_order_id', $data['client_order_id'])
+            ->firstOrFail();
+
+        $this->authorizeOrder($user, $order);
+
+        $line = $this->orders->addItem($order, $user, $data);
+
+        return [
+            'entity_type' => 'order_item',
+            'entity_id' => $line->id,
+            'client_entity_id' => $line->client_line_id,
+            'data' => [
+                'line' => $line->toArray(),
+                'order' => $this->orderSnapshot($order->fresh()),
+            ],
+        ];
+    }
+
+    private function submitOrder(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'client_order_id' => ['required', 'string', 'max:40'],
+        ])->validate();
+
+        $order = Order::query()
+            ->where('client_order_id', $data['client_order_id'])
+            ->firstOrFail();
+
+        $this->authorizeOrder($user, $order);
+
+        $order = $this->orders->submit($order, $user);
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $order->id,
+            'client_entity_id' => $order->client_order_id,
+            'data' => $this->orderSnapshot($order),
+        ];
+    }
+
+    private function recordFailure(
+        TenantUser $user,
+        DeviceActivation $device,
+        array $mutation,
+        string $requestHash,
+        string $status,
+        string $code,
+        string $message,
+    ): array {
+        $response = [
+            'mutation_id' => (string) $mutation['mutation_id'],
+            'status' => $status,
+            'operation' => (string) $mutation['operation'],
+            'code' => $code,
+            'message' => $message,
+        ];
+
+        SyncMutation::query()->create([
+            'central_device_id' => $device->id,
+            'tenant_user_id' => $user->getKey(),
+            'mutation_id' => (string) $mutation['mutation_id'],
+            'operation' => (string) $mutation['operation'],
+            'status' => $status,
+            'request_hash' => $requestHash,
+            'response' => $response,
+            'error_code' => $code,
+            'error_message' => $message,
+            'client_occurred_at' => $mutation['occurred_at'] ?? null,
+            'processed_at' => now(),
+        ]);
+
+        return $response;
+    }
+
+    private function conflictCode(ValidationException $exception): string
+    {
+        $key = array_key_first($exception->errors());
+
+        return match ($key) {
+            'dining_table_id' => 'table_busy',
+            'order' => 'order_state_conflict',
+            'menu_item_id' => 'menu_unavailable',
+            'operation' => 'unsupported_operation',
+            default => 'invalid_payload',
+        };
+    }
+
+    private function authorizeOrder(TenantUser $user, Order $order): void
+    {
+        if ($user->role === 'waiter' && (int) $order->waiter_id !== (int) $user->id) {
+            throw ValidationException::withMessages([
+                'order' => 'This order belongs to another waiter.',
+            ]);
+        }
+    }
+
+    private function visibleChange(TenantUser $user, SyncChange $change): ?array
+    {
+        if ($change->entity_type === 'order') {
+            $order = Order::query()->find($change->entity_id);
+
+            if (! $order) {
+                return [
+                    'sequence' => $change->sequence,
+                    'entity_type' => 'order',
+                    'entity_id' => $change->entity_id,
+                    'operation' => 'delete',
+                    'data' => null,
+                ];
+            }
+
+            if ($user->role === 'waiter' && (int) $order->waiter_id !== (int) $user->id) {
+                return null;
+            }
+
+            return [
+                'sequence' => $change->sequence,
+                'entity_type' => 'order',
+                'entity_id' => $order->id,
+                'operation' => 'upsert',
+                'data' => $this->orderSnapshot($order),
+            ];
+        }
+
+        if ($change->entity_type === 'dining_table') {
+            $table = DiningTable::query()
+                ->with('diningArea.branch')
+                ->find($change->entity_id);
+
+            return [
+                'sequence' => $change->sequence,
+                'entity_type' => 'dining_table',
+                'entity_id' => $change->entity_id,
+                'operation' => $table ? 'upsert' : 'delete',
+                'data' => $table ? $this->singleTableSnapshot($table) : null,
+            ];
+        }
+
+        if ($change->entity_type === 'menu_item') {
+            $item = MenuItem::query()->find($change->entity_id);
+
+            return [
+                'sequence' => $change->sequence,
+                'entity_type' => 'menu_item',
+                'entity_id' => $change->entity_id,
+                'operation' => $item ? 'upsert' : 'delete',
+                'data' => $item?->toArray(),
+            ];
+        }
+
+        if ($change->entity_type === 'menu_category') {
+            $category = MenuCategory::query()->find($change->entity_id);
+
+            return [
+                'sequence' => $change->sequence,
+                'entity_type' => 'menu_category',
+                'entity_id' => $change->entity_id,
+                'operation' => $category ? 'upsert' : 'delete',
+                'data' => $category?->toArray(),
+            ];
+        }
+
+        if ($change->entity_type === 'dining_area') {
+            $area = DiningArea::query()->find($change->entity_id);
+
+            return [
+                'sequence' => $change->sequence,
+                'entity_type' => 'dining_area',
+                'entity_id' => $change->entity_id,
+                'operation' => $area ? 'upsert' : 'delete',
+                'data' => $area?->toArray(),
+            ];
+        }
+
+        return null;
+    }
+
+    private function activeOrderSnapshot(TenantUser $user): array
+    {
+        return Order::query()
+            ->whereIn('status', Order::ACTIVE_STATUSES)
+            ->when($user->role === 'waiter', fn ($query) => $query->where('waiter_id', $user->id))
+            ->orderBy('opened_at')
+            ->get()
+            ->map(fn (Order $order) => $this->orderSnapshot($order))
+            ->all();
+    }
+
+    private function orderSnapshot(Order $order): array
+    {
+        $order->loadMissing([
+            'table.diningArea.branch',
+            'waiter',
+            'items',
+            'kitchenTickets.station',
+        ]);
+
+        return [
+            'id' => $order->id,
+            'client_order_id' => $order->client_order_id,
+            'status' => $order->status,
+            'guest_count' => $order->guest_count,
+            'notes' => $order->notes,
+            'subtotal' => $order->subtotal,
+            'total' => $order->total,
+            'opened_at' => $order->opened_at?->toIso8601String(),
+            'submitted_at' => $order->submitted_at?->toIso8601String(),
+            'served_at' => $order->served_at?->toIso8601String(),
+            'closed_at' => $order->closed_at?->toIso8601String(),
+            'table' => $this->singleTableSnapshot($order->table),
+            'waiter' => [
+                'id' => $order->waiter->id,
+                'public_id' => $order->waiter->public_id,
+                'name' => $order->waiter->name,
+            ],
+            'items' => $order->items->map(fn ($item) => [
+                'id' => $item->id,
+                'client_line_id' => $item->client_line_id,
+                'menu_item_id' => $item->menu_item_id,
+                'item_name' => $item->item_name,
+                'unit_price' => $item->unit_price,
+                'quantity' => $item->quantity,
+                'line_total' => $item->line_total,
+                'notes' => $item->notes,
+                'status' => $item->status,
+            ])->all(),
+            'kitchen_tickets' => $order->kitchenTickets->map(fn ($ticket) => [
+                'id' => $ticket->id,
+                'ticket_number' => $ticket->ticket_number,
+                'status' => $ticket->status,
+                'station' => [
+                    'id' => $ticket->station->id,
+                    'name' => $ticket->station->name,
+                ],
+            ])->all(),
+        ];
+    }
+
+    private function menuSnapshot(): array
+    {
+        return MenuCategory::query()
+            ->where('is_active', true)
+            ->with(['items' => fn ($query) => $query
+                ->where('is_available', true)
+                ->orderBy('sort_order')
+                ->orderBy('name')])
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get()
+            ->map(fn (MenuCategory $category) => [
+                'id' => $category->id,
+                'name' => $category->name,
+                'sort_order' => $category->sort_order,
+                'items' => $category->items->map(fn (MenuItem $item) => [
+                    'id' => $item->id,
+                    'menu_category_id' => $item->menu_category_id,
+                    'sku' => $item->sku,
+                    'name' => $item->name,
+                    'description' => $item->description,
+                    'price' => $item->price,
+                    'currency' => 'AFN',
+                    'sort_order' => $item->sort_order,
+                ])->all(),
+            ])->all();
+    }
+
+    private function tableSnapshot(): array
+    {
+        return DiningTable::query()
+            ->with('diningArea.branch')
+            ->where('is_active', true)
+            ->orderBy('code')
+            ->get()
+            ->map(fn (DiningTable $table) => $this->singleTableSnapshot($table))
+            ->all();
+    }
+
+    private function singleTableSnapshot(DiningTable $table): array
+    {
+        $table->loadMissing('diningArea.branch');
+
+        return [
+            'id' => $table->id,
+            'code' => $table->code,
+            'name' => $table->name,
+            'capacity' => $table->capacity,
+            'status' => $table->status,
+            'is_active' => $table->is_active,
+            'area' => [
+                'id' => $table->diningArea->id,
+                'name' => $table->diningArea->name,
+            ],
+            'branch' => [
+                'id' => $table->diningArea->branch->id,
+                'name' => $table->diningArea->branch->name,
+            ],
+        ];
+    }
+
+    private function userSnapshot(TenantUser $user): array
+    {
+        return [
+            'id' => $user->id,
+            'public_id' => $user->public_id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role,
+        ];
+    }
+
+    private function mutationHash(string $operation, array $payload): string
+    {
+        $canonical = [
+            'operation' => $operation,
+            'payload' => $this->canonicalize($payload),
+        ];
+
+        return hash(
+            'sha256',
+            json_encode(
+                $canonical,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            ),
+        );
+    }
+
+    private function canonicalize(array $value): array
+    {
+        if (! array_is_list($value)) {
+            ksort($value);
+        }
+
+        foreach ($value as $key => $item) {
+            if (is_array($item)) {
+                $value[$key] = $this->canonicalize($item);
+            }
+        }
+
+        return $value;
+    }
+}

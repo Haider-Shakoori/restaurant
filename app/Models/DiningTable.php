@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSyncChanges;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['dining_area_id', 'code', 'name', 'capacity', 'status', 'is_active'])]
 class DiningTable extends Model
 {
-    use HasUlids;
+    use HasUlids, RecordsSyncChanges;
 
     public const STATUS_AVAILABLE = 'available';
 

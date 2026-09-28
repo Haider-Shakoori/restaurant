@@ -1,0 +1,339 @@
+import 'package:businessos_restaurant_waiter/core/api/mobile_api_client.dart';
+import 'package:businessos_restaurant_waiter/core/models/session_credentials.dart';
+import 'package:businessos_restaurant_waiter/core/security/offline_lease_verifier.dart';
+import 'package:businessos_restaurant_waiter/core/security/secure_credential_store.dart';
+import 'package:businessos_restaurant_waiter/data/local/outbox_mutation.dart';
+import 'package:businessos_restaurant_waiter/sync/sync_engine.dart';
+import 'package:businessos_restaurant_waiter/sync/sync_store.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('accepted mutations are applied and pull cursor resumes', () async {
+    final store = _MemorySyncStore(
+      pending: <OutboxMutation>[
+        OutboxMutation(
+          id: 1,
+          mutationId: 'M-1',
+          operation: 'order.open',
+          payload: const <String, Object?>{
+            'client_order_id': 'ORDER-1',
+            'dining_table_id': 'TABLE-1',
+          },
+          occurredAt: DateTime.utc(2026, 9, 28),
+          attempts: 0,
+        ),
+      ],
+    );
+    final api = _FakeApi(
+      pushResponse: const <String, Object?>{
+        'results': <Object?>[
+          <String, Object?>{
+            'mutation_id': 'M-1',
+            'status': 'accepted',
+            'entity_type': 'order',
+            'entity_id': 'SERVER-ORDER-1',
+            'data': <String, Object?>{},
+          },
+        ],
+      },
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 12,
+          'has_more': true,
+          'changes': <Object?>[],
+        },
+        const <String, Object?>{
+          'cursor': 15,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    await engine.syncNow();
+
+    expect(store.accepted, <String>['M-1']);
+    expect(store.cursor, 15);
+    expect(api.pullCursors, <int>[0, 12]);
+    expect(store.states['last_sync_error'], '');
+  });
+
+  test('conflict is persisted without retrying the mutation', () async {
+    final mutation = OutboxMutation(
+      id: 1,
+      mutationId: 'M-CONFLICT',
+      operation: 'order.open',
+      payload: const <String, Object?>{
+        'client_order_id': 'ORDER-2',
+        'dining_table_id': 'TABLE-1',
+      },
+      occurredAt: DateTime.utc(2026, 9, 28),
+      attempts: 0,
+    );
+    final store = _MemorySyncStore(pending: <OutboxMutation>[mutation]);
+    final api = _FakeApi(
+      pushResponse: const <String, Object?>{
+        'results': <Object?>[
+          <String, Object?>{
+            'mutation_id': 'M-CONFLICT',
+            'status': 'conflict',
+            'code': 'table_busy',
+            'message': 'Table is occupied.',
+          },
+        ],
+      },
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 0,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    await engine.syncNow();
+
+    expect(store.conflicts, <String>['M-CONFLICT']);
+    expect(store.retries, isEmpty);
+  });
+
+  test('network failure schedules exponential retry', () async {
+    final mutation = OutboxMutation(
+      id: 1,
+      mutationId: 'M-RETRY',
+      operation: 'order.open',
+      payload: const <String, Object?>{
+        'client_order_id': 'ORDER-3',
+        'dining_table_id': 'TABLE-2',
+      },
+      occurredAt: DateTime.utc(2026, 9, 28),
+      attempts: 2,
+    );
+    final store = _MemorySyncStore(pending: <OutboxMutation>[mutation]);
+    final api = _FakeApi(
+      pushError: const ApiException(
+        code: 'offline',
+        message: 'No connection.',
+      ),
+      pullResponses: const <Map<String, Object?>>[],
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    await expectLater(engine.syncNow(), throwsA(isA<ApiException>()));
+
+    expect(store.retries, <String>['M-RETRY']);
+    expect(store.states['last_sync_error'], 'offline');
+  });
+}
+
+SessionCredentials _session() {
+  return const SessionCredentials(
+    baseUrl: 'https://restaurant.test',
+    accessToken: 'token',
+    deviceId: 'device-1',
+    deviceSecret: 'secret',
+    deviceUid: 'uid-1',
+    publicKey: 'public-key',
+    lease: <String, Object?>{
+      'payload': <String, Object?>{},
+      'signature': 'signature',
+      'algorithm': 'Ed25519',
+    },
+  );
+}
+
+class _AlwaysValidLease implements LeaseValidator {
+  const _AlwaysValidLease();
+
+  @override
+  Future<LeaseVerificationResult> verify({
+    required Map<String, Object?> signedLease,
+    required String publicKey,
+    String? expectedDeviceId,
+    String? expectedTenantId,
+    DateTime? now,
+  }) async {
+    return LeaseVerificationResult(
+      valid: true,
+      reason: 'valid',
+      expiresAt: DateTime.now().toUtc().add(const Duration(days: 2)),
+    );
+  }
+}
+
+class _MemoryCredentials implements CredentialStore {
+  _MemoryCredentials(this.session);
+
+  SessionCredentials? session;
+
+  @override
+  Future<void> clearSession() async {
+    session = null;
+  }
+
+  @override
+  Future<String> deviceUid() async => session?.deviceUid ?? 'uid';
+
+  @override
+  Future<SessionCredentials?> readSession() async => session;
+
+  @override
+  Future<void> saveAccessToken(String token) async {
+    final current = session;
+    if (current != null) {
+      session = current.copyWith(accessToken: token);
+    }
+  }
+
+  @override
+  Future<void> saveActivation({
+    required String baseUrl,
+    required String deviceId,
+    required String deviceSecret,
+    required String deviceUid,
+    required String publicKey,
+    required Map<String, Object?> lease,
+  }) async {}
+
+  @override
+  Future<void> saveLease(Map<String, Object?> lease) async {
+    final current = session;
+    if (current != null) {
+      session = current.copyWith(lease: lease);
+    }
+  }
+}
+
+class _MemorySyncStore implements SyncStore {
+  _MemorySyncStore({
+    required List<OutboxMutation> pending,
+  }) : _pending = pending;
+
+  final List<OutboxMutation> _pending;
+  final List<String> accepted = <String>[];
+  final List<String> conflicts = <String>[];
+  final List<String> retries = <String>[];
+  final Map<String, String> states = <String, String>{};
+  int cursor = 0;
+
+  @override
+  Future<void> applyAcceptedResult(Map<String, Object?> result) async {
+    accepted.add(result['mutation_id']!.toString());
+    _pending.removeWhere(
+      (mutation) => mutation.mutationId == result['mutation_id'],
+    );
+  }
+
+  @override
+  Future<void> applyBootstrap(Map<String, Object?> data) async {
+    cursor = (data['cursor'] as num?)?.toInt() ?? cursor;
+  }
+
+  @override
+  Future<void> applyPull(Map<String, Object?> data) async {
+    cursor = (data['cursor'] as num?)?.toInt() ?? cursor;
+  }
+
+  @override
+  Future<void> markConflict(
+    OutboxMutation mutation,
+    Map<String, Object?> result,
+  ) async {
+    conflicts.add(mutation.mutationId);
+    _pending.removeWhere(
+      (value) => value.mutationId == mutation.mutationId,
+    );
+  }
+
+  @override
+  Future<void> markRetry(
+    OutboxMutation mutation, {
+    required String message,
+    required DateTime retryAt,
+  }) async {
+    retries.add(mutation.mutationId);
+  }
+
+  @override
+  Future<List<OutboxMutation>> pendingMutations({int limit = 50}) async {
+    return _pending.take(limit).toList(growable: false);
+  }
+
+  @override
+  Future<void> setSystemState(String key, String value) async {
+    states[key] = value;
+  }
+
+  @override
+  Future<int> syncCursor() async => cursor;
+}
+
+class _FakeApi implements SyncApi {
+  _FakeApi({
+    this.pushResponse,
+    this.pushError,
+    required List<Map<String, Object?>> pullResponses,
+  }) : _pullResponses = pullResponses;
+
+  final Map<String, Object?>? pushResponse;
+  final ApiException? pushError;
+  final List<Map<String, Object?>> _pullResponses;
+  final List<int> pullCursors = <int>[];
+  int _pullIndex = 0;
+
+  @override
+  Future<Map<String, Object?>> pull(
+    SessionCredentials credentials, {
+    required int cursor,
+    int limit = 100,
+  }) async {
+    pullCursors.add(cursor);
+    return _pullResponses[_pullIndex++];
+  }
+
+  @override
+  Future<Map<String, Object?>> push(
+    SessionCredentials credentials,
+    List<Map<String, Object?>> mutations,
+  ) async {
+    final error = pushError;
+    if (error != null) {
+      throw error;
+    }
+    return pushResponse!;
+  }
+
+  @override
+  Future<Map<String, Object?>> refreshLease(
+    SessionCredentials credentials,
+  ) async {
+    return <String, Object?>{'lease': credentials.lease};
+  }
+
+  @override
+  Future<Map<String, Object?>> syncBootstrap(
+    SessionCredentials credentials,
+  ) async {
+    return const <String, Object?>{'cursor': 0};
+  }
+}
