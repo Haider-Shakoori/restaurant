@@ -45,6 +45,6 @@ See docs/batch-06-ordering.md, docs/batch-07-kot-kds.md, docs/batch-08-cashier-p
 - Batch 6 — tables, menu and waiter ordering: merged.
 - Batch 7 — KOT/KDS and kitchen execution: merged.
 - Batch 8 — cashier/POS, payments and daily closing: merged.
-- Batch 9 — inventory, purchasing and recipes: in development on batch/09-inventory-purchasing-recipes.
+- Batch 9 — inventory, purchasing and recipes: merged.
 
-Next after Batch 9: **Batch 10 — accounting and reporting**.
+Next: **Batch 10 — accounting and reporting**.
