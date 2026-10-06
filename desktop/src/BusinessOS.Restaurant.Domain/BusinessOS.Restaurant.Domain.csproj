@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>BusinessOS.Restaurant.Domain</AssemblyName>
+    <RootNamespace>BusinessOS.Restaurant.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>
