@@ -134,15 +134,26 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var rows = await db.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
-            .Select(x => new InventoryRow(x.Sku, x.Name, x.BaseUnit, x.PurchaseUnit ?? x.BaseUnit, x.ReorderLevel)).ToListAsync();
+        var rows = await (from item in db.InventoryItems.AsNoTracking()
+                          join balance in db.InventoryBalances.AsNoTracking() on item.Id equals balance.InventoryItemId into balances
+                          from balance in balances.DefaultIfEmpty()
+                          join valuation in db.InventoryValuations.AsNoTracking() on item.Id equals valuation.InventoryItemId into valuations
+                          from valuation in valuations.DefaultIfEmpty()
+                          where item.IsActive
+                          orderby item.Name
+                          select new InventoryRow(item.Sku, item.Name, item.BaseUnit, item.PurchaseUnit ?? item.BaseUnit,
+                              balance == null ? 0m : balance.Quantity, item.ReorderLevel,
+                              valuation == null ? 0m : valuation.AverageUnitCost,
+                              valuation == null ? 0m : valuation.Value)).ToListAsync();
         var grid = GridFor(rows);
-        grid.Columns.Add(Column("SKU", nameof(InventoryRow.Sku), 140));
-        grid.Columns.Add(Column("Ingredient", nameof(InventoryRow.Name), 260));
-        grid.Columns.Add(Column("Base unit", nameof(InventoryRow.BaseUnit), 120));
-        grid.Columns.Add(Column("Purchase unit", nameof(InventoryRow.PurchaseUnit), 140));
-        grid.Columns.Add(Column("Reorder level", nameof(InventoryRow.ReorderLevel), 130));
-        return Section("Inventory", "Local stock and recipe consumption remain available without internet.", grid);
+        grid.Columns.Add(Column("SKU", nameof(InventoryRow.Sku), 120));
+        grid.Columns.Add(Column("Ingredient", nameof(InventoryRow.Name), 220));
+        grid.Columns.Add(Column("On hand", nameof(InventoryRow.Quantity), 110));
+        grid.Columns.Add(Column("Base unit", nameof(InventoryRow.BaseUnit), 100));
+        grid.Columns.Add(Column("Reorder", nameof(InventoryRow.ReorderLevel), 100));
+        grid.Columns.Add(Column("Avg cost AFN", nameof(InventoryRow.AverageCost), 120));
+        grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
+        return Section("Inventory", "Restaurant ingredients, on-hand stock, valuation and recipe consumption remain available without internet.", grid);
     }
 
     private static async Task<FrameworkElement> PurchasesAsync()
@@ -150,17 +161,33 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var rows = await (from po in db.PurchaseOrders.AsNoTracking()
-                          join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
-                          orderby po.OrderedAt descending
-                          select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt)).Take(100).ToListAsync();
-        var grid = GridFor(rows);
-        grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190));
-        grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 240));
-        grid.Columns.Add(Column("Status", nameof(PurchaseRow.Status), 120));
-        grid.Columns.Add(Column("Estimated AFN", nameof(PurchaseRow.Total), 150));
-        grid.Columns.Add(Column("Ordered", nameof(PurchaseRow.OrderedAt), 210));
-        return Section("Purchases", "Purchase orders and receiving use the desktop local database.", grid);
+        var orders = await (from po in db.PurchaseOrders.AsNoTracking()
+                            join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
+                            orderby po.OrderedAt descending
+                            select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt, po.CompletedAt)).Take(100).ToListAsync();
+        var suppliers = await db.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+            .Select(x => new SupplierRow(x.Code, x.Name, x.Phone, x.Email)).ToListAsync();
+        var receipts = await db.GoodsReceipts.AsNoTracking().OrderByDescending(x => x.ReceivedAt).Take(100)
+            .Select(x => new ReceiptRow(x.ReceiptNumber, x.Status, x.ReceivedAt, x.PurchaseOrderId)).ToListAsync();
+
+        var panel = Stack();
+        panel.Children.Add(Card("Restaurant procurement", "Supplier → purchase order → goods receipt → stock movement. Receiving stock updates the local restaurant inventory."));
+        var supplierGrid = GridFor(suppliers); supplierGrid.MinHeight = 180;
+        supplierGrid.Columns.Add(Column("Code", nameof(SupplierRow.Code), 110)); supplierGrid.Columns.Add(Column("Supplier", nameof(SupplierRow.Name), 220));
+        supplierGrid.Columns.Add(Column("Phone", nameof(SupplierRow.Phone), 150)); supplierGrid.Columns.Add(Column("Email", nameof(SupplierRow.Email), 220));
+        panel.Children.Add(supplierGrid);
+        panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        var grid = GridFor(orders); grid.MinHeight = 230;
+        grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190)); grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 220));
+        grid.Columns.Add(Column("Status", nameof(PurchaseRow.Status), 120)); grid.Columns.Add(Column("Estimated AFN", nameof(PurchaseRow.Total), 140));
+        grid.Columns.Add(Column("Ordered", nameof(PurchaseRow.OrderedAt), 190)); grid.Columns.Add(Column("Completed", nameof(PurchaseRow.CompletedAt), 190));
+        panel.Children.Add(grid);
+        panel.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        var receiptGrid = GridFor(receipts); receiptGrid.MinHeight = 200;
+        receiptGrid.Columns.Add(Column("GRN", nameof(ReceiptRow.Number), 210)); receiptGrid.Columns.Add(Column("Status", nameof(ReceiptRow.Status), 120));
+        receiptGrid.Columns.Add(Column("Received", nameof(ReceiptRow.ReceivedAt), 200)); receiptGrid.Columns.Add(Column("Purchase order ID", nameof(ReceiptRow.PurchaseOrderId), 280));
+        panel.Children.Add(receiptGrid);
+        return Scroll(panel);
     }
 
 
@@ -280,8 +307,10 @@ internal static class RestaurantOperationalPages
     private sealed record KitchenRow(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
     private sealed record OrderRow(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total, DateTimeOffset UpdatedAt);
     private sealed record MenuRow(string Sku, string Name, string Category, decimal Price, string Currency, bool Available);
-    private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal ReorderLevel);
-    private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt);
+    private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal Quantity, decimal ReorderLevel, decimal AverageCost, decimal StockValue);
+    private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt, DateTimeOffset? CompletedAt);
+    private sealed record SupplierRow(string Code, string Name, string? Phone, string? Email);
+    private sealed record ReceiptRow(string Number, string Status, DateTimeOffset ReceivedAt, string PurchaseOrderId);
     private sealed record StaffRow(string Name, string Email, string Role, bool Active);
     private sealed record ShiftRow(string Name, string Role, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int BreakMinutes);
 }
