@@ -3,6 +3,7 @@ using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
+using BusinessOS.Restaurant.Printing;
 using BusinessOS.Restaurant.Sync;
 
 namespace BusinessOS.Restaurant.Desktop;
@@ -10,6 +11,7 @@ namespace BusinessOS.Restaurant.Desktop;
 public partial class App : System.Windows.Application
 {
     private LocalHostBootstrapper? _localHost;
+    private KotPrintQueueProcessor? _printQueue;
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
@@ -19,6 +21,9 @@ public partial class App : System.Windows.Application
         var settingsStore = new ConnectionSettingsStore();
         var databaseFactory = new LocalDatabaseFactory();
         await databaseFactory.EnsureCreatedAsync();
+
+        _printQueue = new KotPrintQueueProcessor(databaseFactory);
+        await _printQueue.StartAsync();
 
         try
         {
@@ -62,6 +67,11 @@ public partial class App : System.Windows.Application
         if (_localHost is not null)
         {
             _localHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        if (_printQueue is not null)
+        {
+            _printQueue.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
         base.OnExit(e);
