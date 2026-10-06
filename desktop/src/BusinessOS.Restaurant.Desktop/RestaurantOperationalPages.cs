@@ -13,9 +13,9 @@ internal static class RestaurantOperationalPages
         return route switch
         {
             "dashboard" => await DashboardAsync(diagnostics),
-            "tables" => await TablesAsync(),
-            "kitchen" => await KitchenAsync(),
-            "pos" => await PosAsync(),
+            "tables" => await OperationalActionViews.TablesAsync(),
+            "kitchen" => await OperationalActionViews.KitchenAsync(),
+            "pos" => await OperationalActionViews.PosAsync(),
             "menu" => await MenuAsync(),
             "inventory" => await InventoryAsync(),
             "purchases" => await PurchasesAsync(),
