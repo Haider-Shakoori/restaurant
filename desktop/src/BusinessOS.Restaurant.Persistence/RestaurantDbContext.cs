@@ -49,6 +49,10 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalPurchaseOrderLine> PurchaseOrderLines => Set<LocalPurchaseOrderLine>();
     public DbSet<LocalGoodsReceipt> GoodsReceipts => Set<LocalGoodsReceipt>();
     public DbSet<LocalGoodsReceiptLine> GoodsReceiptLines => Set<LocalGoodsReceiptLine>();
+    public DbSet<LocalCloudOutboxMutation> CloudOutbox => Set<LocalCloudOutboxMutation>();
+    public DbSet<LocalCloudEntityLink> CloudEntityLinks => Set<LocalCloudEntityLink>();
+    public DbSet<LocalCloudSyncState> CloudSyncStates => Set<LocalCloudSyncState>();
+    public DbSet<LocalCloudConflict> CloudConflicts => Set<LocalCloudConflict>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -449,6 +453,36 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.Property(value => value.ReceivedBaseQuantity).HasPrecision(18, 4);
             entity.Property(value => value.UnitCost).HasPrecision(18, 2);
             entity.Property(value => value.LineTotal).HasPrecision(18, 2);
+        });
+
+
+        modelBuilder.Entity<LocalCloudOutboxMutation>(entity =>
+        {
+            entity.ToTable("cloud_outbox");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.Status, value.OccurredAtUtc });
+            entity.HasIndex(value => new { value.EntityType, value.LocalEntityId });
+        });
+
+        modelBuilder.Entity<LocalCloudEntityLink>(entity =>
+        {
+            entity.ToTable("cloud_entity_links");
+            entity.HasKey(value => new { value.EntityType, value.LocalEntityId });
+            entity.HasIndex(value => new { value.EntityType, value.CloudEntityId });
+        });
+
+        modelBuilder.Entity<LocalCloudSyncState>(entity =>
+        {
+            entity.ToTable("cloud_sync_state");
+            entity.HasKey(value => value.Id);
+        });
+
+        modelBuilder.Entity<LocalCloudConflict>(entity =>
+        {
+            entity.ToTable("cloud_conflicts");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.MutationId).IsUnique();
+            entity.HasIndex(value => new { value.Status, value.CreatedAtUtc });
         });
 
 
