@@ -6,6 +6,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Domain/BusinessOS.Restaurant.Domain.csproj" />
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
+    <ProjectReference Include="../../src/BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
