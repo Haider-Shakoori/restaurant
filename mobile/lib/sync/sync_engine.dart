@@ -1,4 +1,5 @@
 import '../core/api/mobile_api_client.dart';
+import '../core/connection/connection_mode.dart';
 import '../core/models/session_credentials.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
@@ -136,7 +137,9 @@ class SyncEngine {
     final verification = await _leaseVerifier.verify(
       signedLease: session.lease,
       publicKey: session.publicKey,
-      expectedDeviceId: session.deviceId,
+      expectedDeviceId: session.activeChannel == ConnectionChannel.local
+          ? null
+          : session.deviceId,
     );
 
     final expiresAt = verification.expiresAt;
@@ -155,7 +158,9 @@ class SyncEngine {
     final refreshedVerification = await _leaseVerifier.verify(
       signedLease: lease,
       publicKey: session.publicKey,
-      expectedDeviceId: session.deviceId,
+      expectedDeviceId: session.activeChannel == ConnectionChannel.local
+          ? null
+          : session.deviceId,
     );
 
     if (!refreshedVerification.valid) {
