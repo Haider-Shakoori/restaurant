@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace BusinessOS.Restaurant.LocalServer;
 
 public sealed record LocalPairingCodeRequest(
-    [System.Text.Json.Serialization.JsonPropertyName("staff_user_id")] long StaffUserId);
+    [property: System.Text.Json.Serialization.JsonPropertyName("staff_user_id")] long StaffUserId);
 
 public sealed record LocalPairingCode(
     string Code,
@@ -18,9 +18,9 @@ public sealed record LocalPairingCode(
     DateTimeOffset ExpiresAtUtc);
 
 public sealed record LocalPairRequest(
-    [System.Text.Json.Serialization.JsonPropertyName("pairing_code")] string PairingCode,
-    [System.Text.Json.Serialization.JsonPropertyName("device_uid")] string DeviceUid,
-    [System.Text.Json.Serialization.JsonPropertyName("device_name")] string DeviceName);
+    [property: System.Text.Json.Serialization.JsonPropertyName("pairing_code")] string PairingCode,
+    [property: System.Text.Json.Serialization.JsonPropertyName("device_uid")] string DeviceUid,
+    [property: System.Text.Json.Serialization.JsonPropertyName("device_name")] string DeviceName);
 
 public sealed record LocalPairedDevice(
     string Id,
