@@ -10,6 +10,7 @@ use App\Http\Controllers\Tenant\BootstrapController;
 use App\Http\Controllers\Tenant\CashierSessionController;
 use App\Http\Controllers\Tenant\ChartAccountController;
 use App\Http\Controllers\Tenant\DailyClosingController;
+use App\Http\Controllers\Tenant\DesktopReconciliationController;
 use App\Http\Controllers\Tenant\DiningTableController;
 use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\JournalEntryController;
@@ -156,6 +157,14 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            Route::middleware('tenant.role:owner,admin,manager,cashier,inventory,kitchen,waiter')->group(function (): void {
+                Route::post('/desktop/reconcile/push', [DesktopReconciliationController::class, 'push'])
+                    ->name('tenant.api.desktop.reconcile.push');
+
+                Route::get('/desktop/reconcile/pull', [DesktopReconciliationController::class, 'pull'])
+                    ->name('tenant.api.desktop.reconcile.pull');
+            });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter')->group(function (): void {
                 Route::get('/sync/bootstrap', SyncBootstrapController::class)
