@@ -62,7 +62,7 @@ class MobilePairingController extends Controller
                     ->lockForUpdate()
                     ->first();
 
-                if (! $pairing || $pairing->expires_at->isPast()) {
+                if ($pairing === null || $pairing->expires_at->isPast()) {
                     throw ValidationException::withMessages([
                         'pairing_token' => 'The pairing QR code is invalid or has expired.',
                     ]);
