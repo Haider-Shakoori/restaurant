@@ -17,6 +17,15 @@ public sealed class LocalDatabaseFactory
         _databasePath = Path.Combine(root, "data", "restaurant.db");
     }
 
+    public string DatabasePath => _databasePath;
+
+    public SqliteConnection CreateConnection() => new(new SqliteConnectionStringBuilder
+    {
+        DataSource = _databasePath,
+        ForeignKeys = true,
+        Pooling = false,
+    }.ToString());
+
     public RestaurantDbContext Create()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_databasePath)!);
