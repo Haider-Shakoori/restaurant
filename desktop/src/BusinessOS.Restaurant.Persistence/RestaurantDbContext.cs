@@ -17,6 +17,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalKitchenStation> KitchenStations => Set<LocalKitchenStation>();
     public DbSet<LocalMenuItemKitchenRoute> MenuItemKitchenRoutes => Set<LocalMenuItemKitchenRoute>();
     public DbSet<LocalPairedTerminal> PairedTerminals => Set<LocalPairedTerminal>();
+    public DbSet<LocalTerminalRuntime> TerminalRuntimes => Set<LocalTerminalRuntime>();
     public DbSet<LocalOrder> Orders => Set<LocalOrder>();
     public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
     public DbSet<LocalMutation> Mutations => Set<LocalMutation>();
@@ -147,6 +148,14 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasKey(value => value.DeviceId);
             entity.HasIndex(value => value.UserId);
             entity.HasIndex(value => value.LastSeenAtUtc);
+        });
+
+        modelBuilder.Entity<LocalTerminalRuntime>(entity =>
+        {
+            entity.ToTable("terminal_runtime");
+            entity.HasKey(value => value.DeviceId);
+            entity.HasIndex(value => value.LastHeartbeatAtUtc);
+            entity.HasIndex(value => value.IsEnabled);
         });
 
         modelBuilder.Entity<LocalOrder>(entity =>
