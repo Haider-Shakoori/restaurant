@@ -31,6 +31,7 @@ class SessionService {
     required String licenseKey,
     required String email,
     required String password,
+    String pairingCode = '',
     String deviceName = 'BusinessOS Waiter',
   }) async {
     final target = await _connectionResolver.resolve(
@@ -40,6 +41,69 @@ class SessionService {
     );
     final baseUrl = target.baseUrl;
     final deviceUid = await _credentials.deviceUid();
+
+    if (target.channel == ConnectionChannel.local) {
+      final paired = await _api.pairLocal(
+        baseUrl: baseUrl,
+        pairingCode: pairingCode,
+        deviceUid: deviceUid,
+        deviceName: deviceName,
+      );
+      final device = Map<String, Object?>.from(
+        paired['device']! as Map<Object?, Object?>,
+      );
+      final deviceId = device['id']!.toString();
+      final deviceSecret = paired['device_secret']!.toString();
+      final publicKey = paired['public_key']!.toString();
+      final lease = Map<String, Object?>.from(
+        paired['lease']! as Map<Object?, Object?>,
+      );
+
+      final verified = await _leaseVerifier.verify(
+        signedLease: lease,
+        publicKey: publicKey,
+        expectedTenantId: target.tenantId,
+      );
+
+      if (!verified.valid) {
+        throw ApiException(
+          code: 'invalid_local_host_lease',
+          message:
+              'The desktop restaurant entitlement could not be verified: ' +
+              verified.reason,
+        );
+      }
+
+      await _credentials.saveActivation(
+        baseUrl: baseUrl,
+        deviceId: deviceId,
+        deviceSecret: deviceSecret,
+        deviceUid: deviceUid,
+        publicKey: publicKey,
+        lease: lease,
+        connectionMode: target.mode,
+        activeChannel: target.channel,
+        localBaseUrl: target.localBaseUrl,
+        cloudBaseUrl: target.cloudBaseUrl,
+        tenantId: target.tenantId,
+      );
+      await _credentials.saveAccessToken(
+        paired['access_token']!.toString(),
+      );
+
+      final session = await _credentials.readSession();
+
+      if (session == null) {
+        throw const ApiException(
+          code: 'session_persist_failed',
+          message: 'The paired local session could not be stored securely.',
+        );
+      }
+
+      final bootstrap = await _api.syncBootstrap(session);
+      await _database.applyBootstrap(bootstrap);
+      return target;
+    }
     final keyResponse = await _api.publicKey(baseUrl);
     final publicKey = keyResponse['public_key']!.toString();
 
