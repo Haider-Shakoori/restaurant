@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
+  </ItemGroup>
+</Project>
