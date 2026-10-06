@@ -534,7 +534,9 @@ class LicenseService
             return $limit > 0 ? $limit : null;
         }
 
-        return null;
+        $default = (int) config('license.default_max_mobile_devices', 3);
+
+        return $default > 0 ? $default : null;
     }
 
     private function isMobilePlatform(string $platform): bool
