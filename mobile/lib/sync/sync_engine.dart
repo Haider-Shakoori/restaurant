@@ -1,4 +1,5 @@
 import '../core/api/mobile_api_client.dart';
+import '../core/connection/connection_mode.dart';
 import '../core/models/session_credentials.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
@@ -40,6 +41,11 @@ class SyncEngine {
     try {
       var session = await _requireSession();
       session = await _refreshLeaseIfNeeded(session);
+
+      if (session.activeChannel == ConnectionChannel.local) {
+        await _api.heartbeat(session);
+      }
+
       await _push(session);
       await _pull(session);
       await _store.setSystemState('last_sync_error', '');
