@@ -13,12 +13,14 @@ public sealed class DesktopRestaurantWorkflowService
     private readonly LocalSyncService _sync;
     private readonly LocalCashierService _cashier;
     private readonly LocalOperationsControlService _operations;
+    private readonly LocalExpenseService _expenses;
 
     public DesktopRestaurantWorkflowService()
     {
         _kitchen = new LocalKitchenService(_factory);
         _cashier = new LocalCashierService(_factory);
         _operations = new LocalOperationsControlService(_factory);
+        _expenses = new LocalExpenseService(_factory);
         _sync = new LocalSyncService(_factory, new OperationalSnapshotStore(_factory), _kitchen);
     }
 
@@ -106,6 +108,15 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task<object> FinalizeDailyClosingAsync(string branchId, DateOnly businessDate, CancellationToken token = default)
         => await _operations.FinalizeDailyClosingAsync(branchId, businessDate, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> RecordExpenseAsync(string branchId, string category, string description, decimal amount,
+        string paymentMethod, DateOnly expenseDate, string? reference = null, CancellationToken token = default)
+        => await _expenses.RecordAsync(branchId, category, description, amount, paymentMethod, expenseDate, reference,
+            await CurrentPrincipalAsync(token), token);
+
+    public async Task<object[]> ExpensesAsync(string? branchId = null, DateOnly? from = null, DateOnly? to = null,
+        CancellationToken token = default)
+        => await _expenses.ListAsync(branchId, from, to, await CurrentPrincipalAsync(token), token);
 
     private async Task PushSingleAsync(string operation, JsonElement payload, CancellationToken token)
     {

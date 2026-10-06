@@ -50,6 +50,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalPurchaseOrderLine> PurchaseOrderLines => Set<LocalPurchaseOrderLine>();
     public DbSet<LocalGoodsReceipt> GoodsReceipts => Set<LocalGoodsReceipt>();
     public DbSet<LocalGoodsReceiptLine> GoodsReceiptLines => Set<LocalGoodsReceiptLine>();
+    public DbSet<LocalExpense> Expenses => Set<LocalExpense>();
     public DbSet<LocalCloudOutboxMutation> CloudOutbox => Set<LocalCloudOutboxMutation>();
     public DbSet<LocalCloudEntityLink> CloudEntityLinks => Set<LocalCloudEntityLink>();
     public DbSet<LocalCloudSyncState> CloudSyncStates => Set<LocalCloudSyncState>();
@@ -464,6 +465,16 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.Property(value => value.LineTotal).HasPrecision(18, 2);
         });
 
+
+
+        modelBuilder.Entity<LocalExpense>(entity =>
+        {
+            entity.ToTable("expenses");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.ExpenseDate });
+            entity.HasIndex(value => value.Category);
+            entity.Property(value => value.Amount).HasPrecision(18, 2);
+        });
 
         modelBuilder.Entity<LocalCloudOutboxMutation>(entity =>
         {
