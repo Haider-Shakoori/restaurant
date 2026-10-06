@@ -176,7 +176,6 @@ class LicenseFoundationTest extends TestCase
         $this->assertSame(1, $business->fresh()->devices()->where('status', DeviceStatus::Active)->count());
     }
 
-
     public function test_mobile_activation_limit_is_enforced_separately_from_total_device_limit(): void
     {
         [$business, , $domain] = $this->createActiveBusiness([
