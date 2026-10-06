@@ -1,3 +1,5 @@
+using System.Net;
+using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -51,6 +53,9 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         builder.Services.AddSingleton(descriptor);
         builder.Services.AddSingleton(_databaseFactory);
         builder.Services.AddSingleton<OperationalSnapshotStore>();
+        builder.Services.AddSingleton<WindowsActivationStore>();
+        builder.Services.AddSingleton<LocalPairingService>();
+        builder.Services.AddSingleton<LocalOrderService>();
 
         var app = builder.Build();
 
@@ -170,6 +175,197 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
                     tables,
                 },
             });
+        });
+
+        app.MapPost("/api/v1/local/admin/pairing-code", async (
+            HttpContext context,
+            LocalPairingCodeRequest request,
+            LocalPairingService pairing) =>
+        {
+            var remote = context.Connection.RemoteIpAddress;
+
+            if (remote is null || !IPAddress.IsLoopback(remote))
+            {
+                return Results.Forbid();
+            }
+
+            try
+            {
+                var code = await pairing.CreatePairingCodeAsync(
+                    request.StaffUserId,
+                    context.RequestAborted);
+
+                return Results.Ok(new
+                {
+                    data = new
+                    {
+                        pairing_code = code.Code,
+                        staff_user_id = code.StaffUserId,
+                        staff_name = code.StaffName,
+                        expires_at = code.ExpiresAtUtc,
+                    },
+                });
+            }
+            catch (Exception exception) when (
+                exception is InvalidOperationException or UnauthorizedAccessException)
+            {
+                return Results.UnprocessableEntity(new
+                {
+                    code = "pairing_unavailable",
+                    message = exception.Message,
+                });
+            }
+        });
+
+        app.MapPost("/api/v1/local/pair", async (
+            HttpContext context,
+            LocalPairRequest request,
+            LocalPairingService pairing) =>
+        {
+            try
+            {
+                var paired = await pairing.PairAsync(request, context.RequestAborted);
+
+                return Results.Ok(new
+                {
+                    device = new
+                    {
+                        id = paired.Device.Id,
+                        uid = paired.Device.DeviceUid,
+                        name = paired.Device.DeviceName,
+                        platform = "android",
+                        staff_user_id = paired.Device.StaffUserId,
+                    },
+                    device_secret = paired.DeviceSecret,
+                    access_token = paired.AccessToken,
+                    token_type = paired.TokenType,
+                    tenant_id = paired.TenantId,
+                    public_key = paired.PublicKey,
+                    lease = paired.Lease,
+                });
+            }
+            catch (Exception exception) when (
+                exception is InvalidOperationException or UnauthorizedAccessException)
+            {
+                return Results.UnprocessableEntity(new
+                {
+                    code = "pairing_failed",
+                    message = exception.Message,
+                });
+            }
+        });
+
+        app.MapGet("/api/v1/license/public-key", async (
+            HttpContext context,
+            WindowsActivationStore activations) =>
+        {
+            var activation = await activations.LoadAsync(context.RequestAborted);
+
+            if (activation is null)
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(new
+            {
+                algorithm = "Ed25519",
+                key_id = activation.PublicKeyId,
+                schema_version = 1,
+                public_key = activation.PublicKey,
+            });
+        });
+
+        app.MapPost("/api/v1/license/lease", async (
+            HttpContext context,
+            LocalPairingService pairing) =>
+        {
+            try
+            {
+                var auth = await pairing.AuthenticateDeviceAsync(
+                    context.Request,
+                    context.RequestAborted);
+
+                return Results.Ok(new
+                {
+                    lease = auth.HostActivation.Lease,
+                });
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = exception.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        app.MapGet("/api/v1/sync/bootstrap", async (
+            HttpContext context,
+            LocalPairingService pairing,
+            LocalOrderService orders) =>
+        {
+            try
+            {
+                var auth = await pairing.AuthenticateAsync(
+                    context.Request,
+                    context.RequestAborted);
+                var data = await orders.BootstrapAsync(auth, context.RequestAborted);
+                return Results.Ok(new { data });
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = exception.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        app.MapPost("/api/v1/sync/push", async (
+            HttpContext context,
+            LocalSyncPushRequest request,
+            LocalPairingService pairing,
+            LocalOrderService orders) =>
+        {
+            try
+            {
+                var auth = await pairing.AuthenticateAsync(
+                    context.Request,
+                    context.RequestAborted);
+                var data = await orders.PushAsync(auth, request, context.RequestAborted);
+                return Results.Ok(new { data });
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = exception.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+        });
+
+        app.MapGet("/api/v1/sync/pull", async (
+            HttpContext context,
+            LocalPairingService pairing,
+            LocalOrderService orders,
+            long cursor = 0,
+            int limit = 100) =>
+        {
+            try
+            {
+                var auth = await pairing.AuthenticateAsync(
+                    context.Request,
+                    context.RequestAborted);
+                var data = await orders.PullAsync(
+                    auth,
+                    cursor,
+                    limit,
+                    context.RequestAborted);
+                return Results.Ok(new { data });
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = exception.Message },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
         });
 
         app.MapFallback(() => Results.Json(
