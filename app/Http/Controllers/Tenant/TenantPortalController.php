@@ -192,10 +192,18 @@ class TenantPortalController extends Controller
                 ->get()
             : collect();
 
+        $activeMobileCount = $business
+            ? DeviceActivation::query()
+                ->where('business_id', $business->id)
+                ->whereIn('platform', ['android', 'ios'])
+                ->where('status', 'active')
+                ->count()
+            : 0;
+
         return $this->view('tenant.settings.index', [
             'branches' => RestaurantBranch::query()->with(['diningAreas', 'kitchenStations'])->orderBy('name')->get(),
             'mobileDevices' => $mobileDevices,
-            'activeMobileCount' => $mobileDevices->where('status', 'active')->count(),
+            'activeMobileCount' => $activeMobileCount,
             'mobileDeviceLimit' => $activeLicense?->max_mobile_devices_snapshot,
         ]);
     }
