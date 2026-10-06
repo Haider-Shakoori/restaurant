@@ -12,6 +12,7 @@ public partial class App : System.Windows.Application
 {
     private LocalHostBootstrapper? _localHost;
     private KotPrintQueueProcessor? _printQueue;
+    private ReceiptPrintQueueProcessor? _receiptPrintQueue;
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
@@ -24,6 +25,9 @@ public partial class App : System.Windows.Application
 
         _printQueue = new KotPrintQueueProcessor(databaseFactory);
         await _printQueue.StartAsync();
+
+        _receiptPrintQueue = new ReceiptPrintQueueProcessor(databaseFactory);
+        await _receiptPrintQueue.StartAsync();
 
         try
         {
@@ -72,6 +76,11 @@ public partial class App : System.Windows.Application
         if (_printQueue is not null)
         {
             _printQueue.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        if (_receiptPrintQueue is not null)
+        {
+            _receiptPrintQueue.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
         base.OnExit(e);
