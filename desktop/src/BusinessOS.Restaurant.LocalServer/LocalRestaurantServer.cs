@@ -1,9 +1,9 @@
+using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace BusinessOS.Restaurant.LocalServer;
 
@@ -51,6 +51,14 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         builder.Services.AddSingleton(descriptor);
         builder.Services.AddSingleton(_databaseFactory);
         builder.Services.AddSingleton<OperationalSnapshotStore>();
+        builder.Services.AddSingleton(new ConnectionSettingsStore());
+        builder.Services.AddSingleton(new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(15),
+        });
+        builder.Services.AddSingleton<LocalCloudProxy>();
+        builder.Services.AddSingleton<LocalTerminalAuthenticator>();
+        builder.Services.AddSingleton<LocalSyncService>();
 
         var app = builder.Build();
 
@@ -75,102 +83,35 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
             }));
 
         app.MapGet("/api/v1/local/catalog", async (
-            OperationalSnapshotStore store,
+            HttpRequest request,
+            LocalServerOptions serverOptions,
+            LocalTerminalAuthenticator authenticator,
+            LocalSyncService sync,
             CancellationToken token) =>
         {
-            var catalog = await store.LoadCatalogAsync(token);
-            var branches = catalog.Branches.ToDictionary(value => value.Id, StringComparer.Ordinal);
-            var linksByItem = catalog.MenuItemModifierGroups
-                .GroupBy(value => value.MenuItemId)
-                .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-            var optionsByGroup = catalog.ModifierOptions
-                .GroupBy(value => value.ModifierGroupId)
-                .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                serverOptions,
+                allowCloudPairing: true,
+                token);
 
-            var menu = catalog.Categories.Select(category => new
+            if (principal is null)
             {
-                id = category.Id,
-                name = category.Name,
-                sort_order = category.SortOrder,
-                items = catalog.Items
-                    .Where(item => item.MenuCategoryId == category.Id)
-                    .Select(item => new
+                return Results.Json(
+                    new
                     {
-                        id = item.Id,
-                        menu_category_id = item.MenuCategoryId,
-                        sku = item.Sku,
-                        name = item.Name,
-                        description = item.Description,
-                        price = item.Price,
-                        currency = item.Currency,
-                        sort_order = item.SortOrder,
-                        modifier_groups = linksByItem.TryGetValue(item.Id, out var itemLinks)
-                            ? itemLinks
-                                .Where(link => catalog.ModifierGroups.ContainsKey(link.ModifierGroupId))
-                                .Select(link =>
-                                {
-                                    var group = catalog.ModifierGroups[link.ModifierGroupId];
-                                    return new
-                                    {
-                                        id = group.Id,
-                                        name = group.Name,
-                                        min_selections = group.MinSelections,
-                                        max_selections = group.MaxSelections,
-                                        sort_order = link.SortOrder,
-                                        options = optionsByGroup.TryGetValue(group.Id, out var groupOptions)
-                                            ? groupOptions.Select(option => new
-                                            {
-                                                id = option.Id,
-                                                name = option.Name,
-                                                price_delta = option.PriceDelta,
-                                                sort_order = option.SortOrder,
-                                            }).ToArray()
-                                            : [],
-                                    };
-                                })
-                                .ToArray()
-                            : [],
-                    })
-                    .ToArray(),
-            }).ToArray();
+                        code = "unauthenticated",
+                        message = "This Android terminal has not been validated for local restaurant access.",
+                    },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
 
-            var tables = catalog.Tables.Select(table =>
-            {
-                var area = catalog.Areas[table.DiningAreaId];
-                var branch = branches[area.BranchId];
-
-                return new
-                {
-                    id = table.Id,
-                    code = table.Code,
-                    name = table.Name,
-                    capacity = table.Capacity,
-                    status = table.Status,
-                    is_active = table.IsActive,
-                    area = new { id = area.Id, name = area.Name },
-                    branch = new { id = branch.Id, name = branch.Name },
-                };
-            }).ToArray();
-
-            return Results.Ok(new
-            {
-                data = new
-                {
-                    tenant_id = catalog.State?.TenantId,
-                    cursor = catalog.State?.Cursor ?? 0,
-                    refreshed_at = catalog.State?.RefreshedAtUtc,
-                    branches = catalog.Branches.Select(value => new
-                    {
-                        id = value.Id,
-                        code = value.Code,
-                        name = value.Name,
-                        is_active = value.IsActive,
-                    }).ToArray(),
-                    menu,
-                    tables,
-                },
-            });
+            var data = await sync.BootstrapAsync(principal, token);
+            return Results.Ok(new { data });
         });
+
+        app.MapLocalControlPlane();
+        app.MapLocalSync();
 
         app.MapFallback(() => Results.Json(
             new

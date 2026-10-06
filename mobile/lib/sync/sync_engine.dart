@@ -148,25 +148,33 @@ class SyncEngine {
       return session;
     }
 
-    final response = await _api.refreshLease(session);
-    final lease = Map<String, Object?>.from(
-      response['lease']! as Map<Object?, Object?>,
-    );
-    final refreshedVerification = await _leaseVerifier.verify(
-      signedLease: lease,
-      publicKey: session.publicKey,
-      expectedDeviceId: session.deviceId,
-    );
-
-    if (!refreshedVerification.valid) {
-      throw const ApiException(
-        code: 'invalid_offline_lease',
-        message: 'The refreshed offline lease failed signature validation.',
+    try {
+      final response = await _api.refreshLease(session);
+      final lease = Map<String, Object?>.from(
+        response['lease']! as Map<Object?, Object?>,
       );
-    }
+      final refreshedVerification = await _leaseVerifier.verify(
+        signedLease: lease,
+        publicKey: session.publicKey,
+        expectedDeviceId: session.deviceId,
+      );
 
-    await _credentials.saveLease(lease);
-    return session.copyWith(lease: lease);
+      if (!refreshedVerification.valid) {
+        throw const ApiException(
+          code: 'invalid_offline_lease',
+          message: 'The refreshed offline lease failed signature validation.',
+        );
+      }
+
+      await _credentials.saveLease(lease);
+      return session.copyWith(lease: lease);
+    } on ApiException catch (error) {
+      if (verification.valid && _isRetryable(error)) {
+        return session;
+      }
+
+      rethrow;
+    }
   }
 
   Future<SessionCredentials> _requireSession() async {

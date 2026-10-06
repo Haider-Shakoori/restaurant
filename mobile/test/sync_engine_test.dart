@@ -112,6 +112,35 @@ void main() {
     expect(store.retries, isEmpty);
   });
 
+  test('valid lease keeps LAN sync working when refresh cloud is offline', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      refreshError: const ApiException(
+        code: 'offline',
+        message: 'Cloud unavailable.',
+      ),
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 1,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _ExpiringButValidLease(),
+    );
+
+    await engine.syncNow();
+
+    expect(store.cursor, 1);
+    expect(store.states['last_sync_error'], '');
+  });
+
   test('network failure schedules exponential retry', () async {
     final mutation = OutboxMutation(
       id: 1,
@@ -161,6 +190,25 @@ SessionCredentials _session() {
       'algorithm': 'Ed25519',
     },
   );
+}
+
+class _ExpiringButValidLease implements LeaseValidator {
+  const _ExpiringButValidLease();
+
+  @override
+  Future<LeaseVerificationResult> verify({
+    required Map<String, Object?> signedLease,
+    required String publicKey,
+    String? expectedDeviceId,
+    String? expectedTenantId,
+    DateTime? now,
+  }) async {
+    return LeaseVerificationResult(
+      valid: true,
+      reason: 'valid',
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    );
+  }
 }
 
 class _AlwaysValidLease implements LeaseValidator {
@@ -298,11 +346,13 @@ class _FakeApi implements SyncApi {
   _FakeApi({
     this.pushResponse,
     this.pushError,
+    this.refreshError,
     required List<Map<String, Object?>> pullResponses,
   }) : _pullResponses = pullResponses;
 
   final Map<String, Object?>? pushResponse;
   final ApiException? pushError;
+  final ApiException? refreshError;
   final List<Map<String, Object?>> _pullResponses;
   final List<int> pullCursors = <int>[];
   int _pullIndex = 0;
@@ -333,6 +383,11 @@ class _FakeApi implements SyncApi {
   Future<Map<String, Object?>> refreshLease(
     SessionCredentials credentials,
   ) async {
+    final error = refreshError;
+    if (error != null) {
+      throw error;
+    }
+
     return <String, Object?>{'lease': credentials.lease};
   }
 
