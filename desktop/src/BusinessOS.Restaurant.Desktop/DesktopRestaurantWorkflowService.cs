@@ -100,6 +100,41 @@ public sealed class DesktopRestaurantWorkflowService
             await CurrentPrincipalAsync(token),
             token);
 
+    public async Task<object> CreateEqualSplitsAsync(string billId, int splitCount, CancellationToken token = default)
+    {
+        if (splitCount < 2 || splitCount > 20)
+        {
+            throw new InvalidOperationException("Split count must be between 2 and 20.");
+        }
+
+        await _factory.EnsureCreatedAsync(token);
+        await using var db = _factory.Create();
+        var bill = await db.Bills.FindAsync([billId], token)
+            ?? throw new InvalidOperationException("Bill does not exist.");
+
+        var baseAmount = decimal.Round(bill.Total / splitCount, 2, MidpointRounding.AwayFromZero);
+        var parts = new List<LocalBillSplitPart>(splitCount);
+        var allocated = 0m;
+
+        for (var index = 1; index <= splitCount; index++)
+        {
+            var amount = index == splitCount ? bill.Total - allocated : baseAmount;
+            amount = decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+            allocated += amount;
+            parts.Add(new LocalBillSplitPart($"Split {index}", amount));
+        }
+
+        return await _cashier.CreateSplitsAsync(billId, parts, await CurrentPrincipalAsync(token), token);
+    }
+
+    public async Task<object> AddSplitPaymentAsync(string billId, string splitId, string sessionId, decimal amount,
+        string method, string? reference = null, CancellationToken token = default)
+        => await _cashier.AddPaymentAsync(
+            billId,
+            new LocalPaymentRequest(sessionId, amount, method, $"DESK-PAY-{Guid.CreateVersion7():N}", reference, splitId),
+            await CurrentPrincipalAsync(token),
+            token);
+
     public async Task QueueReceiptAsync(string billId, CancellationToken token = default)
         => await _cashier.QueueReceiptAsync(billId, await CurrentPrincipalAsync(token), token);
 
