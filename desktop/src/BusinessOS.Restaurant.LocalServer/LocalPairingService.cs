@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace BusinessOS.Restaurant.LocalServer;
 
+public sealed record LocalPairingCodeRequest(
+    [System.Text.Json.Serialization.JsonPropertyName("staff_user_id")] long StaffUserId);
+
 public sealed record LocalPairingCode(
     string Code,
     long StaffUserId,
