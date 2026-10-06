@@ -25,6 +25,13 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalKitchenTicketItem> KitchenTicketItems => Set<LocalKitchenTicketItem>();
     public DbSet<LocalKitchenPrinterBinding> KitchenPrinterBindings => Set<LocalKitchenPrinterBinding>();
     public DbSet<LocalPrintJob> PrintJobs => Set<LocalPrintJob>();
+    public DbSet<LocalCashierSession> CashierSessions => Set<LocalCashierSession>();
+    public DbSet<LocalBill> Bills => Set<LocalBill>();
+    public DbSet<LocalBillLine> BillLines => Set<LocalBillLine>();
+    public DbSet<LocalBillSplit> BillSplits => Set<LocalBillSplit>();
+    public DbSet<LocalTenantPayment> Payments => Set<LocalTenantPayment>();
+    public DbSet<LocalReceiptPrinterSetting> ReceiptPrinterSettings => Set<LocalReceiptPrinterSetting>();
+    public DbSet<LocalReceiptPrintJob> ReceiptPrintJobs => Set<LocalReceiptPrintJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -186,6 +193,78 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasIndex(value => value.KitchenTicketId).IsUnique();
             entity.HasIndex(value => new { value.Status, value.CreatedAtUtc });
         });
+
+        modelBuilder.Entity<LocalCashierSession>(entity =>
+        {
+            entity.ToTable("cashier_sessions");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.CashierUserId, value.Status });
+            entity.HasIndex(value => new { value.BranchId, value.Status });
+            entity.Property(value => value.OpeningCash).HasPrecision(18, 2);
+            entity.Property(value => value.ExpectedCash).HasPrecision(18, 2);
+            entity.Property(value => value.DeclaredCash).HasPrecision(18, 2);
+            entity.Property(value => value.CashVariance).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalBill>(entity =>
+        {
+            entity.ToTable("bills");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.OrderId).IsUnique();
+            entity.HasIndex(value => value.BillNumber).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.Status });
+            entity.Property(value => value.Subtotal).HasPrecision(18, 2);
+            entity.Property(value => value.DiscountValue).HasPrecision(18, 4);
+            entity.Property(value => value.DiscountAmount).HasPrecision(18, 2);
+            entity.Property(value => value.Total).HasPrecision(18, 2);
+            entity.Property(value => value.PaidAmount).HasPrecision(18, 2);
+            entity.Property(value => value.BalanceDue).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalBillLine>(entity =>
+        {
+            entity.ToTable("bill_lines");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.OrderItemId).IsUnique();
+            entity.HasIndex(value => value.BillId);
+            entity.Property(value => value.UnitPrice).HasPrecision(18, 2);
+            entity.Property(value => value.LineTotal).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalBillSplit>(entity =>
+        {
+            entity.ToTable("bill_splits");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BillId, value.SplitNumber }).IsUnique();
+            entity.Property(value => value.Amount).HasPrecision(18, 2);
+            entity.Property(value => value.PaidAmount).HasPrecision(18, 2);
+            entity.Property(value => value.BalanceDue).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalTenantPayment>(entity =>
+        {
+            entity.ToTable("tenant_payments");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.ClientPaymentId).IsUnique();
+            entity.HasIndex(value => new { value.CashierSessionId, value.Status });
+            entity.HasIndex(value => value.BillId);
+            entity.Property(value => value.Amount).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalReceiptPrinterSetting>(entity =>
+        {
+            entity.ToTable("receipt_printer_settings");
+            entity.HasKey(value => value.Id);
+        });
+
+        modelBuilder.Entity<LocalReceiptPrintJob>(entity =>
+        {
+            entity.ToTable("receipt_print_jobs");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.BillId);
+            entity.HasIndex(value => new { value.Status, value.CreatedAtUtc });
+        });
+
 
 
     }
