@@ -361,9 +361,6 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonValidationErrors('device_secret');
     }
 
-    /**
-     * @return array{Business, string, Tenant}
-     */
     public function test_desktop_reconciliation_is_idempotent_links_local_ids_and_exposes_pull_cursor(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();
@@ -437,7 +434,9 @@ class MobileOfflineSyncTest extends TestCase
         tenancy()->end();
     }
 
-
+    /**
+     * @return array{Business, string, Tenant}
+     */
     private function createActiveBusiness(): array
     {
         Carbon::setTestNow(Carbon::parse('2026-10-01 09:00:00', 'Asia/Kabul'));
