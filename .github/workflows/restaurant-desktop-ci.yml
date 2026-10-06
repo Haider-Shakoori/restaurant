@@ -57,3 +57,4 @@ jobs:
           name: BusinessOS-Restaurant-win-x64-ci
           path: desktop/artifacts/publish/
           if-no-files-found: error
+          retention-days: 30
