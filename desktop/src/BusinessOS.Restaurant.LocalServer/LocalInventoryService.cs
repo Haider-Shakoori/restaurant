@@ -122,12 +122,13 @@ public sealed class LocalInventoryService
             .Select(item =>
             {
                 balances.TryGetValue(item.Id, out var balance);
+                var quantity = balance?.Quantity ?? 0m;
                 return new
                 {
                     item,
-                    quantity = balance?.Quantity ?? 0m,
-                    low = balance is not null &&
-                          Quantity(balance.Quantity) <= Quantity(item.ReorderLevel),
+                    quantity,
+                    low = !string.IsNullOrWhiteSpace(branchId) &&
+                          Quantity(quantity) <= Quantity(item.ReorderLevel),
                 };
             })
             .Where(value => !lowStockOnly || value.low)
