@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Domain/BusinessOS.Restaurant.Domain.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="NSec.Cryptography" Version="26.4.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+</Project>
