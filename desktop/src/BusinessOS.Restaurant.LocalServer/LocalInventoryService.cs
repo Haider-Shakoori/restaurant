@@ -878,9 +878,11 @@ public sealed class LocalInventoryService
         string? notes,
         CancellationToken cancellationToken)
     {
-        var existing = await db.StockMovements.SingleOrDefaultAsync(
-            value => value.IdempotencyKey == idempotencyKey,
-            cancellationToken);
+        var existing = db.StockMovements.Local.FirstOrDefault(
+            value => value.IdempotencyKey == idempotencyKey)
+            ?? await db.StockMovements.SingleOrDefaultAsync(
+                value => value.IdempotencyKey == idempotencyKey,
+                cancellationToken);
 
         if (existing is not null)
         {
@@ -893,9 +895,11 @@ public sealed class LocalInventoryService
             throw new LocalSyncConflictException("invalid_payload", "Stock movement quantity cannot be zero.");
         }
 
-        var balance = await db.InventoryBalances.SingleOrDefaultAsync(
-            value => value.BranchId == branchId && value.InventoryItemId == item.Id,
-            cancellationToken);
+        var balance = db.InventoryBalances.Local.FirstOrDefault(
+            value => value.BranchId == branchId && value.InventoryItemId == item.Id)
+            ?? await db.InventoryBalances.SingleOrDefaultAsync(
+                value => value.BranchId == branchId && value.InventoryItemId == item.Id,
+                cancellationToken);
 
         if (balance is null)
         {
@@ -937,9 +941,11 @@ public sealed class LocalInventoryService
         string inventoryItemId,
         CancellationToken cancellationToken)
     {
-        var valuation = await db.InventoryValuations.SingleOrDefaultAsync(
-            value => value.BranchId == branchId && value.InventoryItemId == inventoryItemId,
-            cancellationToken);
+        var valuation = db.InventoryValuations.Local.FirstOrDefault(
+            value => value.BranchId == branchId && value.InventoryItemId == inventoryItemId)
+            ?? await db.InventoryValuations.SingleOrDefaultAsync(
+                value => value.BranchId == branchId && value.InventoryItemId == inventoryItemId,
+                cancellationToken);
 
         if (valuation is not null)
         {
