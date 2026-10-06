@@ -11,6 +11,7 @@
     <ProjectReference Include="../BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
     <ProjectReference Include="../BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
     <ProjectReference Include="../BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.LocalServer/BusinessOS.Restaurant.LocalServer.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
