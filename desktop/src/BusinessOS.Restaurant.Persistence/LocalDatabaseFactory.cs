@@ -202,6 +202,109 @@ public sealed class LocalDatabaseFactory
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_print_jobs_KitchenTicketId ON print_jobs (KitchenTicketId);
             CREATE INDEX IF NOT EXISTS IX_print_jobs_Status_CreatedAtUtc ON print_jobs (Status, CreatedAtUtc);
+
+            CREATE TABLE IF NOT EXISTS cashier_sessions (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                CashierUserId INTEGER NOT NULL,
+                CashierName TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                OpeningCash TEXT NOT NULL,
+                ExpectedCash TEXT NULL,
+                DeclaredCash TEXT NULL,
+                CashVariance TEXT NULL,
+                OpenedAt TEXT NOT NULL,
+                ClosedAt TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_cashier_sessions_CashierUserId_Status ON cashier_sessions (CashierUserId, Status);
+            CREATE INDEX IF NOT EXISTS IX_cashier_sessions_BranchId_Status ON cashier_sessions (BranchId, Status);
+
+            CREATE TABLE IF NOT EXISTS bills (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                CreatedByUserId INTEGER NOT NULL,
+                BillNumber TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                Subtotal TEXT NOT NULL,
+                DiscountType TEXT NULL,
+                DiscountValue TEXT NULL,
+                DiscountAmount TEXT NOT NULL,
+                DiscountReason TEXT NULL,
+                Total TEXT NOT NULL,
+                PaidAmount TEXT NOT NULL,
+                BalanceDue TEXT NOT NULL,
+                IssuedAt TEXT NOT NULL,
+                PaidAt TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_bills_OrderId ON bills (OrderId);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_bills_BillNumber ON bills (BillNumber);
+            CREATE INDEX IF NOT EXISTS IX_bills_BranchId_Status ON bills (BranchId, Status);
+
+            CREATE TABLE IF NOT EXISTS bill_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BillId TEXT NOT NULL,
+                OrderItemId TEXT NOT NULL,
+                ItemName TEXT NOT NULL,
+                Quantity INTEGER NOT NULL,
+                UnitPrice TEXT NOT NULL,
+                LineTotal TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_bill_lines_OrderItemId ON bill_lines (OrderItemId);
+            CREATE INDEX IF NOT EXISTS IX_bill_lines_BillId ON bill_lines (BillId);
+
+            CREATE TABLE IF NOT EXISTS bill_splits (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BillId TEXT NOT NULL,
+                SplitNumber INTEGER NOT NULL,
+                Label TEXT NOT NULL,
+                Amount TEXT NOT NULL,
+                PaidAmount TEXT NOT NULL,
+                BalanceDue TEXT NOT NULL,
+                Status TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_bill_splits_BillId_SplitNumber ON bill_splits (BillId, SplitNumber);
+
+            CREATE TABLE IF NOT EXISTS tenant_payments (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BillId TEXT NOT NULL,
+                BillSplitId TEXT NULL,
+                CashierSessionId TEXT NOT NULL,
+                ReceivedByUserId INTEGER NOT NULL,
+                ClientPaymentId TEXT NULL,
+                Method TEXT NOT NULL,
+                Amount TEXT NOT NULL,
+                Reference TEXT NULL,
+                Status TEXT NOT NULL,
+                ReceivedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_tenant_payments_ClientPaymentId ON tenant_payments (ClientPaymentId);
+            CREATE INDEX IF NOT EXISTS IX_tenant_payments_CashierSessionId_Status ON tenant_payments (CashierSessionId, Status);
+            CREATE INDEX IF NOT EXISTS IX_tenant_payments_BillId ON tenant_payments (BillId);
+
+            CREATE TABLE IF NOT EXISTS receipt_printer_settings (
+                Id INTEGER NOT NULL PRIMARY KEY,
+                PrinterName TEXT NOT NULL,
+                Copies INTEGER NOT NULL,
+                IsEnabled INTEGER NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS receipt_print_jobs (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BillId TEXT NOT NULL,
+                PrinterName TEXT NOT NULL,
+                DocumentName TEXT NOT NULL,
+                PayloadText TEXT NOT NULL,
+                Copies INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                Attempts INTEGER NOT NULL,
+                LastError TEXT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                PrintedAtUtc TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_receipt_print_jobs_BillId ON receipt_print_jobs (BillId);
+            CREATE INDEX IF NOT EXISTS IX_receipt_print_jobs_Status_CreatedAtUtc ON receipt_print_jobs (Status, CreatedAtUtc);
             """;
 
         await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
