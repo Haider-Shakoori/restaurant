@@ -13,8 +13,8 @@ public sealed record OperationalSnapshot(
     [property: JsonPropertyName("branches")] IReadOnlyList<BranchSnapshot> Branches,
     [property: JsonPropertyName("staff")] IReadOnlyList<StaffSnapshot> Staff,
     [property: JsonPropertyName("menu")] IReadOnlyList<MenuCategorySnapshot> Menu,
-    [property: JsonPropertyName("kitchen")] KitchenSnapshot Kitchen,
-    [property: JsonPropertyName("tables")] IReadOnlyList<DiningTableSnapshot> Tables);
+    [property: JsonPropertyName("tables")] IReadOnlyList<DiningTableSnapshot> Tables,
+    [property: JsonPropertyName("kitchen")] KitchenSnapshot? Kitchen = null);
 
 public sealed record BranchSnapshot(
     [property: JsonPropertyName("id")] string Id,
