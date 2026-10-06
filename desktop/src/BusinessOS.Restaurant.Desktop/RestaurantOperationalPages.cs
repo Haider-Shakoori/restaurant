@@ -258,15 +258,64 @@ internal static class RestaurantOperationalPages
 
     private static FrameworkElement Settings(LanDiagnosticsViewModel diagnostics)
     {
+        var panel = Stack();
+        panel.DataContext = diagnostics;
+
+        panel.Children.Add(Cards(
+            ("LAN STATUS", diagnostics.NetworkMode),
+            ("WAITER DEVICES", diagnostics.TerminalSummary),
+            ("OFFLINE LEASE", diagnostics.LeaseStatus),
+            ("CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts")));
+
+        panel.Children.Add(Card(
+            "Local restaurant network",
+            $"{diagnostics.StatusMessage}\n\nCloud: {diagnostics.CloudStatus}\n\nWaiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid."));
+
+        var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
+
+        var refresh = new Button { Content = "Refresh status", MinWidth = 130, Height = 38, Margin = new Thickness(0, 0, 10, 0) };
+        refresh.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.RefreshCommand)));
+        actions.Children.Add(refresh);
+
+        var toggle = new Button { MinWidth = 140, Height = 38, Margin = new Thickness(0, 0, 10, 0) };
+        toggle.SetBinding(Button.ContentProperty, new Binding(nameof(LanDiagnosticsViewModel.ToggleTerminalLabel)));
+        toggle.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.ToggleSelectedTerminalCommand)));
+        actions.Children.Add(toggle);
+
+        var unpair = new Button { Content = "Unpair device", MinWidth = 130, Height = 38 };
+        unpair.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.UnpairSelectedTerminalCommand)));
+        actions.Children.Add(unpair);
+        panel.Children.Add(actions);
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Paired waiter devices",
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 8, 0, 10)
+        });
+
         var grid = GridFor(diagnostics.Terminals);
+        grid.MinHeight = 320;
+        grid.SetBinding(DataGrid.SelectedItemProperty, new Binding(nameof(LanDiagnosticsViewModel.SelectedTerminal))
+        {
+            Mode = BindingMode.TwoWay
+        });
         grid.Columns.Add(Column("Device", "DisplayName", 220));
         grid.Columns.Add(Column("Type", "ClientType", 120));
         grid.Columns.Add(Column("User", "UserName", 180));
         grid.Columns.Add(Column("Role", "UserRole", 120));
         grid.Columns.Add(Column("Status", "Status", 120));
+        grid.Columns.Add(Column("Enabled", "IsEnabled", 90));
         grid.Columns.Add(Column("IP address", "LastIpAddress", 160));
         grid.Columns.Add(Column("Last seen", "LastSeenAtUtc", 210));
-        return Section("LAN & mobile devices", $"{diagnostics.NetworkMode} · {diagnostics.TerminalSummary}\nMobile devices connect to the desktop host over the restaurant LAN/Wi-Fi.", grid);
+        panel.Children.Add(grid);
+
+        panel.Children.Add(Card(
+            "Device control",
+            "Select a waiter device above to enable/disable or unpair it. Device-management actions require an Owner or Manager session. Disabling or unpairing a terminal does not disable the restaurant desktop or other LAN terminals."));
+
+        return Scroll(panel);
     }
 
     private static FrameworkElement Placeholder(string route) => Section(route, "This management screen is part of the operational UI completion phase.", new TextBlock { Text = "The local service layer already exists; the full editing surface is being connected.", Foreground = System.Windows.Media.Brushes.SlateGray });
