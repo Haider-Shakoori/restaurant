@@ -126,4 +126,162 @@ public static class LocalEndpointMappings
             return Results.Ok(new { data });
         });
     }
+    public static void MapLocalKitchen(this WebApplication app)
+    {
+        app.MapGet("/api/v1/kitchen/tickets", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            string? station_id,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new
+                    {
+                        code = "unauthenticated",
+                        message = "This kitchen terminal has not been validated for local restaurant access.",
+                    },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (principal.UserRole is not ("owner" or "manager" or "kitchen"))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "This user cannot operate the kitchen display." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            var data = await kitchen.ActiveTicketsAsync(station_id, token);
+            return Results.Ok(new { data });
+        });
+
+        app.MapPost("/api/v1/kitchen/tickets/{ticketId}/start", async (
+            string ticketId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.StartAsync(ticketId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/tickets/{ticketId}/ready", async (
+            string ticketId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.ReadyAsync(ticketId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPut("/api/v1/kitchen/stations/{stationId}/printer", async (
+            string stationId,
+            LocalPrinterBindingRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Restaurant management authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (principal.UserRole is not ("owner" or "manager"))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "Only an owner or manager can configure kitchen printers." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            try
+            {
+                await kitchen.ConfigurePrinterAsync(
+                    stationId,
+                    body.PrinterName,
+                    body.Copies,
+                    body.Enabled,
+                    token);
+                return Results.NoContent();
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+        });
+    }
+
 }

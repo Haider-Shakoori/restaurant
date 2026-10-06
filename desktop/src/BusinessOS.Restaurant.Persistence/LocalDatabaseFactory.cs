@@ -128,6 +128,80 @@ public sealed class LocalDatabaseFactory
             );
             CREATE INDEX IF NOT EXISTS IX_local_changes_EntityType_EntityId ON local_changes (EntityType, EntityId);
             CREATE INDEX IF NOT EXISTS IX_local_changes_OwnerUserId ON local_changes (OwnerUserId);
+
+            CREATE TABLE IF NOT EXISTS kitchen_stations (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                SortOrder INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_stations_BranchId_Code ON kitchen_stations (BranchId, Code);
+            CREATE INDEX IF NOT EXISTS IX_kitchen_stations_BranchId_SortOrder ON kitchen_stations (BranchId, SortOrder);
+
+            CREATE TABLE IF NOT EXISTS menu_item_kitchen_routes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                MenuItemId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                KitchenStationId TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_menu_item_kitchen_routes_MenuItemId_BranchId ON menu_item_kitchen_routes (MenuItemId, BranchId);
+            CREATE INDEX IF NOT EXISTS IX_menu_item_kitchen_routes_KitchenStationId ON menu_item_kitchen_routes (KitchenStationId);
+
+            CREATE TABLE IF NOT EXISTS kitchen_tickets (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                KitchenStationId TEXT NOT NULL,
+                SubmittedByUserId INTEGER NOT NULL,
+                TicketNumber TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                QueuedAt TEXT NOT NULL,
+                StartedAt TEXT NULL,
+                ReadyAt TEXT NULL,
+                CompletedAt TEXT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_TicketNumber ON kitchen_tickets (TicketNumber);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_OrderId_KitchenStationId ON kitchen_tickets (OrderId, KitchenStationId);
+            CREATE INDEX IF NOT EXISTS IX_kitchen_tickets_KitchenStationId_Status ON kitchen_tickets (KitchenStationId, Status);
+
+            CREATE TABLE IF NOT EXISTS kitchen_ticket_items (
+                Id TEXT NOT NULL PRIMARY KEY,
+                KitchenTicketId TEXT NOT NULL,
+                OrderItemId TEXT NOT NULL,
+                ItemName TEXT NOT NULL,
+                Quantity INTEGER NOT NULL,
+                Notes TEXT NULL,
+                Status TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_ticket_items_OrderItemId ON kitchen_ticket_items (OrderItemId);
+            CREATE INDEX IF NOT EXISTS IX_kitchen_ticket_items_KitchenTicketId ON kitchen_ticket_items (KitchenTicketId);
+
+            CREATE TABLE IF NOT EXISTS kitchen_printer_bindings (
+                KitchenStationId TEXT NOT NULL PRIMARY KEY,
+                PrinterName TEXT NOT NULL,
+                Copies INTEGER NOT NULL,
+                IsEnabled INTEGER NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS print_jobs (
+                Id TEXT NOT NULL PRIMARY KEY,
+                KitchenTicketId TEXT NOT NULL,
+                PrinterName TEXT NOT NULL,
+                DocumentName TEXT NOT NULL,
+                PayloadText TEXT NOT NULL,
+                Copies INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                Attempts INTEGER NOT NULL,
+                LastError TEXT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                PrintedAtUtc TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_print_jobs_KitchenTicketId ON print_jobs (KitchenTicketId);
+            CREATE INDEX IF NOT EXISTS IX_print_jobs_Status_CreatedAtUtc ON print_jobs (Status, CreatedAtUtc);
             """;
 
         await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);

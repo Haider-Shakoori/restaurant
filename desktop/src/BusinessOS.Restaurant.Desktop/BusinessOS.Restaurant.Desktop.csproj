@@ -13,6 +13,7 @@
     <ProjectReference Include="../BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
     <ProjectReference Include="../BusinessOS.Restaurant.LocalServer/BusinessOS.Restaurant.LocalServer.csproj" />
     <ProjectReference Include="../BusinessOS.Restaurant.Sync/BusinessOS.Restaurant.Sync.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Printing/BusinessOS.Restaurant.Printing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />

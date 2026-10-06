@@ -14,11 +14,17 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalMenuItemModifierGroup> MenuItemModifierGroups => Set<LocalMenuItemModifierGroup>();
     public DbSet<LocalStaffUser> StaffUsers => Set<LocalStaffUser>();
     public DbSet<LocalOperationalState> OperationalStates => Set<LocalOperationalState>();
+    public DbSet<LocalKitchenStation> KitchenStations => Set<LocalKitchenStation>();
+    public DbSet<LocalMenuItemKitchenRoute> MenuItemKitchenRoutes => Set<LocalMenuItemKitchenRoute>();
     public DbSet<LocalPairedTerminal> PairedTerminals => Set<LocalPairedTerminal>();
     public DbSet<LocalOrder> Orders => Set<LocalOrder>();
     public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
     public DbSet<LocalMutation> Mutations => Set<LocalMutation>();
     public DbSet<LocalChange> Changes => Set<LocalChange>();
+    public DbSet<LocalKitchenTicket> KitchenTickets => Set<LocalKitchenTicket>();
+    public DbSet<LocalKitchenTicketItem> KitchenTicketItems => Set<LocalKitchenTicketItem>();
+    public DbSet<LocalKitchenPrinterBinding> KitchenPrinterBindings => Set<LocalKitchenPrinterBinding>();
+    public DbSet<LocalPrintJob> PrintJobs => Set<LocalPrintJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -91,6 +97,22 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.ToTable("operational_state");
             entity.HasKey(value => value.Id);
         });
+        modelBuilder.Entity<LocalKitchenStation>(entity =>
+        {
+            entity.ToTable("kitchen_stations");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.Code }).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.SortOrder });
+        });
+
+        modelBuilder.Entity<LocalMenuItemKitchenRoute>(entity =>
+        {
+            entity.ToTable("menu_item_kitchen_routes");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.MenuItemId, value.BranchId }).IsUnique();
+            entity.HasIndex(value => value.KitchenStationId);
+        });
+
         modelBuilder.Entity<LocalPairedTerminal>(entity =>
         {
             entity.ToTable("paired_terminals");
@@ -134,6 +156,37 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasIndex(value => new { value.EntityType, value.EntityId });
             entity.HasIndex(value => value.OwnerUserId);
         });
+        modelBuilder.Entity<LocalKitchenTicket>(entity =>
+        {
+            entity.ToTable("kitchen_tickets");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.TicketNumber).IsUnique();
+            entity.HasIndex(value => new { value.OrderId, value.KitchenStationId }).IsUnique();
+            entity.HasIndex(value => new { value.KitchenStationId, value.Status });
+        });
+
+        modelBuilder.Entity<LocalKitchenTicketItem>(entity =>
+        {
+            entity.ToTable("kitchen_ticket_items");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.OrderItemId).IsUnique();
+            entity.HasIndex(value => value.KitchenTicketId);
+        });
+
+        modelBuilder.Entity<LocalKitchenPrinterBinding>(entity =>
+        {
+            entity.ToTable("kitchen_printer_bindings");
+            entity.HasKey(value => value.KitchenStationId);
+        });
+
+        modelBuilder.Entity<LocalPrintJob>(entity =>
+        {
+            entity.ToTable("print_jobs");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.KitchenTicketId).IsUnique();
+            entity.HasIndex(value => new { value.Status, value.CreatedAtUtc });
+        });
+
 
     }
 }

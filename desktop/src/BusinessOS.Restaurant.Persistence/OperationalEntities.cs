@@ -94,3 +94,22 @@ public sealed class LocalOperationalState
     public DateTimeOffset ServerTime { get; set; }
     public DateTimeOffset RefreshedAtUtc { get; set; }
 }
+
+
+public sealed class LocalKitchenStation
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class LocalMenuItemKitchenRoute
+{
+    public required string Id { get; set; }
+    public required string MenuItemId { get; set; }
+    public required string BranchId { get; set; }
+    public required string KitchenStationId { get; set; }
+}

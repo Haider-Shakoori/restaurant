@@ -9,8 +9,10 @@ use App\Models\AdminUser;
 use App\Models\Business;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
+use App\Models\KitchenStation;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
+use App\Models\MenuItemKitchenRoute;
 use App\Models\MenuModifierGroup;
 use App\Models\Order;
 use App\Models\Plan;
@@ -302,6 +304,22 @@ class MobileOfflineSyncTest extends TestCase
         ]);
 
         $menuItem->modifierGroups()->attach($group->id, ['sort_order' => 1]);
+
+        $branch = RestaurantBranch::query()->firstOrFail();
+        $station = KitchenStation::query()->create([
+            'branch_id' => $branch->id,
+            'code' => 'GRILL',
+            'name' => 'Grill Station',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        MenuItemKitchenRoute::query()->create([
+            'menu_item_id' => $menuItem->id,
+            'branch_id' => $branch->id,
+            'kitchen_station_id' => $station->id,
+        ]);
+
         tenancy()->end();
 
         $token = $this->login($domain, 'waiter1@restaurant.test');
@@ -314,7 +332,12 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.name', 'Size')
             ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.min_selections', 1)
             ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.options.0.name', 'Large')
-            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.options.0.price_delta', '50.00');
+            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.options.0.price_delta', '50.00')
+            ->assertJsonCount(1, 'data.kitchen.stations')
+            ->assertJsonCount(1, 'data.kitchen.routes')
+            ->assertJsonPath('data.kitchen.stations.0.code', 'GRILL')
+            ->assertJsonPath('data.kitchen.routes.0.menu_item_id', $menuItem->id)
+            ->assertJsonPath('data.kitchen.routes.0.kitchen_station_id', $station->id);
     }
 
     public function test_sync_requires_valid_activated_device_secret_in_addition_to_user_token(): void

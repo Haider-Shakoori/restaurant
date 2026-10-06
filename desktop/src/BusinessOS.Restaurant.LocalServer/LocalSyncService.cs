@@ -22,13 +22,16 @@ public sealed class LocalSyncService
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
     private readonly OperationalSnapshotStore _catalogStore;
+    private readonly LocalKitchenService _kitchen;
 
     public LocalSyncService(
         LocalDatabaseFactory databaseFactory,
-        OperationalSnapshotStore catalogStore)
+        OperationalSnapshotStore catalogStore,
+        LocalKitchenService? kitchen = null)
     {
         _databaseFactory = databaseFactory;
         _catalogStore = catalogStore;
+        _kitchen = kitchen ?? new LocalKitchenService(databaseFactory);
     }
 
     public async Task<object> BootstrapAsync(
@@ -84,6 +87,25 @@ public sealed class LocalSyncService
             }).ToArray(),
             staff,
             menu,
+            kitchen = new
+            {
+                stations = catalog.KitchenStations.Select(value => new
+                {
+                    id = value.Id,
+                    branch_id = value.BranchId,
+                    code = value.Code,
+                    name = value.Name,
+                    sort_order = value.SortOrder,
+                    is_active = value.IsActive,
+                }).ToArray(),
+                routes = catalog.KitchenRoutes.Select(value => new
+                {
+                    id = value.Id,
+                    menu_item_id = value.MenuItemId,
+                    branch_id = value.BranchId,
+                    kitchen_station_id = value.KitchenStationId,
+                }).ToArray(),
+            },
             tables,
             orders,
         };
@@ -492,6 +514,8 @@ public sealed class LocalSyncService
         order.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
 
+        await _kitchen.DispatchAsync(db, order, principal, cancellationToken);
+
         var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
         AddChange(db, "order", order.Id, order.WaiterId, snapshot);
 
@@ -678,6 +702,17 @@ public sealed class LocalSyncService
             .OrderBy(value => value.CreatedAtUtc)
             .ToArray();
 
+        var tickets = await db.KitchenTickets
+            .Where(value => value.OrderId == order.Id)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
+        var ticketSnapshots = new List<object>(tickets.Length);
+
+        foreach (var ticket in tickets)
+        {
+            ticketSnapshots.Add(await LocalKitchenService.TicketSnapshotAsync(db, ticket, cancellationToken));
+        }
+
         return new
         {
             id = order.Id,
@@ -709,7 +744,7 @@ public sealed class LocalSyncService
                 name = order.WaiterName,
             },
             items = items.Select(LineSnapshot).ToArray(),
-            kitchen_tickets = Array.Empty<object>(),
+            kitchen_tickets = ticketSnapshots.ToArray(),
         };
     }
 
