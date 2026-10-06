@@ -27,11 +27,11 @@ public sealed class LocalSyncService
     public LocalSyncService(
         LocalDatabaseFactory databaseFactory,
         OperationalSnapshotStore catalogStore,
-        LocalKitchenService kitchen)
+        LocalKitchenService? kitchen = null)
     {
         _databaseFactory = databaseFactory;
         _catalogStore = catalogStore;
-        _kitchen = kitchen;
+        _kitchen = kitchen ?? new LocalKitchenService(databaseFactory);
     }
 
     public async Task<object> BootstrapAsync(
