@@ -20,6 +20,7 @@ use App\Http\Controllers\Tenant\KitchenTicketController;
 use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
+use App\Http\Controllers\Tenant\MobilePairingController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OperatingExpenseController;
 use App\Http\Controllers\Tenant\OrderController;
@@ -151,9 +152,17 @@ Route::middleware($tenantMiddleware)
             ->middleware('throttle:10,1')
             ->name('tenant.api.auth.login');
 
+        Route::post('/mobile/pair/redeem', [MobilePairingController::class, 'redeem'])
+            ->middleware('throttle:20,1')
+            ->name('tenant.api.mobile.pair.redeem');
+
         Route::middleware(['auth:sanctum', 'subscription.active'])->group(function (): void {
             Route::post('/auth/logout', [TenantAuthController::class, 'logout'])
                 ->name('tenant.api.auth.logout');
+
+            Route::post('/mobile/pairings', [MobilePairingController::class, 'create'])
+                ->middleware('tenant.role:owner,admin,manager')
+                ->name('tenant.api.mobile.pair.create');
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
