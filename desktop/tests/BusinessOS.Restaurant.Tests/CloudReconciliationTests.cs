@@ -137,6 +137,50 @@ public sealed class CloudReconciliationTests
         }
     }
 
+
+    [Fact]
+    public async Task Cloud_pull_imports_supplier_and_advances_cursor()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+
+            using var http = new HttpClient(new QueueHandler(
+                Json(HttpStatusCode.OK, """
+                {"data":{"server_time":"2026-10-06T18:00:01Z","cursor":12,"has_more":false,"changes":[{"sequence":12,"entity_type":"supplier","entity_id":"cloud-supplier-2","operation":"upsert","payload":{"id":"cloud-supplier-2","code":"SUP-2","name":"Cloud Supplier","phone":null,"email":null,"address":null,"is_active":true},"occurred_at":"2026-10-06T18:00:00Z","local_links":[]}]}}
+                """)));
+
+            var service = new CloudReconciliationService(
+                factory,
+                new CloudReconciliationClient(http));
+
+            var result = await service.RunOnceAsync(
+                Activation(),
+                Session());
+
+            Assert.Equal(1, result.Pulled);
+            Assert.Equal(12, result.Cursor);
+
+            await using var verify = factory.Create();
+            var supplier = await verify.Suppliers.SingleAsync();
+            var link = await verify.CloudEntityLinks.SingleAsync();
+            var state = await verify.CloudSyncStates.SingleAsync();
+
+            Assert.Equal("SUP-2", supplier.Code);
+            Assert.Equal("Cloud Supplier", supplier.Name);
+            Assert.Equal(supplier.Id, link.LocalEntityId);
+            Assert.Equal("cloud-supplier-2", link.CloudEntityId);
+            Assert.Equal(12, state.PullCursor);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static ActivationState Activation()
     {
         using var document = JsonDocument.Parse("{}");
