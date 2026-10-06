@@ -13,6 +13,7 @@ public sealed record OperationalSnapshot(
     [property: JsonPropertyName("branches")] IReadOnlyList<BranchSnapshot> Branches,
     [property: JsonPropertyName("staff")] IReadOnlyList<StaffSnapshot> Staff,
     [property: JsonPropertyName("menu")] IReadOnlyList<MenuCategorySnapshot> Menu,
+    [property: JsonPropertyName("kitchen")] KitchenSnapshot Kitchen,
     [property: JsonPropertyName("tables")] IReadOnlyList<DiningTableSnapshot> Tables);
 
 public sealed record BranchSnapshot(
@@ -77,3 +78,22 @@ public sealed record DiningAreaSummary(
 public sealed record BranchSummary(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string Name);
+
+
+public sealed record KitchenSnapshot(
+    [property: JsonPropertyName("stations")] IReadOnlyList<KitchenStationSnapshot> Stations,
+    [property: JsonPropertyName("routes")] IReadOnlyList<MenuItemKitchenRouteSnapshot> Routes);
+
+public sealed record KitchenStationSnapshot(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("sort_order")] int SortOrder,
+    [property: JsonPropertyName("is_active")] bool IsActive);
+
+public sealed record MenuItemKitchenRouteSnapshot(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("menu_item_id")] string MenuItemId,
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("kitchen_station_id")] string KitchenStationId);
