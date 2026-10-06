@@ -3,5 +3,39 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+        <DrawingImage x:Key="BusinessOSRestaurantIcon">
+            <DrawingImage.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#071A2E">
+                        <GeometryDrawing.Geometry>
+                            <EllipseGeometry Center="54,54" RadiusX="50" RadiusY="50"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#0B82F6">
+                        <GeometryDrawing.Geometry>
+                            <EllipseGeometry Center="54,54" RadiusX="39" RadiusY="39"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#37C6FF">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <EllipseGeometry Center="81,28" RadiusX="6" RadiusY="6"/>
+                                <EllipseGeometry Center="27,82" RadiusX="4.5" RadiusY="4.5"/>
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="White">
+                        <GeometryDrawing.Geometry>
+                            <PathGeometry Figures="M35,26 L57,26 C72,26 79,33 79,44 C79,52 75,57 68,60 C77,63 82,70 82,79 C82,93 71,101 55,101 L35,101 Z M47,38 L47,55 L56,55 C64,55 68,52 68,46 C68,41 64,38 56,38 Z M47,66 L47,89 L57,89 C65,89 70,85 70,78 C70,70 65,66 56,66 Z"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#071A2E">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="22,92,64,4" RadiusX="2" RadiusY="2"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingImage.Drawing>
+        </DrawingImage>
     </Application.Resources>
 </Application>
