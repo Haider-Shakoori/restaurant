@@ -164,6 +164,64 @@ internal static class OperationalActionViews
         return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
+
+    public static async Task<FrameworkElement> ClosingAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        await using var db = factory.Create();
+
+        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+            .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
+        var sessions = await db.CashierSessions.AsNoTracking().OrderByDescending(x => x.OpenedAt).Take(50)
+            .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt)).ToListAsync();
+        var closings = await db.DailyClosings.AsNoTracking().OrderByDescending(x => x.BusinessDate).Take(30)
+            .Select(x => new ClosingChoice(x.Id, x.BusinessDate, x.Status, x.FinalizedAt)).ToListAsync();
+
+        var workflow = new DesktopRestaurantWorkflowService();
+        var root = new StackPanel();
+        root.Children.Add(Header("Daily closing", "Restaurant end-of-day control. Close cashier sessions and staff shifts before finalizing the business date."));
+
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0,0,0,12) };
+        var branchBox = Combo(branches, "Label"); branchBox.Width = 220;
+        var dateBox = new TextBox { Text = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"), Width = 130, Height = 34, Margin = new Thickness(8,4,8,6) };
+        var finalize = Button("Finalize day");
+        var status = new TextBlock { Margin = new Thickness(12,10,0,0), Foreground = System.Windows.Media.Brushes.SlateGray, TextWrapping = TextWrapping.Wrap };
+        controls.Children.Add(branchBox); controls.Children.Add(dateBox); controls.Children.Add(finalize); controls.Children.Add(status);
+        finalize.Click += async (_, _) =>
+        {
+            try
+            {
+                if (branchBox.SelectedItem is not Choice branch) throw new InvalidOperationException("Select a branch.");
+                if (!DateOnly.TryParse(dateBox.Text, out var date)) throw new InvalidOperationException("Enter a valid business date.");
+                await workflow.FinalizeDailyClosingAsync(branch.Id, date);
+                status.Text = $"Business date {date:yyyy-MM-dd} finalized.";
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+        };
+        root.Children.Add(Card(controls));
+
+        var sessionGrid = DataGrid(sessions);
+        sessionGrid.Columns.Add(Column("Cashier", nameof(CashierSessionChoice.Cashier), 180));
+        sessionGrid.Columns.Add(Column("Status", nameof(CashierSessionChoice.Status), 100));
+        sessionGrid.Columns.Add(Column("Opening AFN", nameof(CashierSessionChoice.OpeningCash), 120));
+        sessionGrid.Columns.Add(Column("Expected", nameof(CashierSessionChoice.ExpectedCash), 110));
+        sessionGrid.Columns.Add(Column("Declared", nameof(CashierSessionChoice.DeclaredCash), 110));
+        sessionGrid.Columns.Add(Column("Variance", nameof(CashierSessionChoice.Variance), 110));
+        sessionGrid.Columns.Add(Column("Opened", nameof(CashierSessionChoice.OpenedAt), 190));
+        root.Children.Add(Header("Cashier sessions", "Cash control is separated from waiter ordering and kitchen operations."));
+        root.Children.Add(sessionGrid);
+
+        var closingGrid = DataGrid(closings);
+        closingGrid.MinHeight = 220;
+        closingGrid.Columns.Add(Column("Business date", nameof(ClosingChoice.BusinessDate), 150));
+        closingGrid.Columns.Add(Column("Status", nameof(ClosingChoice.Status), 120));
+        closingGrid.Columns.Add(Column("Finalized", nameof(ClosingChoice.FinalizedAt), 210));
+        root.Children.Add(Header("Closing history", "Finalized restaurant business dates and audit status."));
+        root.Children.Add(closingGrid);
+        return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    }
+
     private static TextBlock HeaderText(string text, double size, bool bold = false) => new() { Text = text, FontSize = size, FontWeight = bold ? FontWeights.Bold : FontWeights.Normal };
     private static StackPanel Header(string title, string subtitle)
     {
@@ -184,4 +242,6 @@ internal static class OperationalActionViews
     private sealed record OrderChoice(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total);
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
     private sealed record KitchenChoice(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
+    private sealed record CashierSessionChoice(string Id, string Cashier, string Status, decimal OpeningCash, decimal? ExpectedCash, decimal? DeclaredCash, decimal? Variance, DateTimeOffset OpenedAt);
+    private sealed record ClosingChoice(string Id, DateOnly BusinessDate, string Status, DateTimeOffset? FinalizedAt);
 }

@@ -19,6 +19,7 @@ internal static class RestaurantOperationalPages
             "menu" => await MenuAsync(),
             "inventory" => await InventoryAsync(),
             "purchases" => await PurchasesAsync(),
+            "closing" => await OperationalActionViews.ClosingAsync(),
             "reports" => Reports(diagnostics),
             "settings" => Settings(diagnostics),
             _ => Placeholder(route),
