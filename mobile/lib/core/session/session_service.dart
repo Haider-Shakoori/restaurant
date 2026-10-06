@@ -111,6 +111,95 @@ class SessionService {
     return target;
   }
 
+  Future<ConnectionTarget> pairAndLogin({
+    String? localUrl,
+    required String cloudUrl,
+    required String pairingToken,
+    required String email,
+    required String password,
+    String deviceName = 'BusinessOS Waiter',
+    String platform = 'android',
+  }) async {
+    final target = await _connectionResolver.resolve(
+      mode: ConnectionMode.automatic,
+      localUrl: localUrl,
+      cloudUrl: cloudUrl,
+    );
+
+    final deviceUid = await _credentials.deviceUid();
+    final keyResponse = await _api.publicKey(cloudUrl);
+    final publicKey = keyResponse['public_key']!.toString();
+
+    final activation = await _api.redeemPairing(
+      cloudUrl: cloudUrl,
+      pairingToken: pairingToken,
+      deviceUid: deviceUid,
+      deviceName: deviceName,
+      platform: platform,
+      appVersion: '1.0.0',
+    );
+
+    final device = Map<String, Object?>.from(
+      activation['device']! as Map<Object?, Object?>,
+    );
+    final deviceId = device['id']!.toString();
+    final deviceSecret = activation['device_secret']!.toString();
+    final lease = Map<String, Object?>.from(
+      activation['lease']! as Map<Object?, Object?>,
+    );
+
+    final verified = await _leaseVerifier.verify(
+      signedLease: lease,
+      publicKey: publicKey,
+      expectedDeviceId: deviceId,
+      expectedTenantId: target.tenantId,
+    );
+
+    if (!verified.valid) {
+      throw ApiException(
+        code: 'invalid_offline_lease',
+        message:
+            'The QR pairing lease could not be verified: ' + verified.reason,
+      );
+    }
+
+    await _credentials.saveActivation(
+      baseUrl: target.baseUrl,
+      deviceId: deviceId,
+      deviceSecret: deviceSecret,
+      deviceUid: deviceUid,
+      publicKey: publicKey,
+      lease: lease,
+      connectionMode: ConnectionMode.automatic,
+      activeChannel: target.channel,
+      localBaseUrl: target.localBaseUrl,
+      cloudBaseUrl: cloudUrl,
+      tenantId: target.tenantId,
+    );
+
+    final login = await _api.login(
+      baseUrl: target.baseUrl,
+      email: email.trim(),
+      password: password,
+      deviceName: deviceName,
+    );
+    await _credentials.saveAccessToken(login['access_token']!.toString());
+
+    final session = await _credentials.readSession();
+
+    if (session == null) {
+      throw const ApiException(
+        code: 'session_persist_failed',
+        message: 'The paired mobile session could not be stored securely.',
+      );
+    }
+
+    final bootstrap = await _api.syncBootstrap(session);
+    await _database.applyBootstrap(bootstrap);
+
+    return target;
+  }
+
   Future<void> logoutLocal() async {
     await _credentials.clearSession();
   }
