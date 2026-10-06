@@ -1378,6 +1378,48 @@ public static class LocalEndpointMappings
         });
     }
 
+    public static void MapLocalReports(this WebApplication app)
+    {
+        app.MapGet("/api/v1/reports/summary", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated", message = "Management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden", message = "This role cannot view financial reports." }, statusCode: StatusCodes.Status403Forbidden);
+            if (to < from) return Results.BadRequest(new { code = "invalid_period", message = "The report end date must be on or after the start date." });
+            return Results.Ok(new { data = await reports.SummaryAsync(branch_id, from, to, token) });
+        });
+
+        app.MapGet("/api/v1/reports/payments", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(new { data = await reports.PaymentsAsync(branch_id, from, to, token) });
+        });
+
+        app.MapGet("/api/v1/reports/top-items", async (string branch_id, DateOnly from, DateOnly to, int? limit, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(new { data = await reports.TopItemsAsync(branch_id, from, to, limit ?? 10, token) });
+        });
+
+        app.MapGet("/api/v1/reports/closings", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(new { data = await reports.ClosingsAsync(branch_id, from, to, token) });
+        });
+    }
+
+    private static bool CanViewReports(LocalTerminalPrincipal principal) =>
+        principal.UserRole.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
+        principal.UserRole.Equals("manager", StringComparison.OrdinalIgnoreCase) ||
+        principal.UserRole.Equals("accountant", StringComparison.OrdinalIgnoreCase) ||
+        principal.UserRole.Equals("auditor", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsTerminalManager(LocalTerminalPrincipal principal) =>
         principal.UserRole.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
         principal.UserRole.Equals("manager", StringComparison.OrdinalIgnoreCase);

@@ -46,7 +46,8 @@
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="24,0,24,24">
-                <Grid Margin="0,0,0,14">
+                <TabControl>
+                <TabItem Header="LAN &amp; Sync"><StackPanel Margin="12"><Grid Margin="0,0,0,14">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="12" />
@@ -190,7 +191,30 @@
                             </DataGrid.Columns>
                         </DataGrid>
                     </Grid>
-                </Border>
+                </Border></StackPanel></TabItem>
+                    <TabItem Header="Reports &amp; Accounting">
+                        <StackPanel Margin="12" DataContext="{Binding Reports}">
+                            <Grid Margin="0,0,0,14">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="12"/><ColumnDefinition Width="180"/><ColumnDefinition Width="12"/><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Height="34" Text="{Binding BranchId, UpdateSourceTrigger=PropertyChanged}" />
+                                <DatePicker Grid.Column="2" SelectedDate="{Binding From}" />
+                                <DatePicker Grid.Column="4" SelectedDate="{Binding To}" />
+                                <Button Grid.Column="5" Width="120" Height="34" HorizontalAlignment="Right" Command="{Binding RefreshReportsCommand}" Content="Run report"/>
+                            </Grid>
+                            <UniformGrid Columns="4" Margin="0,0,0,14">
+                                <Border Margin="0,0,8,0" Padding="16" CornerRadius="12" Background="White"><StackPanel><TextBlock Foreground="#64748B" Text="Net sales"/><TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding Sales}"/></StackPanel></Border>
+                                <Border Margin="0,0,8,0" Padding="16" CornerRadius="12" Background="White"><StackPanel><TextBlock Foreground="#64748B" Text="Gross profit"/><TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding GrossProfit}"/></StackPanel></Border>
+                                <Border Margin="0,0,8,0" Padding="16" CornerRadius="12" Background="White"><StackPanel><TextBlock Foreground="#64748B" Text="Inventory value"/><TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding InventoryValue}"/></StackPanel></Border>
+                                <Border Padding="16" CornerRadius="12" Background="White"><StackPanel><TextBlock Foreground="#64748B" Text="Cash variance"/><TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding CashVariance}"/></StackPanel></Border>
+                            </UniformGrid>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <DataGrid Grid.Column="0" MinHeight="320" AutoGenerateColumns="False" IsReadOnly="True" ItemsSource="{Binding Payments}"><DataGrid.Columns><DataGridTextColumn Header="Payment method" Width="*" Binding="{Binding Method}"/><DataGridTextColumn Header="Count" Width="*" Binding="{Binding Count}"/><DataGridTextColumn Header="Amount (AFN)" Width="*" Binding="{Binding Amount, StringFormat=N2}"/></DataGrid.Columns></DataGrid>
+                                <DataGrid Grid.Column="2" MinHeight="320" AutoGenerateColumns="False" IsReadOnly="True" ItemsSource="{Binding TopItems}"><DataGrid.Columns><DataGridTextColumn Header="Top item" Width="*" Binding="{Binding ItemName}"/><DataGridTextColumn Header="Qty" Width="*" Binding="{Binding Quantity}"/><DataGridTextColumn Header="Sales (AFN)" Width="*" Binding="{Binding Sales, StringFormat=N2}"/></DataGrid.Columns></DataGrid>
+                            </Grid>
+                        </StackPanel>
+                    </TabItem>
+                </TabControl>
             </StackPanel>
         </ScrollViewer>
     </Grid>

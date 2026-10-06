@@ -46,6 +46,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
 
     public ObservableCollection<LocalTerminalSnapshot> Terminals { get; } = [];
 
+    public ReportsViewModel Reports { get; } = new();
+
     public IAsyncRelayCommand RefreshCommand { get; }
 
     public IAsyncRelayCommand ToggleSelectedTerminalCommand { get; }
