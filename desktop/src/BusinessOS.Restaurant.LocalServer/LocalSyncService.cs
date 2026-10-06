@@ -559,16 +559,16 @@ public sealed class LocalSyncService
     {
         var query = db.Orders
             .Where(value => ActiveStatuses.Contains(value.Status))
-            .OrderBy(value => value.OpenedAt)
             .AsNoTracking();
 
         if (string.Equals(principal.UserRole, "waiter", StringComparison.OrdinalIgnoreCase))
         {
-            query = query.Where(value => value.WaiterId == principal.UserId)
-                .OrderBy(value => value.OpenedAt);
+            query = query.Where(value => value.WaiterId == principal.UserId);
         }
 
-        var orders = await query.ToArrayAsync(cancellationToken);
+        var orders = (await query.ToArrayAsync(cancellationToken))
+            .OrderBy(value => value.OpenedAt)
+            .ToArray();
         var result = new List<object>(orders.Length);
 
         foreach (var order in orders)
@@ -671,11 +671,12 @@ public sealed class LocalSyncService
         var branch = await db.Branches
             .AsNoTracking()
             .SingleAsync(value => value.Id == area.BranchId, cancellationToken);
-        var items = await db.OrderItems
+        var items = (await db.OrderItems
             .Where(value => value.OrderId == order.Id)
-            .OrderBy(value => value.CreatedAtUtc)
             .AsNoTracking()
-            .ToArrayAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken))
+            .OrderBy(value => value.CreatedAtUtc)
+            .ToArray();
 
         return new
         {
