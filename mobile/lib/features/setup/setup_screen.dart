@@ -131,7 +131,46 @@ class _SetupScreenState extends State<SetupScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Icon(Icons.restaurant_menu, size: 52),
+                      Center(
+                        child: Container(
+                          width: 72,
+                          height: 72,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF071A2E),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                width: 56,
+                                height: 56,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF0B82F6),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const Text(
+                                'B',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 34,
+                                  fontWeight: FontWeight.w900,
+                                  height: 1,
+                                ),
+                              ),
+                              const Positioned(
+                                right: 11,
+                                top: 11,
+                                child: CircleAvatar(
+                                  radius: 5,
+                                  backgroundColor: Color(0xFF37C6FF),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       Text(
                         s.setupTitle,
