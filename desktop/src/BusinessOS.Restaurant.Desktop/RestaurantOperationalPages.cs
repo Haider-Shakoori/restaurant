@@ -229,11 +229,28 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
+        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+            .Select(x => new ExpenseBranchChoice(x.Id, x.Name)).ToListAsync();
         var rows = await (from expense in db.Expenses.AsNoTracking()
                           join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
                           orderby expense.ExpenseDate descending, expense.RecordedAtUtc descending
                           select new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
                               expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference)).Take(500).ToListAsync();
+
+        var panel = Stack();
+        panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
+
+        var form = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
+        var branchBox = new ComboBox { ItemsSource = branches, DisplayMemberPath = nameof(ExpenseBranchChoice.Name), Width = 180, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var category = new TextBox { Text = "operations", Width = 140, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var description = new TextBox { Width = 240, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var amount = new TextBox { Text = "0", Width = 100, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var method = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Width = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var record = new Button { Content = "Record expense", MinWidth = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
+        var status = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, Margin = new Thickness(8,11,0,0), TextWrapping = TextWrapping.Wrap };
+        form.Children.Add(branchBox); form.Children.Add(category); form.Children.Add(description); form.Children.Add(amount); form.Children.Add(method); form.Children.Add(record); form.Children.Add(status);
+        panel.Children.Add(form);
+
         var grid = GridFor(rows);
         grid.Columns.Add(Column("Date", nameof(ExpenseRow.Date), 120));
         grid.Columns.Add(Column("Branch", nameof(ExpenseRow.Branch), 160));
@@ -242,7 +259,24 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Amount AFN", nameof(ExpenseRow.Amount), 120));
         grid.Columns.Add(Column("Method", nameof(ExpenseRow.Method), 130));
         grid.Columns.Add(Column("Reference", nameof(ExpenseRow.Reference), 180));
-        return Section("Expenses", "Restaurant operating expenses are stored locally, audited and queued for cloud sync.", grid);
+        panel.Children.Add(grid);
+
+        var workflow = new DesktopRestaurantWorkflowService();
+        record.Click += async (_, _) =>
+        {
+            try
+            {
+                if (branchBox.SelectedItem is not ExpenseBranchChoice branch) throw new InvalidOperationException("Select a branch.");
+                if (string.IsNullOrWhiteSpace(description.Text)) throw new InvalidOperationException("Enter an expense description.");
+                if (!decimal.TryParse(amount.Text, out var value) || value <= 0) throw new InvalidOperationException("Enter a positive expense amount.");
+                await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text, value, method.SelectedItem?.ToString() ?? "cash", DateOnly.FromDateTime(DateTime.Today));
+                status.Text = "Expense recorded locally. Refresh the page to update the ledger.";
+                description.Clear(); amount.Text = "0";
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+        };
+
+        return Scroll(panel);
     }
 
     private static FrameworkElement Reports(LanDiagnosticsViewModel diagnostics)
@@ -380,5 +414,6 @@ internal static class RestaurantOperationalPages
     private sealed record ReceiptRow(string Number, string Status, DateTimeOffset ReceivedAt, string PurchaseOrderId);
     private sealed record StaffRow(string Name, string Email, string Role, bool Active);
     private sealed record ShiftRow(string Name, string Role, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int BreakMinutes);
+    private sealed record ExpenseBranchChoice(string Id, string Name);
     private sealed record ExpenseRow(DateOnly Date, string Branch, string Category, string Description, decimal Amount, string Currency, string Method, string? Reference);
 }
