@@ -141,6 +141,34 @@ void main() {
     expect(store.states['last_sync_error'], '');
   });
 
+
+  test('local channel sends terminal heartbeat before sync', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 0,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session(
+        activeChannel: ConnectionChannel.local,
+        baseUrl: 'http://192.168.1.20:8787',
+      )),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    await engine.syncNow();
+
+    expect(api.heartbeatCount, 1);
+  });
+
   test('network failure schedules exponential retry', () async {
     final mutation = OutboxMutation(
       id: 1,
@@ -176,15 +204,19 @@ void main() {
   });
 }
 
-SessionCredentials _session() {
-  return const SessionCredentials(
-    baseUrl: 'https://restaurant.test',
+SessionCredentials _session({
+  ConnectionChannel activeChannel = ConnectionChannel.cloud,
+  String baseUrl = 'https://restaurant.test',
+}) {
+  return SessionCredentials(
+    baseUrl: baseUrl,
     accessToken: 'token',
     deviceId: 'device-1',
     deviceSecret: 'secret',
     deviceUid: 'uid-1',
     publicKey: 'public-key',
-    lease: <String, Object?>{
+    activeChannel: activeChannel,
+    lease: const <String, Object?>{
       'payload': <String, Object?>{},
       'signature': 'signature',
       'algorithm': 'Ed25519',
@@ -356,6 +388,18 @@ class _FakeApi implements SyncApi {
   final List<Map<String, Object?>> _pullResponses;
   final List<int> pullCursors = <int>[];
   int _pullIndex = 0;
+  int heartbeatCount = 0;
+
+  @override
+  Future<Map<String, Object?>> heartbeat(
+    SessionCredentials credentials,
+  ) async {
+    heartbeatCount += 1;
+    return const <String, Object?>{
+      'network_mode': 'healthy',
+      'local_operations_allowed': true,
+    };
+  }
 
   @override
   Future<Map<String, Object?>> pull(
