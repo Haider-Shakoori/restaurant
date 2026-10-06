@@ -19,6 +19,7 @@ use Stancl\Tenancy\Database\Concerns\CentralConnection;
     'key_last4',
     'status',
     'max_devices_snapshot',
+    'max_mobile_devices_snapshot',
     'generated_at',
     'last_used_at',
     'revoked_at',
