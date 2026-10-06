@@ -12,11 +12,13 @@ public sealed class DesktopRestaurantWorkflowService
     private readonly LocalKitchenService _kitchen;
     private readonly LocalSyncService _sync;
     private readonly LocalCashierService _cashier;
+    private readonly LocalOperationsControlService _operations;
 
     public DesktopRestaurantWorkflowService()
     {
         _kitchen = new LocalKitchenService(_factory);
         _cashier = new LocalCashierService(_factory);
+        _operations = new LocalOperationsControlService(_factory);
         _sync = new LocalSyncService(_factory, new OperationalSnapshotStore(_factory), _kitchen);
     }
 
@@ -101,6 +103,9 @@ public sealed class DesktopRestaurantWorkflowService
 
     public Task<object[]> OpenBillsAsync(CancellationToken token = default)
         => _cashier.OpenBillsAsync(token);
+
+    public async Task<object> FinalizeDailyClosingAsync(string branchId, DateOnly businessDate, CancellationToken token = default)
+        => await _operations.FinalizeDailyClosingAsync(branchId, businessDate, await CurrentPrincipalAsync(token), token);
 
     private async Task PushSingleAsync(string operation, JsonElement payload, CancellationToken token)
     {
