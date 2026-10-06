@@ -193,7 +193,7 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ],
                       if (showCloudCredentials) ...[
-                      const SizedBox(height: 20),
+                        const SizedBox(height: 20),
                         TextField(
                           controller: _license,
                           autocorrect: false,
@@ -222,7 +222,7 @@ class _SetupScreenState extends State<SetupScreen> {
                             border: const OutlineInputBorder(),
                           ),
                         ),
-                        ],
+                      ],
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -243,7 +243,11 @@ class _SetupScreenState extends State<SetupScreen> {
                                 ),
                               )
                             : const Icon(Icons.lock_open),
-                        label: Text(_mode == ConnectionMode.local ? s.pairDevice : s.connect),
+                        label: Text(
+                          _mode == ConnectionMode.local
+                              ? s.pairDevice
+                              : s.connect,
+                        ),
                       ),
                     ],
                   ),
