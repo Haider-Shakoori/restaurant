@@ -32,6 +32,10 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalTenantPayment> Payments => Set<LocalTenantPayment>();
     public DbSet<LocalReceiptPrinterSetting> ReceiptPrinterSettings => Set<LocalReceiptPrinterSetting>();
     public DbSet<LocalReceiptPrintJob> ReceiptPrintJobs => Set<LocalReceiptPrintJob>();
+    public DbSet<LocalDailyClosing> DailyClosings => Set<LocalDailyClosing>();
+    public DbSet<LocalDailyClosingSnapshot> DailyClosingSnapshots => Set<LocalDailyClosingSnapshot>();
+    public DbSet<LocalWaiterShift> WaiterShifts => Set<LocalWaiterShift>();
+    public DbSet<LocalAuditEvent> AuditEvents => Set<LocalAuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -263,6 +267,53 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => value.BillId);
             entity.HasIndex(value => new { value.Status, value.CreatedAtUtc });
+        });
+
+
+        modelBuilder.Entity<LocalDailyClosing>(entity =>
+        {
+            entity.ToTable("daily_closings");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.BusinessDate }).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.Status });
+        });
+
+        modelBuilder.Entity<LocalDailyClosingSnapshot>(entity =>
+        {
+            entity.ToTable("daily_closing_snapshots");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.DailyClosingId, value.Version }).IsUnique();
+            entity.Property(value => value.GrossSales).HasPrecision(18, 2);
+            entity.Property(value => value.Discounts).HasPrecision(18, 2);
+            entity.Property(value => value.NetSales).HasPrecision(18, 2);
+            entity.Property(value => value.PaymentsTotal).HasPrecision(18, 2);
+            entity.Property(value => value.CashPayments).HasPrecision(18, 2);
+            entity.Property(value => value.CardPayments).HasPrecision(18, 2);
+            entity.Property(value => value.BankPayments).HasPrecision(18, 2);
+            entity.Property(value => value.MobileMoneyPayments).HasPrecision(18, 2);
+            entity.Property(value => value.OtherPayments).HasPrecision(18, 2);
+            entity.Property(value => value.ExpectedCash).HasPrecision(18, 2);
+            entity.Property(value => value.DeclaredCash).HasPrecision(18, 2);
+            entity.Property(value => value.CashVariance).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalWaiterShift>(entity =>
+        {
+            entity.ToTable("waiter_shifts");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.UserId, value.Status });
+            entity.HasIndex(value => new { value.BranchId, value.StartedAt });
+        });
+
+        modelBuilder.Entity<LocalAuditEvent>(entity =>
+        {
+            entity.ToTable("audit_events");
+            entity.HasKey(value => value.Sequence);
+            entity.Property(value => value.Sequence).ValueGeneratedOnAdd();
+            entity.HasIndex(value => value.EventId).IsUnique();
+            entity.HasIndex(value => new { value.Category, value.OccurredAtUtc });
+            entity.HasIndex(value => new { value.EntityType, value.EntityId });
+            entity.HasIndex(value => value.ActorUserId);
         });
 
 

@@ -24,7 +24,7 @@ Native Windows operational client and local-network host for the existing Busine
 6. 🚧 Android -> Desktop waiter ordering, idempotent local mutations and pull cursors
 7. ✅ Kitchen stations, KOT routing, KDS and thermal printing
 8. ✅ Cashier/POS, serve/billing, discounts, split allocations, payments, transfer/merge and receipts
-9. Daily closing, waiter shifts and audit controls
+9. ✅ Daily closing, waiter/staff shifts and audit controls
 10. Inventory, recipes and purchasing
 11. Desktop -> cloud reconciliation, two-way synchronization and conflict handling
 12. LAN terminal management, diagnostics and degraded-network controls

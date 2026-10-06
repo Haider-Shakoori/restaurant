@@ -589,6 +589,211 @@ public static class LocalEndpointMappings
         });
     }
 
+    public static void MapLocalOperationsControl(this WebApplication app)
+    {
+        app.MapPost("/api/v1/shifts", async (
+            LocalStartShiftRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Staff authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await operations.StartShiftAsync(body.BranchId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/shifts/{shiftId}/close", async (
+            string shiftId,
+            LocalEndShiftRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Staff authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await operations.EndShiftAsync(
+                        shiftId,
+                        body.BreakMinutes,
+                        body.Note,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/shifts/active", async (
+            string? branch_id,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await operations.ActiveShiftsAsync(branch_id, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/daily-closings", async (
+            string? branch_id,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier or management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await operations.ListClosingsAsync(branch_id, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/daily-closings/finalize", async (
+            LocalFinalizeDailyClosingRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier or management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await operations.FinalizeDailyClosingAsync(
+                        body.BranchId,
+                        body.BusinessDate,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/daily-closings/{closingId}/reopen", async (
+            string closingId,
+            LocalReopenDailyClosingRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await operations.ReopenDailyClosingAsync(
+                        closingId,
+                        body.Reason,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/audit", async (
+            long? cursor,
+            int? limit,
+            string? category,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalOperationsControlService operations,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await operations.AuditAsync(
+                        Math.Max(0, cursor ?? 0),
+                        limit ?? 100,
+                        category,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+    }
+
     private static IResult CashierConflict(LocalSyncConflictException conflict) =>
         Results.Json(
             new { code = conflict.Code, message = conflict.Message },
