@@ -48,6 +48,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
 
     public ReportsViewModel Reports { get; } = new();
 
+    public MobilePairingViewModel MobilePairing { get; } = new();
+
     public IAsyncRelayCommand RefreshCommand { get; }
 
     public IAsyncRelayCommand ToggleSelectedTerminalCommand { get; }
