@@ -14,6 +14,12 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalMenuItemModifierGroup> MenuItemModifierGroups => Set<LocalMenuItemModifierGroup>();
     public DbSet<LocalStaffUser> StaffUsers => Set<LocalStaffUser>();
     public DbSet<LocalOperationalState> OperationalStates => Set<LocalOperationalState>();
+    public DbSet<LocalDevice> Devices => Set<LocalDevice>();
+    public DbSet<LocalSession> Sessions => Set<LocalSession>();
+    public DbSet<LocalOrder> Orders => Set<LocalOrder>();
+    public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
+    public DbSet<LocalMutation> Mutations => Set<LocalMutation>();
+    public DbSet<LocalChange> Changes => Set<LocalChange>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -85,6 +91,58 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
         {
             entity.ToTable("operational_state");
             entity.HasKey(value => value.Id);
+        });
+
+        modelBuilder.Entity<LocalDevice>(entity =>
+        {
+            entity.ToTable("local_devices");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.DeviceUid).IsUnique();
+            entity.HasIndex(value => value.StaffUserId);
+        });
+
+        modelBuilder.Entity<LocalSession>(entity =>
+        {
+            entity.ToTable("local_sessions");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.TokenHash).IsUnique();
+            entity.HasIndex(value => value.DeviceId);
+        });
+
+        modelBuilder.Entity<LocalOrder>(entity =>
+        {
+            entity.ToTable("orders");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.ClientOrderId).IsUnique();
+            entity.HasIndex(value => new { value.DiningTableId, value.Status });
+            entity.HasIndex(value => new { value.WaiterId, value.Status });
+            entity.Property(value => value.Subtotal).HasPrecision(18, 2);
+            entity.Property(value => value.Total).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalOrderItem>(entity =>
+        {
+            entity.ToTable("order_items");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.OrderId, value.ClientLineId }).IsUnique();
+            entity.Property(value => value.UnitPrice).HasPrecision(18, 2);
+            entity.Property(value => value.LineTotal).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalMutation>(entity =>
+        {
+            entity.ToTable("local_mutations");
+            entity.HasKey(value => value.Id);
+            entity.Property(value => value.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(value => new { value.DeviceId, value.MutationId }).IsUnique();
+        });
+
+        modelBuilder.Entity<LocalChange>(entity =>
+        {
+            entity.ToTable("local_changes");
+            entity.HasKey(value => value.Sequence);
+            entity.Property(value => value.Sequence).ValueGeneratedOnAdd();
+            entity.HasIndex(value => value.OccurredAtUtc);
         });
     }
 }
