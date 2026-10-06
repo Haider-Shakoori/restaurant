@@ -436,12 +436,8 @@ class MobileOfflineSyncTest extends TestCase
 
     public function test_manager_can_generate_one_time_mobile_pairing_and_redeem_it_once(): void
     {
-        [$business, $domain, $tenant] = $this->createActiveBusiness();
-
-        $plan = $business->plan()->firstOrFail();
-        $plan->features()->create([
-            'feature_key' => 'max_mobile_devices',
-            'value' => ['value' => '1'],
+        [$business, $domain, $tenant] = $this->createActiveBusiness([
+            'max_mobile_devices' => '1',
         ]);
 
         app(LicenseService::class)->generate(
@@ -497,7 +493,7 @@ class MobileOfflineSyncTest extends TestCase
     /**
      * @return array{Business, string, Tenant}
      */
-    private function createActiveBusiness(): array
+    private function createActiveBusiness(array $features = []): array
     {
         Carbon::setTestNow(Carbon::parse('2026-10-01 09:00:00', 'Asia/Kabul'));
 
@@ -510,6 +506,13 @@ class MobileOfflineSyncTest extends TestCase
             'feature_key' => 'max_devices',
             'value' => ['value' => '5'],
         ]);
+
+        foreach ($features as $key => $value) {
+            $plan->features()->create([
+                'feature_key' => $key,
+                'value' => ['value' => $value],
+            ]);
+        }
 
         $tenantId = 'sync-'.Str::lower(Str::random(10));
         $database = config('tenancy.database.prefix').$tenantId.config('tenancy.database.suffix');
