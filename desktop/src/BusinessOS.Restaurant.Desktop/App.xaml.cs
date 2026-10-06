@@ -1,3 +1,4 @@
+using System.Net.Http;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
