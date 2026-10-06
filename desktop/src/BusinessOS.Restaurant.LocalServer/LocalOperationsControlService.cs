@@ -51,6 +51,24 @@ public sealed class LocalOperationsControlService
         };
 
         db.WaiterShifts.Add(shift);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "shift.upsert",
+            "waiter_shift",
+            shift.Id,
+            new
+            {
+                branch_id = shift.BranchId,
+                user_public_id = shift.UserPublicId,
+                user_name = shift.UserName,
+                role = shift.Role,
+                status = shift.Status,
+                started_at = shift.StartedAt,
+                ended_at = shift.EndedAt,
+                break_minutes = shift.BreakMinutes,
+                closing_note = shift.ClosingNote,
+            });
         AddAudit(
             db,
             actor,
@@ -100,6 +118,24 @@ public sealed class LocalOperationsControlService
         shift.BreakMinutes = breakMinutes;
         shift.ClosingNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "shift.upsert",
+            "waiter_shift",
+            shift.Id,
+            new
+            {
+                branch_id = shift.BranchId,
+                user_public_id = shift.UserPublicId,
+                user_name = shift.UserName,
+                role = shift.Role,
+                status = shift.Status,
+                started_at = shift.StartedAt,
+                ended_at = shift.EndedAt,
+                break_minutes = shift.BreakMinutes,
+                closing_note = shift.ClosingNote,
+            });
         AddAudit(
             db,
             actor,
@@ -280,6 +316,17 @@ public sealed class LocalOperationsControlService
         closing.FinalizedAt = now;
         closing.ReopenedAt = null;
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "daily_closing.finalize",
+            "daily_closing",
+            closing.Id,
+            new
+            {
+                branch_id = branch.Id,
+                business_date = businessDate.ToString("yyyy-MM-dd"),
+            });
         AddAudit(
             db,
             actor,
@@ -332,6 +379,18 @@ public sealed class LocalOperationsControlService
         closing.Status = "reopened";
         closing.ReopenedAt = DateTimeOffset.UtcNow;
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "daily_closing.reopen",
+            "daily_closing",
+            closing.Id,
+            new
+            {
+                reason = reason.Trim(),
+                business_date = closing.BusinessDate.ToString("yyyy-MM-dd"),
+                branch_id = closing.BranchId,
+            });
         AddAudit(
             db,
             actor,
@@ -439,7 +498,7 @@ public sealed class LocalOperationsControlService
         string? entityId,
         object? payload = null)
     {
-        db.AuditEvents.Add(new LocalAuditEvent
+        var audit = new LocalAuditEvent
         {
             EventId = Guid.CreateVersion7().ToString("N"),
             Category = category,
@@ -452,7 +511,31 @@ public sealed class LocalOperationsControlService
             EntityId = entityId,
             PayloadJson = payload is null ? null : JsonSerializer.Serialize(payload, JsonOptions),
             OccurredAtUtc = DateTimeOffset.UtcNow,
-        });
+        };
+
+        db.AuditEvents.Add(audit);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "audit.append",
+            "audit_event",
+            audit.EventId,
+            new
+            {
+                event_id = audit.EventId,
+                category = audit.Category,
+                event_type = audit.EventType,
+                actor_user_id = audit.ActorUserId,
+                actor_name = audit.ActorName,
+                actor_role = audit.ActorRole,
+                branch_id = audit.BranchId,
+                entity_type = audit.EntityType,
+                entity_id = audit.EntityId,
+                payload,
+                occurred_at = audit.OccurredAtUtc,
+            },
+            audit.OccurredAtUtc,
+            audit.EventId);
     }
 
     private static async Task<object> ClosingSnapshotAsync(

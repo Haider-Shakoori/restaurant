@@ -7,6 +7,7 @@ use App\Enums\PlatformRole;
 use App\Enums\ProvisioningState;
 use App\Models\AdminUser;
 use App\Models\Business;
+use App\Models\DesktopEntityLink;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\KitchenStation;
@@ -358,6 +359,79 @@ class MobileOfflineSyncTest extends TestCase
         ])->getJson("http://{$domain}/api/v1/sync/bootstrap")
             ->assertUnprocessable()
             ->assertJsonValidationErrors('device_secret');
+    }
+
+    public function test_desktop_reconciliation_is_idempotent_links_local_ids_and_exposes_pull_cursor(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'desktop-reconcile-device');
+
+        tenancy()->initialize($tenant);
+        [$waiter, $table] = $this->seedRestaurant('waiter1@restaurant.test');
+        $actorPublicId = $waiter->public_id;
+        tenancy()->end();
+
+        $token = $this->login($domain, 'waiter1@restaurant.test');
+        $headers = $this->syncHeaders($token, $credentials);
+
+        $mutation = [
+            'mutation_id' => 'DESKTOP-OPEN-001',
+            'operation' => 'order.open',
+            'entity_type' => 'order',
+            'local_entity_id' => 'local-order-001',
+            'actor_public_id' => $actorPublicId,
+            'occurred_at' => now()->utc()->toIso8601String(),
+            'payload' => [
+                'client_order_id' => 'DESKTOP-CLIENT-001',
+                'dining_table_id' => $table->id,
+                'guest_count' => 3,
+            ],
+        ];
+
+        $first = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/desktop/reconcile/push", [
+                'mutations' => [$mutation],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted')
+            ->json('data');
+
+        $retry = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/desktop/reconcile/push", [
+                'mutations' => [$mutation],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted')
+            ->json('data');
+
+        $this->assertSame(
+            $first['results'][0]['entity_id'],
+            $retry['results'][0]['entity_id'],
+        );
+
+        $pull = $this->withHeaders($headers)
+            ->getJson("http://{$domain}/api/v1/desktop/reconcile/pull?cursor=0&limit=100")
+            ->assertOk()
+            ->json('data');
+
+        $this->assertGreaterThan(0, $pull['cursor']);
+        $this->assertContains('order', collect($pull['changes'])->pluck('entity_type')->all());
+
+        tenancy()->initialize($tenant);
+
+        $this->assertSame(1, Order::query()
+            ->where('client_order_id', 'DESKTOP-CLIENT-001')
+            ->count());
+
+        $this->assertDatabaseHas('desktop_entity_links', [
+            'entity_type' => 'order',
+            'local_entity_id' => 'local-order-001',
+            'cloud_entity_id' => $first['results'][0]['entity_id'],
+        ], 'tenant');
+
+        $this->assertSame(1, DesktopEntityLink::query()->count());
+
+        tenancy()->end();
     }
 
     /**

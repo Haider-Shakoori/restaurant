@@ -81,6 +81,13 @@ public sealed class LocalCashierService
             "cashier_session",
             session.Id,
             new { session_id = session.Id, opening_cash = session.OpeningCash });
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "cashier.session.open",
+            "cashier_session",
+            session.Id,
+            new { branch_id = branch.Id, opening_cash = session.OpeningCash });
 
         await db.SaveChangesAsync(cancellationToken);
         return SessionSnapshot(session);
@@ -146,6 +153,13 @@ public sealed class LocalCashierService
                 declared_cash = session.DeclaredCash,
                 cash_variance = session.CashVariance,
             });
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "cashier.session.close",
+            "cashier_session",
+            session.Id,
+            new { declared_cash = session.DeclaredCash ?? declared });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -214,6 +228,13 @@ public sealed class LocalCashierService
 
         var orderSnapshot = await OrderSnapshotAsync(db, order, cancellationToken);
         AddChange(db, "order", order.Id, order.WaiterId, orderSnapshot);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "order.serve",
+            "order",
+            order.Id,
+            new { client_order_id = order.ClientOrderId });
 
         foreach (var ticket in tickets)
         {
@@ -311,6 +332,13 @@ public sealed class LocalCashierService
             "bill",
             bill.Id,
             new { bill_id = bill.Id, order_id = order.Id, subtotal = bill.Subtotal, total = bill.Total });
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "bill.issue",
+            "bill",
+            bill.Id,
+            new { local_order_id = order.Id, client_order_id = order.ClientOrderId });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -399,6 +427,18 @@ public sealed class LocalCashierService
                 discount_type = bill.DiscountType,
                 discount_value = bill.DiscountValue,
                 discount_amount = bill.DiscountAmount,
+                reason = bill.DiscountReason,
+            });
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "bill.discount",
+            "bill",
+            bill.Id,
+            new
+            {
+                type = bill.DiscountType,
+                value = bill.DiscountValue,
                 reason = bill.DiscountReason,
             });
         await db.SaveChangesAsync(cancellationToken);
@@ -600,6 +640,21 @@ public sealed class LocalCashierService
                 method = payment.Method,
                 amount = payment.Amount,
                 bill_split_id = payment.BillSplitId,
+                reference = payment.Reference,
+            });
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "payment.post",
+            "payment",
+            payment.Id,
+            new
+            {
+                local_bill_id = bill.Id,
+                local_cashier_session_id = session.Id,
+                client_payment_id = payment.ClientPaymentId ?? payment.Id,
+                method = payment.Method,
+                amount = payment.Amount,
                 reference = payment.Reference,
             });
         await db.SaveChangesAsync(cancellationToken);

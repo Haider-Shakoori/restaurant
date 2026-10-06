@@ -69,6 +69,21 @@ public sealed class LocalInventoryService
         };
 
         db.InventoryItems.Add(item);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "inventory.item.create",
+            "inventory_item",
+            item.Id,
+            new
+            {
+                sku = item.Sku,
+                name = item.Name,
+                base_unit = item.BaseUnit,
+                purchase_unit = item.PurchaseUnit,
+                purchase_to_base_factor = item.PurchaseToBaseFactor,
+                reorder_level = item.ReorderLevel,
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -175,6 +190,20 @@ public sealed class LocalInventoryService
         };
 
         db.Suppliers.Add(supplier);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "supplier.create",
+            "supplier",
+            supplier.Id,
+            new
+            {
+                code = supplier.Code,
+                name = supplier.Name,
+                phone = supplier.Phone,
+                email = supplier.Email,
+                address = supplier.Address,
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -288,6 +317,24 @@ public sealed class LocalInventoryService
             });
         }
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "recipe.version.create",
+            "recipe",
+            recipeEntity.Id,
+            new
+            {
+                branch_id = branchId,
+                menu_item_id = menuItemId,
+                name = recipeEntity.Name,
+                version = recipeEntity.Version,
+                items = components.Select(value => new
+                {
+                    local_inventory_item_id = value.InventoryItemId,
+                    quantity_base = Quantity(value.QuantityBase),
+                }).ToArray(),
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -404,6 +451,20 @@ public sealed class LocalInventoryService
             ? valuation.AverageUnitCost
             : Factor(valuation.Value / valuation.Quantity);
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "inventory.adjust",
+            "stock_movement",
+            movement.Id,
+            new
+            {
+                branch_id = branchId,
+                local_inventory_item_id = item.Id,
+                quantity_delta = delta,
+                client_adjustment_id = clientAdjustmentId.Trim(),
+                reason = reason.Trim(),
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -648,6 +709,27 @@ public sealed class LocalInventoryService
 
         po.EstimatedTotal = total;
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "purchase_order.create",
+            "purchase_order",
+            po.Id,
+            new
+            {
+                branch_id = po.BranchId,
+                local_supplier_id = po.SupplierId,
+                notes = po.Notes,
+                lines = db.PurchaseOrderLines.Local
+                    .Where(value => value.PurchaseOrderId == po.Id)
+                    .Select(value => new
+                    {
+                        local_line_id = value.Id,
+                        local_inventory_item_id = value.InventoryItemId,
+                        purchase_quantity = value.OrderedPurchaseQuantity,
+                        unit_cost = value.UnitCost,
+                    }).ToArray(),
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -842,6 +924,25 @@ public sealed class LocalInventoryService
         po.Status = fullyReceived ? "received" : "partially_received";
         po.CompletedAt = fullyReceived ? DateTimeOffset.UtcNow : null;
 
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "goods_receipt.post",
+            "goods_receipt",
+            receipt.Id,
+            new
+            {
+                local_purchase_order_id = po.Id,
+                client_receipt_id = receipt.ClientReceiptId ?? receipt.Id,
+                notes = receipt.Notes,
+                lines = db.GoodsReceiptLines.Local
+                    .Where(value => value.GoodsReceiptId == receipt.Id)
+                    .Select(value => new
+                    {
+                        local_purchase_order_line_id = value.PurchaseOrderLineId,
+                        purchase_quantity = value.ReceivedPurchaseQuantity,
+                    }).ToArray(),
+            });
         LocalOperationsControlService.AddAudit(
             db,
             actor,

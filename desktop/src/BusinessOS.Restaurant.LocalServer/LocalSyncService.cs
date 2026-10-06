@@ -255,6 +255,28 @@ public sealed class LocalSyncService
                 conflict.Message);
         }
 
+        if (string.Equals(result.GetValueOrDefault("status")?.ToString(), "accepted", StringComparison.Ordinal))
+        {
+            var entityType = result.GetValueOrDefault("entity_type")?.ToString() ?? "unknown";
+            var localEntityId = result.GetValueOrDefault("entity_id")?.ToString() ?? mutation.MutationId;
+            var cloudMutationId = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes($"{principal.DeviceId}:{mutation.MutationId}")));
+
+            LocalCloudOutboxWriter.Enqueue(
+                db,
+                principal,
+                mutation.Operation,
+                entityType,
+                localEntityId,
+                new
+                {
+                    mutation_payload = mutation.Payload,
+                    local_result = result,
+                },
+                mutation.OccurredAt,
+                cloudMutationId);
+        }
+
         var responseJson = JsonSerializer.Serialize(result, JsonOptions);
 
         db.Mutations.Add(new LocalMutation

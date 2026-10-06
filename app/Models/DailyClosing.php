@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\RecordsSyncChanges;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
@@ -18,7 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class DailyClosing extends Model
 {
-    use HasUlids;
+    use HasUlids, RecordsSyncChanges;
 
     public const STATUS_OPEN = 'open';
 

@@ -537,6 +537,61 @@ public sealed class LocalDatabaseFactory
                 LineTotal TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_goods_receipt_lines_GoodsReceiptId ON goods_receipt_lines (GoodsReceiptId);
+
+            CREATE TABLE IF NOT EXISTS cloud_outbox (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Operation TEXT NOT NULL,
+                EntityType TEXT NOT NULL,
+                LocalEntityId TEXT NOT NULL,
+                ActorUserId INTEGER NOT NULL,
+                ActorPublicId TEXT NOT NULL,
+                PayloadJson TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                Attempts INTEGER NOT NULL,
+                CloudEntityId TEXT NULL,
+                ErrorCode TEXT NULL,
+                ErrorMessage TEXT NULL,
+                OccurredAtUtc TEXT NOT NULL,
+                LastAttemptAtUtc TEXT NULL,
+                SyncedAtUtc TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_cloud_outbox_Status_OccurredAtUtc ON cloud_outbox (Status, OccurredAtUtc);
+            CREATE INDEX IF NOT EXISTS IX_cloud_outbox_EntityType_LocalEntityId ON cloud_outbox (EntityType, LocalEntityId);
+
+            CREATE TABLE IF NOT EXISTS cloud_entity_links (
+                EntityType TEXT NOT NULL,
+                LocalEntityId TEXT NOT NULL,
+                CloudEntityId TEXT NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL,
+                PRIMARY KEY (EntityType, LocalEntityId)
+            );
+            CREATE INDEX IF NOT EXISTS IX_cloud_entity_links_EntityType_CloudEntityId ON cloud_entity_links (EntityType, CloudEntityId);
+
+            CREATE TABLE IF NOT EXISTS cloud_sync_state (
+                Id INTEGER NOT NULL PRIMARY KEY,
+                PullCursor INTEGER NOT NULL,
+                LastPushAtUtc TEXT NULL,
+                LastPullAtUtc TEXT NULL,
+                LastSuccessAtUtc TEXT NULL,
+                LastError TEXT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS cloud_conflicts (
+                Id TEXT NOT NULL PRIMARY KEY,
+                MutationId TEXT NOT NULL,
+                Operation TEXT NOT NULL,
+                EntityType TEXT NOT NULL,
+                LocalEntityId TEXT NOT NULL,
+                Code TEXT NOT NULL,
+                Message TEXT NOT NULL,
+                LocalPayloadJson TEXT NULL,
+                CloudPayloadJson TEXT NULL,
+                Status TEXT NOT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                ResolvedAtUtc TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_cloud_conflicts_MutationId ON cloud_conflicts (MutationId);
+            CREATE INDEX IF NOT EXISTS IX_cloud_conflicts_Status_CreatedAtUtc ON cloud_conflicts (Status, CreatedAtUtc);
             """;
 
         await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
