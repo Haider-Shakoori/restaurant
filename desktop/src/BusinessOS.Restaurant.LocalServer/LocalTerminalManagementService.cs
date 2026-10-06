@@ -124,7 +124,6 @@ public sealed class LocalTerminalManagementService
 
         var paired = await db.PairedTerminals
             .AsNoTracking()
-            .OrderByDescending(value => value.LastSeenAtUtc)
             .ToArrayAsync(cancellationToken);
         var runtimes = await db.TerminalRuntimes
             .AsNoTracking()
@@ -151,7 +150,9 @@ public sealed class LocalTerminalManagementService
                 lastSeen,
                 runtime?.LastIpAddress,
                 runtime?.LastUserAgent);
-        }).ToArray();
+        })
+        .OrderByDescending(value => value.LastSeenAtUtc)
+        .ToArray();
     }
 
     public async Task<bool> SetEnabledAsync(
