@@ -321,6 +321,87 @@ internal static class RestaurantOperationalPages
         actions.Children.Add(unpair);
         panel.Children.Add(actions);
 
+        var pairingCard = new Border
+        {
+            Background = System.Windows.Media.Brushes.White,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(18),
+            Margin = new Thickness(0, 0, 12, 16),
+        };
+
+        var pairingGrid = new Grid();
+        pairingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
+        pairingGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var qr = new Image
+        {
+            Width = 210,
+            Height = 210,
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        qr.SetBinding(Image.SourceProperty, new Binding("MobilePairing.QrImage"));
+        pairingGrid.Children.Add(qr);
+
+        var pairingInfo = new StackPanel { Margin = new Thickness(18, 0, 0, 0) };
+        Grid.SetColumn(pairingInfo, 1);
+
+        pairingInfo.Children.Add(new TextBlock
+        {
+            Text = "Connect waiter mobile",
+            FontSize = 20,
+            FontWeight = FontWeights.Bold,
+        });
+        pairingInfo.Children.Add(new TextBlock
+        {
+            Text = "Generate a secure one-time QR code. The mobile app can scan it instead of typing the restaurant server details manually.",
+            Foreground = System.Windows.Media.Brushes.SlateGray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 14),
+        });
+
+        var generatePairing = new Button
+        {
+            Content = "Generate pairing QR",
+            Width = 170,
+            Height = 40,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        generatePairing.SetBinding(Button.CommandProperty, new Binding("MobilePairing.GenerateCommand"));
+        pairingInfo.Children.Add(generatePairing);
+
+        var pairingStatus = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+        pairingStatus.SetBinding(TextBlock.TextProperty, new Binding("MobilePairing.Status"));
+        pairingInfo.Children.Add(pairingStatus);
+
+        var localAddress = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) };
+        localAddress.SetBinding(TextBlock.TextProperty, new Binding("MobilePairing.LocalAddress") { StringFormat = "LAN: {0}" });
+        pairingInfo.Children.Add(localAddress);
+
+        var cloudAddress = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 2) };
+        cloudAddress.SetBinding(TextBlock.TextProperty, new Binding("MobilePairing.CloudAddress") { StringFormat = "Cloud: {0}" });
+        pairingInfo.Children.Add(cloudAddress);
+
+        var expiry = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.SlateGray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        expiry.SetBinding(TextBlock.TextProperty, new Binding("MobilePairing.Expires"));
+        pairingInfo.Children.Add(expiry);
+
+        pairingGrid.Children.Add(pairingInfo);
+        pairingCard.Child = pairingGrid;
+        panel.Children.Add(pairingCard);
+
         panel.Children.Add(new TextBlock
         {
             Text = "Paired waiter devices",
