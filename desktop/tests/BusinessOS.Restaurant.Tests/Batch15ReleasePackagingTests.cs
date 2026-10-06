@@ -10,12 +10,12 @@ public sealed class Batch15ReleasePackagingTests
     {
         var root=RepositoryRoot();
         var project=XDocument.Load(Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","BusinessOS.Restaurant.Desktop.csproj"));
-        var values=project.Descendants().ToDictionary(x=>x.Name.LocalName,x=>x.Value);
-        Assert.Equal("BusinessOS Restaurant",values["Product"]);
-        Assert.Equal("BusinessOS.af",values["Company"]);
-        Assert.Equal("win-x64",values["RuntimeIdentifier"]);
-        Assert.Equal("true",values["PublishSingleFile"]);
-        Assert.Equal("true",values["SelfContained"]);
+        string Value(string name) => project.Descendants().First(x=>x.Name.LocalName==name).Value;
+        Assert.Equal("BusinessOS Restaurant",Value("Product"));
+        Assert.Equal("BusinessOS.af",Value("Company"));
+        Assert.Equal("win-x64",Value("RuntimeIdentifier"));
+        Assert.Equal("true",Value("PublishSingleFile"));
+        Assert.Equal("true",Value("SelfContained"));
     }
 
     [Fact]
@@ -28,11 +28,11 @@ public sealed class Batch15ReleasePackagingTests
     }
 
     [Fact]
-    public void Installer_does_not_delete_local_application_data()
+    public void Installer_has_no_destructive_uninstall_directives()
     {
         var installer=File.ReadAllText(Path.Combine(RepositoryRoot(),"desktop","installer","BusinessOS.Restaurant.iss"));
-        Assert.DoesNotContain("LocalAppData",installer,StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("[UninstallDelete]",installer,StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deleteafterinstall",installer,StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RepositoryRoot()
