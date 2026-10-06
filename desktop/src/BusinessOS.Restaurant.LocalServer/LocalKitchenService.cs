@@ -211,6 +211,7 @@ public sealed class LocalKitchenService
                     setters => setters.SetProperty(value => value.Status, "preparing"),
                     cancellationToken);
 
+            await db.SaveChangesAsync(cancellationToken);
             await SynchronizeOrderStatusAsync(db, ticket.OrderId, cancellationToken);
         }
 
@@ -258,6 +259,7 @@ public sealed class LocalKitchenService
                     setters => setters.SetProperty(value => value.Status, "ready"),
                     cancellationToken);
 
+            await db.SaveChangesAsync(cancellationToken);
             await SynchronizeOrderStatusAsync(db, ticket.OrderId, cancellationToken);
         }
 
