@@ -85,9 +85,9 @@ class LicenseFoundationTest extends TestCase
 
         $response = $this->postJson("http://{$domain}/api/v1/license/activate", [
             'license_key' => $license['raw_key'],
-            'device_uid' => 'android-device-001',
-            'device_name' => 'Waiter Phone 1',
-            'platform' => 'android',
+            'device_uid' => 'windows-desktop-001',
+            'device_name' => 'Cashier Terminal 1',
+            'platform' => 'windows',
             'app_version' => '1.0.0',
         ])->assertCreated();
 
