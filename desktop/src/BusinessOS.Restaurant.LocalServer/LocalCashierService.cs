@@ -68,6 +68,16 @@ public sealed class LocalCashierService
         };
 
         db.CashierSessions.Add(session);
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "cashier",
+            "cashier.session_opened",
+            branch.Id,
+            "cashier_session",
+            session.Id,
+            new { session_id = session.Id, opening_cash = session.OpeningCash });
+
         await db.SaveChangesAsync(cancellationToken);
         return SessionSnapshot(session);
     }
@@ -116,6 +126,22 @@ public sealed class LocalCashierService
         session.DeclaredCash = declared;
         session.CashVariance = Money(declared - expected);
         session.ClosedAt = DateTimeOffset.UtcNow;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "cashier",
+            "cashier.session_closed",
+            session.BranchId,
+            "cashier_session",
+            session.Id,
+            new
+            {
+                session_id = session.Id,
+                expected_cash = session.ExpectedCash,
+                declared_cash = session.DeclaredCash,
+                cash_variance = session.CashVariance,
+            });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -270,6 +296,15 @@ public sealed class LocalCashierService
         var billSnapshot = await BillSnapshotAsync(db, bill, cancellationToken);
         AddChange(db, "bill", bill.Id, null, billSnapshot);
         AddChange(db, "order", order.Id, order.WaiterId, await OrderSnapshotAsync(db, order, cancellationToken));
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "billing",
+            "bill.issued",
+            bill.BranchId,
+            "bill",
+            bill.Id,
+            new { bill_id = bill.Id, order_id = order.Id, subtotal = bill.Subtotal, total = bill.Total });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -344,6 +379,22 @@ public sealed class LocalCashierService
 
         var snapshot = await BillSnapshotAsync(db, bill, cancellationToken);
         AddChange(db, "bill", bill.Id, null, snapshot);
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "billing",
+            "bill.discount_applied",
+            bill.BranchId,
+            "bill",
+            bill.Id,
+            new
+            {
+                bill_id = bill.Id,
+                discount_type = bill.DiscountType,
+                discount_value = bill.DiscountValue,
+                discount_amount = bill.DiscountAmount,
+                reason = bill.DiscountReason,
+            });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -401,6 +452,16 @@ public sealed class LocalCashierService
                 Status = "open",
             });
         }
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "billing",
+            "bill.split_configured",
+            bill.BranchId,
+            "bill",
+            bill.Id,
+            new { bill_id = bill.Id, split_count = parts.Count, total = bill.Total });
 
         await db.SaveChangesAsync(cancellationToken);
         return await BillSnapshotAsync(db, bill, cancellationToken);
@@ -518,6 +579,23 @@ public sealed class LocalCashierService
         }
 
         AddChange(db, "bill", bill.Id, null, await BillSnapshotAsync(db, bill, cancellationToken));
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "payment",
+            "payment.posted",
+            bill.BranchId,
+            "payment",
+            payment.Id,
+            new
+            {
+                payment_id = payment.Id,
+                bill_id = bill.Id,
+                method = payment.Method,
+                amount = payment.Amount,
+                bill_split_id = payment.BillSplitId,
+                reference = payment.Reference,
+            });
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return PaymentSnapshot(payment);
@@ -562,6 +640,19 @@ public sealed class LocalCashierService
         AddChange(db, "order", order.Id, order.WaiterId, await OrderSnapshotAsync(db, order, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
         AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+
+        var targetArea = await db.DiningAreas.AsNoTracking().SingleAsync(
+            value => value.Id == targetTable.DiningAreaId,
+            cancellationToken);
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "order",
+            "order.transferred",
+            targetArea.BranchId,
+            "order",
+            order.Id,
+            new { order_id = order.Id, from_table_id = sourceTable.Id, to_table_id = targetTable.Id });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -623,6 +714,19 @@ public sealed class LocalCashierService
         AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
 
+        var sourceArea = await db.DiningAreas.AsNoTracking().SingleAsync(
+            value => value.Id == sourceTable.DiningAreaId,
+            cancellationToken);
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "order",
+            "order.merged",
+            sourceArea.BranchId,
+            "order",
+            target.Id,
+            new { target_order_id = target.Id, source_order_id = source.Id, released_table_id = sourceTable.Id });
+
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return await OrderSnapshotAsync(db, target, cancellationToken);
@@ -656,6 +760,17 @@ public sealed class LocalCashierService
         setting.Copies = Math.Clamp(copies, 1, 5);
         setting.IsEnabled = enabled;
         setting.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "configuration",
+            "receipt_printer.configured",
+            null,
+            "receipt_printer",
+            "1",
+            new { printer_name = setting.PrinterName, copies = setting.Copies, enabled = setting.IsEnabled });
+
         await db.SaveChangesAsync(cancellationToken);
     }
 
