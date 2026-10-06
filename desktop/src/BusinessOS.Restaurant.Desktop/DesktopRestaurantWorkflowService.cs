@@ -85,8 +85,8 @@ public sealed class DesktopRestaurantWorkflowService
         var result = await _sync.PushAsync(await CurrentPrincipalAsync(token), request, token);
         var json = JsonSerializer.Serialize(result);
 
-        if (json.Contains(""status":"rejected"", StringComparison.OrdinalIgnoreCase) ||
-            json.Contains(""status":"conflict"", StringComparison.OrdinalIgnoreCase))
+        if (json.Contains("\\\"status\\\":\\\"rejected\\\"", StringComparison.OrdinalIgnoreCase) ||
+            json.Contains("\\\"status\\\":\\\"conflict\\\"", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Restaurant operation was rejected: {json}");
         }
