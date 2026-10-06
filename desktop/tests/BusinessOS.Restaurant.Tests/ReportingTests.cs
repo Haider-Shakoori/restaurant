@@ -1,6 +1,7 @@
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace BusinessOS.Restaurant.Tests;
 
