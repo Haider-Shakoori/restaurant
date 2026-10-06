@@ -20,7 +20,7 @@ internal static class RestaurantOperationalPages
             "inventory" => await InventoryAsync(),
             "purchases" => await PurchasesAsync(),
             "users" => await UsersAsync(),
-            "expenses" => Expenses(),
+            "expenses" => await ExpensesAsync(),
             "closing" => await OperationalActionViews.ClosingAsync(),
             "reports" => Reports(diagnostics),
             "settings" => Settings(diagnostics),
@@ -224,8 +224,26 @@ internal static class RestaurantOperationalPages
         return Scroll(panel);
     }
 
-    private static FrameworkElement Expenses()
-        => Section("Expenses", "Restaurant operating expenses", Card("Backend boundary", "The desktop local schema does not currently contain an expense entity/service. Phase 4 will not invent pharmacy-style expense logic; this screen remains explicitly unavailable until the restaurant expense contract exists."));
+    private static async Task<FrameworkElement> ExpensesAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        await using var db = factory.Create();
+        var rows = await (from expense in db.Expenses.AsNoTracking()
+                          join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
+                          orderby expense.ExpenseDate descending, expense.RecordedAtUtc descending
+                          select new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
+                              expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference)).Take(500).ToListAsync();
+        var grid = GridFor(rows);
+        grid.Columns.Add(Column("Date", nameof(ExpenseRow.Date), 120));
+        grid.Columns.Add(Column("Branch", nameof(ExpenseRow.Branch), 160));
+        grid.Columns.Add(Column("Category", nameof(ExpenseRow.Category), 150));
+        grid.Columns.Add(Column("Description", nameof(ExpenseRow.Description), 260));
+        grid.Columns.Add(Column("Amount AFN", nameof(ExpenseRow.Amount), 120));
+        grid.Columns.Add(Column("Method", nameof(ExpenseRow.Method), 130));
+        grid.Columns.Add(Column("Reference", nameof(ExpenseRow.Reference), 180));
+        return Section("Expenses", "Restaurant operating expenses are stored locally, audited and queued for cloud sync.", grid);
+    }
 
     private static FrameworkElement Reports(LanDiagnosticsViewModel diagnostics)
     {
@@ -313,4 +331,5 @@ internal static class RestaurantOperationalPages
     private sealed record ReceiptRow(string Number, string Status, DateTimeOffset ReceivedAt, string PurchaseOrderId);
     private sealed record StaffRow(string Name, string Email, string Role, bool Active);
     private sealed record ShiftRow(string Name, string Role, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int BreakMinutes);
+    private sealed record ExpenseRow(DateOnly Date, string Branch, string Category, string Description, decimal Amount, string Currency, string Method, string? Reference);
 }
