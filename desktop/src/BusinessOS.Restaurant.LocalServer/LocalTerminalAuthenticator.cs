@@ -23,19 +23,25 @@ public sealed class LocalTerminalAuthenticator
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
+    private readonly WindowsActivationStore _activationStore;
     private readonly ConnectionSettingsStore _settingsStore;
     private readonly OperationalSnapshotStore _snapshotStore;
+    private readonly LocalTerminalManagementService _terminalManagement;
     private readonly HttpClient _httpClient;
 
     public LocalTerminalAuthenticator(
         LocalDatabaseFactory databaseFactory,
+        WindowsActivationStore activationStore,
         ConnectionSettingsStore settingsStore,
         OperationalSnapshotStore snapshotStore,
+        LocalTerminalManagementService terminalManagement,
         HttpClient httpClient)
     {
         _databaseFactory = databaseFactory;
+        _activationStore = activationStore;
         _settingsStore = settingsStore;
         _snapshotStore = snapshotStore;
+        _terminalManagement = terminalManagement;
         _httpClient = httpClient;
     }
 
@@ -45,6 +51,15 @@ public sealed class LocalTerminalAuthenticator
         bool allowCloudPairing,
         CancellationToken cancellationToken)
     {
+        var activation = await _activationStore.LoadAsync(cancellationToken);
+
+        if (activation is null ||
+            !string.Equals(activation.Snapshot.TenantId, serverOptions.TenantId, StringComparison.Ordinal) ||
+            !LicenseManager.CanRunOffline(activation, DateTimeOffset.UtcNow))
+        {
+            return null;
+        }
+
         if (!TryCredentials(request, out var deviceId, out var deviceSecret, out var accessToken))
         {
             return null;
@@ -64,6 +79,14 @@ public sealed class LocalTerminalAuthenticator
             SecureEquals(terminal.DeviceSecretHash, deviceHash) &&
             SecureEquals(terminal.AccessTokenHash, tokenHash))
         {
+            if (!await _terminalManagement.RecordHeartbeatAsync(
+                    terminal,
+                    request,
+                    cancellationToken))
+            {
+                return null;
+            }
+
             terminal.LastSeenAtUtc = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(cancellationToken);
 
@@ -76,6 +99,7 @@ public sealed class LocalTerminalAuthenticator
         }
 
         return await ValidateAndPairThroughCloudAsync(
+            request,
             deviceId,
             deviceSecret,
             accessToken,
@@ -86,6 +110,7 @@ public sealed class LocalTerminalAuthenticator
     }
 
     private async Task<LocalTerminalPrincipal?> ValidateAndPairThroughCloudAsync(
+        HttpRequest localRequest,
         string deviceId,
         string deviceSecret,
         string accessToken,
@@ -203,6 +228,14 @@ public sealed class LocalTerminalAuthenticator
             }
 
             await db.SaveChangesAsync(cancellationToken);
+
+            if (!await _terminalManagement.RecordHeartbeatAsync(
+                    existing,
+                    localRequest,
+                    cancellationToken))
+            {
+                return null;
+            }
 
             try
             {

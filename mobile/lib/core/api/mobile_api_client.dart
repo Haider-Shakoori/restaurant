@@ -13,6 +13,8 @@ export 'api_exception.dart';
 abstract interface class SyncApi {
   Future<Map<String, Object?>> refreshLease(SessionCredentials credentials);
 
+  Future<Map<String, Object?>> heartbeat(SessionCredentials credentials);
+
   Future<Map<String, Object?>> syncBootstrap(SessionCredentials credentials);
 
   Future<Map<String, Object?>> push(
@@ -93,6 +95,18 @@ class MobileApiClient implements SyncApi, ServerProbe {
         'device_name': deviceName,
       },
     );
+  }
+
+  @override
+  Future<Map<String, Object?>> heartbeat(
+    SessionCredentials credentials,
+  ) {
+    return _request(
+      'POST',
+      _uri(credentials.baseUrl, '/api/v1/local/heartbeat'),
+      headers: _authHeaders(credentials),
+      body: const <String, Object?>{},
+    ).then(_data);
   }
 
   @override

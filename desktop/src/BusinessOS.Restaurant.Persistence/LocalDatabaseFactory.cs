@@ -62,6 +62,22 @@ public sealed class LocalDatabaseFactory
             CREATE INDEX IF NOT EXISTS IX_paired_terminals_UserId ON paired_terminals (UserId);
             CREATE INDEX IF NOT EXISTS IX_paired_terminals_LastSeenAtUtc ON paired_terminals (LastSeenAtUtc);
 
+            CREATE TABLE IF NOT EXISTS terminal_runtime (
+                DeviceId TEXT NOT NULL PRIMARY KEY,
+                DisplayName TEXT NULL,
+                ClientType TEXT NULL,
+                AppVersion TEXT NULL,
+                LastIpAddress TEXT NULL,
+                LastUserAgent TEXT NULL,
+                IsEnabled INTEGER NOT NULL,
+                FirstSeenAtUtc TEXT NOT NULL,
+                LastHeartbeatAtUtc TEXT NOT NULL,
+                DisabledAtUtc TEXT NULL,
+                DisabledByUserId INTEGER NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_terminal_runtime_LastHeartbeatAtUtc ON terminal_runtime (LastHeartbeatAtUtc);
+            CREATE INDEX IF NOT EXISTS IX_terminal_runtime_IsEnabled ON terminal_runtime (IsEnabled);
+
             CREATE TABLE IF NOT EXISTS orders (
                 Id TEXT NOT NULL PRIMARY KEY,
                 ClientOrderId TEXT NOT NULL,

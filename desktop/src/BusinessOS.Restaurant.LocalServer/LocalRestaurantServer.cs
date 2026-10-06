@@ -52,11 +52,13 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         builder.Services.AddSingleton(_databaseFactory);
         builder.Services.AddSingleton<OperationalSnapshotStore>();
         builder.Services.AddSingleton(new ConnectionSettingsStore());
+        builder.Services.AddSingleton(new WindowsActivationStore());
         builder.Services.AddSingleton(new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(15),
         });
         builder.Services.AddSingleton<LocalCloudProxy>();
+        builder.Services.AddSingleton<LocalTerminalManagementService>();
         builder.Services.AddSingleton<LocalTerminalAuthenticator>();
         builder.Services.AddSingleton<LocalKitchenService>();
         builder.Services.AddSingleton<LocalInventoryService>();
@@ -115,6 +117,7 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         });
 
         app.MapLocalControlPlane();
+        app.MapLocalDiagnostics();
         app.MapLocalSync();
         app.MapLocalKitchen();
         app.MapLocalCashier();
