@@ -13,6 +13,8 @@ public partial class App : System.Windows.Application
     private LocalHostBootstrapper? _localHost;
     private KotPrintQueueProcessor? _printQueue;
     private ReceiptPrintQueueProcessor? _receiptPrintQueue;
+    private CloudReconciliationProcessor? _cloudReconciliation;
+    private HttpClient? _cloudReconciliationHttpClient;
 
     protected override async void OnStartup(System.Windows.StartupEventArgs e)
     {
@@ -50,6 +52,19 @@ public partial class App : System.Windows.Application
             // Cached reference data remains available while cloud synchronization is unavailable.
         }
 
+        _cloudReconciliationHttpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(20),
+        };
+        _cloudReconciliation = new CloudReconciliationProcessor(
+            activationStore,
+            new WindowsSessionStore(),
+            settingsStore,
+            new CloudReconciliationService(
+                databaseFactory,
+                new CloudReconciliationClient(_cloudReconciliationHttpClient)));
+        await _cloudReconciliation.StartAsync();
+
         _localHost = new LocalHostBootstrapper(
             activationStore,
             new LocalRestaurantServer(databaseFactory),
@@ -82,6 +97,13 @@ public partial class App : System.Windows.Application
         {
             _receiptPrintQueue.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
+
+        if (_cloudReconciliation is not null)
+        {
+            _cloudReconciliation.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        _cloudReconciliationHttpClient?.Dispose();
 
         base.OnExit(e);
     }
