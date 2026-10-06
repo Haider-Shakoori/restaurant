@@ -498,7 +498,7 @@ public sealed class LocalOperationsControlService
         string? entityId,
         object? payload = null)
     {
-        db.AuditEvents.Add(new LocalAuditEvent
+        var audit = new LocalAuditEvent
         {
             EventId = Guid.CreateVersion7().ToString("N"),
             Category = category,
@@ -511,7 +511,31 @@ public sealed class LocalOperationsControlService
             EntityId = entityId,
             PayloadJson = payload is null ? null : JsonSerializer.Serialize(payload, JsonOptions),
             OccurredAtUtc = DateTimeOffset.UtcNow,
-        });
+        };
+
+        db.AuditEvents.Add(audit);
+        LocalCloudOutboxWriter.Enqueue(
+            db,
+            actor,
+            "audit.append",
+            "audit_event",
+            audit.EventId,
+            new
+            {
+                event_id = audit.EventId,
+                category = audit.Category,
+                event_type = audit.EventType,
+                actor_user_id = audit.ActorUserId,
+                actor_name = audit.ActorName,
+                actor_role = audit.ActorRole,
+                branch_id = audit.BranchId,
+                entity_type = audit.EntityType,
+                entity_id = audit.EntityId,
+                payload,
+                occurred_at = audit.OccurredAtUtc,
+            },
+            audit.OccurredAtUtc,
+            audit.EventId);
     }
 
     private static async Task<object> ClosingSnapshotAsync(
