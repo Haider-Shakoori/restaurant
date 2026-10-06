@@ -563,6 +563,22 @@ public sealed class LocalDatabaseFactory
             );
             CREATE INDEX IF NOT EXISTS IX_goods_receipt_lines_GoodsReceiptId ON goods_receipt_lines (GoodsReceiptId);
 
+            CREATE TABLE IF NOT EXISTS expenses (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                RecordedByUserId INTEGER NOT NULL,
+                Category TEXT NOT NULL,
+                Description TEXT NOT NULL,
+                Amount TEXT NOT NULL,
+                Currency TEXT NOT NULL,
+                PaymentMethod TEXT NOT NULL,
+                Reference TEXT NULL,
+                ExpenseDate TEXT NOT NULL,
+                RecordedAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_expenses_BranchId_ExpenseDate ON expenses (BranchId, ExpenseDate);
+            CREATE INDEX IF NOT EXISTS IX_expenses_Category ON expenses (Category);
+
             CREATE TABLE IF NOT EXISTS cloud_outbox (
                 Id TEXT NOT NULL PRIMARY KEY,
                 Operation TEXT NOT NULL,
