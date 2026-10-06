@@ -21,6 +21,11 @@ public sealed class WindowsActivationStore
 
     public async Task<ActivationState?> LoadAsync(CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Protected restaurant activation storage requires Windows DPAPI.");
+        }
+
         if (!File.Exists(_statePath))
         {
             return null;
@@ -45,6 +50,11 @@ public sealed class WindowsActivationStore
 
     public async Task SaveAsync(ActivationState state, CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Protected restaurant activation storage requires Windows DPAPI.");
+        }
+
         var directory = Path.GetDirectoryName(_statePath)!;
         Directory.CreateDirectory(directory);
 
