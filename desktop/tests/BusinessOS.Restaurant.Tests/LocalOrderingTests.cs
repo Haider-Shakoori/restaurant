@@ -1,0 +1,360 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using BusinessOS.Restaurant.Application.OperationalData;
+using BusinessOS.Restaurant.Licensing;
+using BusinessOS.Restaurant.LocalServer;
+using BusinessOS.Restaurant.Persistence;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Xunit;
+
+namespace BusinessOS.Restaurant.Tests;
+
+public sealed class LocalOrderingTests
+{
+    [Fact]
+    public async Task Android_mutations_open_add_and_submit_against_local_database()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalogStore = new OperationalSnapshotStore(factory);
+            await catalogStore.ApplyAsync(Snapshot());
+
+            var sync = new LocalSyncService(factory, catalogStore);
+            var waiter = new LocalTerminalPrincipal(
+                "device-1",
+                1,
+                "waiter-1",
+                "Waiter One",
+                "waiter",
+                "tenant-1");
+
+            var open = await PushOneAsync(
+                sync,
+                waiter,
+                "M-OPEN-1",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    dining_table_id = "table-1",
+                    guest_count = 2,
+                });
+
+            Assert.Equal("accepted", open.GetProperty("status").GetString());
+
+            var add = await PushOneAsync(
+                sync,
+                waiter,
+                "M-ADD-1",
+                "order.item.add",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    client_line_id = "LINE-1",
+                    menu_item_id = "item-1",
+                    quantity = 2,
+                });
+
+            Assert.Equal("accepted", add.GetProperty("status").GetString());
+
+            var submit = await PushOneAsync(
+                sync,
+                waiter,
+                "M-SUBMIT-1",
+                "order.submit",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                });
+
+            Assert.Equal("accepted", submit.GetProperty("status").GetString());
+
+            await using var db = factory.Create();
+            var order = await db.Orders.SingleAsync();
+
+            Assert.Equal("submitted", order.Status);
+            Assert.Equal(500m, order.Subtotal);
+            Assert.Equal(500m, order.Total);
+            Assert.Equal("occupied", (await db.DiningTables.SingleAsync()).Status);
+            Assert.Single(await db.OrderItems.ToListAsync());
+
+            var pull = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(waiter, 0, 100, CancellationToken.None));
+
+            Assert.True(pull.GetProperty("cursor").GetInt64() > 0);
+            Assert.NotEmpty(pull.GetProperty("changes").EnumerateArray());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Mutation_replay_is_safe_and_reuse_with_different_content_is_rejected()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalogStore = new OperationalSnapshotStore(factory);
+            await catalogStore.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalogStore);
+            var waiter = new LocalTerminalPrincipal(
+                "device-1",
+                1,
+                "waiter-1",
+                "Waiter One",
+                "waiter",
+                "tenant-1");
+
+            var first = await PushOneAsync(
+                sync,
+                waiter,
+                "M-SAME",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    dining_table_id = "table-1",
+                    guest_count = 2,
+                });
+
+            var replay = await PushOneAsync(
+                sync,
+                waiter,
+                "M-SAME",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    dining_table_id = "table-1",
+                    guest_count = 2,
+                });
+
+            var reused = await PushOneAsync(
+                sync,
+                waiter,
+                "M-SAME",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    dining_table_id = "table-1",
+                    guest_count = 3,
+                });
+
+            Assert.Equal("accepted", first.GetProperty("status").GetString());
+            Assert.Equal("accepted", replay.GetProperty("status").GetString());
+            Assert.Equal("rejected", reused.GetProperty("status").GetString());
+            Assert.Equal("mutation_id_reused", reused.GetProperty("code").GetString());
+
+            await using var db = factory.Create();
+            Assert.Single(await db.Orders.ToListAsync());
+            Assert.Single(await db.Mutations.ToListAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Second_waiter_gets_table_busy_conflict()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalogStore = new OperationalSnapshotStore(factory);
+            await catalogStore.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalogStore);
+
+            var waiterOne = new LocalTerminalPrincipal(
+                "device-1",
+                1,
+                "waiter-1",
+                "Waiter One",
+                "waiter",
+                "tenant-1");
+            var waiterTwo = new LocalTerminalPrincipal(
+                "device-2",
+                2,
+                "waiter-2",
+                "Waiter Two",
+                "waiter",
+                "tenant-1");
+
+            await PushOneAsync(
+                sync,
+                waiterOne,
+                "M-OPEN-1",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-1",
+                    dining_table_id = "table-1",
+                });
+
+            var conflict = await PushOneAsync(
+                sync,
+                waiterTwo,
+                "M-OPEN-2",
+                "order.open",
+                new
+                {
+                    client_order_id = "ORDER-2",
+                    dining_table_id = "table-1",
+                });
+
+            Assert.Equal("conflict", conflict.GetProperty("status").GetString());
+            Assert.Equal("table_busy", conflict.GetProperty("code").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Cached_terminal_credentials_authenticate_without_cloud()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var store = new OperationalSnapshotStore(factory);
+            await store.ApplyAsync(Snapshot());
+
+            await using (var db = factory.Create())
+            {
+                db.PairedTerminals.Add(new LocalPairedTerminal
+                {
+                    DeviceId = "device-1",
+                    TenantId = "tenant-1",
+                    DeviceSecretHash = Hash("device-secret"),
+                    AccessTokenHash = Hash("access-token"),
+                    UserId = 1,
+                    UserPublicId = "waiter-1",
+                    UserName = "Waiter One",
+                    UserRole = "waiter",
+                    ValidatedAtUtc = DateTimeOffset.UtcNow,
+                    LastSeenAtUtc = DateTimeOffset.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var context = new DefaultHttpContext();
+            context.Request.Headers.Authorization = "Bearer access-token";
+            context.Request.Headers["X-Device-Id"] = "device-1";
+            context.Request.Headers["X-Device-Secret"] = "device-secret";
+
+            var authenticator = new LocalTerminalAuthenticator(
+                factory,
+                new ConnectionSettingsStore(root),
+                store,
+                new HttpClient());
+
+            var principal = await authenticator.AuthenticateAsync(
+                context.Request,
+                new LocalServerOptions("tenant-1"),
+                allowCloudPairing: false,
+                CancellationToken.None);
+
+            Assert.NotNull(principal);
+            Assert.Equal(1, principal.UserId);
+            Assert.Equal("waiter", principal.UserRole);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static async Task<JsonElement> PushOneAsync(
+        LocalSyncService sync,
+        LocalTerminalPrincipal principal,
+        string mutationId,
+        string operation,
+        object payload)
+    {
+        var request = new LocalSyncPushRequest(
+            "batch-1",
+            [
+                new LocalSyncMutationRequest(
+                    mutationId,
+                    operation,
+                    DateTimeOffset.UtcNow,
+                    JsonSerializer.SerializeToElement(payload)),
+            ]);
+
+        var response = JsonSerializer.SerializeToElement(
+            await sync.PushAsync(principal, request, CancellationToken.None));
+
+        return response.GetProperty("results")[0];
+    }
+
+    private static OperationalSnapshot Snapshot() =>
+        new(
+            1,
+            DateTimeOffset.UtcNow,
+            0,
+            "tenant-1",
+            [
+                new BranchSnapshot("branch-1", "MAIN", "Main Branch", true),
+            ],
+            [
+                new StaffSnapshot(1, "waiter-1", "Waiter One", "one@example.test", "waiter", true),
+                new StaffSnapshot(2, "waiter-2", "Waiter Two", "two@example.test", "waiter", true),
+            ],
+            [
+                new MenuCategorySnapshot(
+                    "category-1",
+                    "Main",
+                    1,
+                    [
+                        new MenuItemSnapshot(
+                            "item-1",
+                            "category-1",
+                            "FOOD-1",
+                            "Kabuli Pulao",
+                            null,
+                            250m,
+                            "AFN",
+                            1,
+                            []),
+                    ]),
+            ],
+            [
+                new DiningTableSnapshot(
+                    "table-1",
+                    "T-01",
+                    "Table 1",
+                    4,
+                    "available",
+                    true,
+                    new DiningAreaSummary("area-1", "Main Hall"),
+                    new BranchSummary("branch-1", "Main Branch")),
+            ]);
+
+    private static string Hash(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static string CreateTemporaryDirectory()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "BusinessOS.Restaurant.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+}
