@@ -5,6 +5,16 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>BusinessOS.Restaurant.Desktop</AssemblyName>
     <RootNamespace>BusinessOS.Restaurant.Desktop</RootNamespace>
+    <Product>BusinessOS Restaurant</Product>
+    <Company>BusinessOS.af</Company>
+    <Description>BusinessOS Restaurant Desktop</Description>
+    <Authors>BusinessOS.af</Authors>
+    <Version>1.0.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />

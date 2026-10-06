@@ -36,3 +36,24 @@ jobs:
 
       - name: Test
         run: dotnet test BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build
+
+      - name: Publish Windows x64 single EXE
+        shell: pwsh
+        run: ./installer/Build-Release.ps1
+
+      - name: Validate release package
+        shell: pwsh
+        run: |
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          if (!(Test-Path $exe)) { throw "Release EXE missing." }
+          if ((Get-Item $exe).Length -lt 1MB) { throw "Release EXE is unexpectedly small." }
+          $fw = Get-Content "installer/Configure-LanFirewall.ps1" -Raw
+          if ($fw -notmatch 'Profile Domain,Private') { throw "Firewall profile scope regression." }
+          if ($fw -match 'Profile Public') { throw "Public firewall exposure is forbidden by default." }
+
+      - name: Upload unsigned CI release
+        uses: actions/upload-artifact@v4
+        with:
+          name: BusinessOS-Restaurant-win-x64-ci
+          path: desktop/artifacts/publish/
+          if-no-files-found: error
