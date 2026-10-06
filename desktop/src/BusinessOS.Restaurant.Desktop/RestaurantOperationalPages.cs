@@ -19,6 +19,8 @@ internal static class RestaurantOperationalPages
             "menu" => await MenuAsync(),
             "inventory" => await InventoryAsync(),
             "purchases" => await PurchasesAsync(),
+            "users" => await UsersAsync(),
+            "expenses" => Expenses(),
             "closing" => await OperationalActionViews.ClosingAsync(),
             "reports" => Reports(diagnostics),
             "settings" => Settings(diagnostics),
@@ -161,6 +163,43 @@ internal static class RestaurantOperationalPages
         return Section("Purchases", "Purchase orders and receiving use the desktop local database.", grid);
     }
 
+
+    private static async Task<FrameworkElement> UsersAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        await using var db = factory.Create();
+        var staff = await db.StaffUsers.AsNoTracking().OrderBy(x => x.Name)
+            .Select(x => new StaffRow(x.Name, x.Email, x.Role, x.IsActive)).ToListAsync();
+        var shifts = await db.WaiterShifts.AsNoTracking().OrderByDescending(x => x.StartedAt).Take(100)
+            .Select(x => new ShiftRow(x.UserName, x.Role, x.Status, x.StartedAt, x.EndedAt, x.BreakMinutes)).ToListAsync();
+
+        var panel = Stack();
+        panel.Children.Add(Card("Restaurant staff", "Restaurant roles and access are shown from the local operational store. Pharmacy roles are not reused."));
+        var staffGrid = GridFor(staff);
+        staffGrid.MinHeight = 260;
+        staffGrid.Columns.Add(Column("Name", nameof(StaffRow.Name), 220));
+        staffGrid.Columns.Add(Column("Email", nameof(StaffRow.Email), 260));
+        staffGrid.Columns.Add(Column("Restaurant role", nameof(StaffRow.Role), 160));
+        staffGrid.Columns.Add(Column("Active", nameof(StaffRow.Active), 100));
+        panel.Children.Add(staffGrid);
+
+        panel.Children.Add(new TextBlock { Text = "Staff shifts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        var shiftGrid = GridFor(shifts);
+        shiftGrid.MinHeight = 260;
+        shiftGrid.Columns.Add(Column("Staff", nameof(ShiftRow.Name), 200));
+        shiftGrid.Columns.Add(Column("Role", nameof(ShiftRow.Role), 140));
+        shiftGrid.Columns.Add(Column("Status", nameof(ShiftRow.Status), 110));
+        shiftGrid.Columns.Add(Column("Started", nameof(ShiftRow.StartedAt), 190));
+        shiftGrid.Columns.Add(Column("Ended", nameof(ShiftRow.EndedAt), 190));
+        shiftGrid.Columns.Add(Column("Break min", nameof(ShiftRow.BreakMinutes), 100));
+        panel.Children.Add(shiftGrid);
+        return Scroll(panel);
+    }
+
+    private static FrameworkElement Expenses()
+        => Section("Expenses", "Restaurant operating expenses", Card("Backend boundary", "The desktop local schema does not currently contain an expense entity/service. Phase 4 will not invent pharmacy-style expense logic; this screen remains explicitly unavailable until the restaurant expense contract exists."));
+
     private static FrameworkElement Reports(LanDiagnosticsViewModel diagnostics)
     {
         var panel = Stack();
@@ -243,4 +282,6 @@ internal static class RestaurantOperationalPages
     private sealed record MenuRow(string Sku, string Name, string Category, decimal Price, string Currency, bool Available);
     private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal ReorderLevel);
     private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt);
+    private sealed record StaffRow(string Name, string Email, string Role, bool Active);
+    private sealed record ShiftRow(string Name, string Role, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int BreakMinutes);
 }
