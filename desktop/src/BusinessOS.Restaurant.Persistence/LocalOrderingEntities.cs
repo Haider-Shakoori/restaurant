@@ -76,3 +76,55 @@ public sealed class LocalChange
     public string? DataJson { get; set; }
     public DateTimeOffset OccurredAtUtc { get; set; }
 }
+
+
+public sealed class LocalKitchenTicket
+{
+    public required string Id { get; set; }
+    public required string OrderId { get; set; }
+    public required string KitchenStationId { get; set; }
+    public long SubmittedByUserId { get; set; }
+    public required string TicketNumber { get; set; }
+    public required string Status { get; set; }
+    public DateTimeOffset QueuedAt { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? ReadyAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class LocalKitchenTicketItem
+{
+    public required string Id { get; set; }
+    public required string KitchenTicketId { get; set; }
+    public required string OrderItemId { get; set; }
+    public required string ItemName { get; set; }
+    public int Quantity { get; set; }
+    public string? Notes { get; set; }
+    public required string Status { get; set; }
+}
+
+public sealed class LocalKitchenPrinterBinding
+{
+    public required string KitchenStationId { get; set; }
+    public required string PrinterName { get; set; }
+    public int Copies { get; set; } = 1;
+    public bool IsEnabled { get; set; } = true;
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class LocalPrintJob
+{
+    public required string Id { get; set; }
+    public required string KitchenTicketId { get; set; }
+    public required string PrinterName { get; set; }
+    public required string DocumentName { get; set; }
+    public required string PayloadText { get; set; }
+    public int Copies { get; set; } = 1;
+    public required string Status { get; set; }
+    public int Attempts { get; set; }
+    public string? LastError { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? PrintedAtUtc { get; set; }
+}
