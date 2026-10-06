@@ -1,3 +1,5 @@
+using Xunit;
+
 namespace BusinessOS.Restaurant.Tests;
 
 public sealed class FoundationTests
