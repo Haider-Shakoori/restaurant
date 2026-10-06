@@ -7,6 +7,8 @@ use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
+use App\Models\KitchenStation;
+use App\Models\MenuItemKitchenRoute;
 use App\Models\Order;
 use App\Models\RestaurantBranch;
 use App\Models\SyncChange;
@@ -52,6 +54,7 @@ class MobileSyncService
             'branches' => $this->branchSnapshot(),
             'staff' => $this->staffSnapshot(),
             'menu' => $this->menuSnapshot(),
+            'kitchen' => $this->kitchenSnapshot(),
             'tables' => $this->tableSnapshot(),
             'orders' => $this->activeOrderSnapshot($user),
         ];
@@ -580,6 +583,36 @@ class MobileSyncService
                     ])->all(),
                 ])->all(),
             ])->all();
+    }
+
+    private function kitchenSnapshot(): array
+    {
+        return [
+            'stations' => KitchenStation::query()
+                ->where('is_active', true)
+                ->orderBy('branch_id')
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get()
+                ->map(fn (KitchenStation $station) => [
+                    'id' => $station->id,
+                    'branch_id' => $station->branch_id,
+                    'code' => $station->code,
+                    'name' => $station->name,
+                    'sort_order' => $station->sort_order,
+                    'is_active' => $station->is_active,
+                ])->all(),
+            'routes' => MenuItemKitchenRoute::query()
+                ->orderBy('branch_id')
+                ->orderBy('menu_item_id')
+                ->get()
+                ->map(fn (MenuItemKitchenRoute $route) => [
+                    'id' => $route->id,
+                    'menu_item_id' => $route->menu_item_id,
+                    'branch_id' => $route->branch_id,
+                    'kitchen_station_id' => $route->kitchen_station_id,
+                ])->all(),
+        ];
     }
 
     private function tableSnapshot(): array
