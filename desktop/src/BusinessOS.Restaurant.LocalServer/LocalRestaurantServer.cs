@@ -58,6 +58,7 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         });
         builder.Services.AddSingleton<LocalCloudProxy>();
         builder.Services.AddSingleton<LocalTerminalAuthenticator>();
+        builder.Services.AddSingleton<LocalKitchenService>();
         builder.Services.AddSingleton<LocalSyncService>();
 
         var app = builder.Build();
@@ -112,6 +113,7 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
 
         app.MapLocalControlPlane();
         app.MapLocalSync();
+        app.MapLocalKitchen();
 
         app.MapFallback(() => Results.Json(
             new
