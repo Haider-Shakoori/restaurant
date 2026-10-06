@@ -14,6 +14,8 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalMenuItemModifierGroup> MenuItemModifierGroups => Set<LocalMenuItemModifierGroup>();
     public DbSet<LocalStaffUser> StaffUsers => Set<LocalStaffUser>();
     public DbSet<LocalOperationalState> OperationalStates => Set<LocalOperationalState>();
+    public DbSet<LocalKitchenStation> KitchenStations => Set<LocalKitchenStation>();
+    public DbSet<LocalMenuItemKitchenRoute> MenuItemKitchenRoutes => Set<LocalMenuItemKitchenRoute>();
     public DbSet<LocalPairedTerminal> PairedTerminals => Set<LocalPairedTerminal>();
     public DbSet<LocalOrder> Orders => Set<LocalOrder>();
     public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
@@ -91,6 +93,22 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.ToTable("operational_state");
             entity.HasKey(value => value.Id);
         });
+        modelBuilder.Entity<LocalKitchenStation>(entity =>
+        {
+            entity.ToTable("kitchen_stations");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.Code }).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.SortOrder });
+        });
+
+        modelBuilder.Entity<LocalMenuItemKitchenRoute>(entity =>
+        {
+            entity.ToTable("menu_item_kitchen_routes");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.MenuItemId, value.BranchId }).IsUnique();
+            entity.HasIndex(value => value.KitchenStationId);
+        });
+
         modelBuilder.Entity<LocalPairedTerminal>(entity =>
         {
             entity.ToTable("paired_terminals");
