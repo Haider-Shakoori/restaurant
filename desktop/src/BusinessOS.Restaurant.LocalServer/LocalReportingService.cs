@@ -16,7 +16,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
 {
     public async Task<LocalReportSummary> SummaryAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
-        await using var db = databaseFactory.CreateDbContext();
+        await using var db = databaseFactory.Create();
         var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
 
@@ -49,7 +49,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
 
     public async Task<IReadOnlyList<LocalPaymentBreakdown>> PaymentsAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
-        await using var db = databaseFactory.CreateDbContext();
+        await using var db = databaseFactory.Create();
         var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         return await (from payment in db.Payments.AsNoTracking()
@@ -62,7 +62,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
 
     public async Task<IReadOnlyList<LocalTopItem>> TopItemsAsync(string branchId, DateOnly fromDate, DateOnly toDate, int take = 10, CancellationToken token = default)
     {
-        await using var db = databaseFactory.CreateDbContext();
+        await using var db = databaseFactory.Create();
         var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         return await (from line in db.BillLines.AsNoTracking()
@@ -75,7 +75,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
 
     public async Task<IReadOnlyList<LocalClosingReport>> ClosingsAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
-        await using var db = databaseFactory.CreateDbContext();
+        await using var db = databaseFactory.Create();
         var rows = await (from closing in db.DailyClosings.AsNoTracking()
                           join snapshot in db.DailyClosingSnapshots.AsNoTracking() on closing.Id equals snapshot.DailyClosingId
                           where closing.BranchId == branchId && closing.BusinessDate >= fromDate && closing.BusinessDate <= toDate
