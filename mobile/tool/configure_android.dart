@@ -13,16 +13,19 @@ void main() {
 
   var content = manifest.readAsStringSync();
 
-  if (!content.contains('android.permission.INTERNET')) {
-    content = content.replaceFirst(
-      '<manifest',
-      '<manifest',
-    );
-    final close = content.indexOf('>');
+  final manifestClose = content.indexOf('>');
 
+  if (manifestClose >= 0 && !content.contains('android.permission.INTERNET')) {
+    content = content.substring(0, manifestClose + 1) +
+        '\n    <uses-permission android:name="android.permission.INTERNET"/>' +
+        content.substring(manifestClose + 1);
+  }
+
+  if (!content.contains('android.permission.CAMERA')) {
+    final close = content.indexOf('>');
     if (close >= 0) {
       content = content.substring(0, close + 1) +
-          '\n    <uses-permission android:name="android.permission.INTERNET"/>' +
+          '\n    <uses-permission android:name="android.permission.CAMERA"/>' +
           content.substring(close + 1);
     }
   }
