@@ -39,5 +39,97 @@ public sealed class LocalDatabaseFactory
     {
         await using var db = Create();
         await db.Database.EnsureCreatedAsync(cancellationToken);
+        await EnsureOrderingSchemaAsync(db, cancellationToken);
+    }
+
+    private static async Task EnsureOrderingSchemaAsync(
+        RestaurantDbContext db,
+        CancellationToken cancellationToken)
+    {
+        const string sql = """
+            CREATE TABLE IF NOT EXISTS paired_terminals (
+                DeviceId TEXT NOT NULL PRIMARY KEY,
+                TenantId TEXT NOT NULL,
+                DeviceSecretHash TEXT NOT NULL,
+                AccessTokenHash TEXT NOT NULL,
+                UserId INTEGER NOT NULL,
+                UserPublicId TEXT NOT NULL,
+                UserName TEXT NOT NULL,
+                UserRole TEXT NOT NULL,
+                ValidatedAtUtc TEXT NOT NULL,
+                LastSeenAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_paired_terminals_UserId ON paired_terminals (UserId);
+            CREATE INDEX IF NOT EXISTS IX_paired_terminals_LastSeenAtUtc ON paired_terminals (LastSeenAtUtc);
+
+            CREATE TABLE IF NOT EXISTS orders (
+                Id TEXT NOT NULL PRIMARY KEY,
+                ClientOrderId TEXT NOT NULL,
+                DiningTableId TEXT NOT NULL,
+                WaiterId INTEGER NOT NULL,
+                WaiterPublicId TEXT NOT NULL,
+                WaiterName TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                GuestCount INTEGER NOT NULL,
+                Notes TEXT NULL,
+                Subtotal TEXT NOT NULL,
+                Total TEXT NOT NULL,
+                OpenedAt TEXT NULL,
+                SubmittedAt TEXT NULL,
+                ServedAt TEXT NULL,
+                ClosedAt TEXT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_orders_ClientOrderId ON orders (ClientOrderId);
+            CREATE INDEX IF NOT EXISTS IX_orders_DiningTableId_Status ON orders (DiningTableId, Status);
+            CREATE INDEX IF NOT EXISTS IX_orders_WaiterId_Status ON orders (WaiterId, Status);
+
+            CREATE TABLE IF NOT EXISTS order_items (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                MenuItemId TEXT NOT NULL,
+                ClientLineId TEXT NOT NULL,
+                ItemName TEXT NOT NULL,
+                UnitPrice TEXT NOT NULL,
+                Quantity INTEGER NOT NULL,
+                LineTotal TEXT NOT NULL,
+                Notes TEXT NULL,
+                Status TEXT NOT NULL,
+                CreatedAtUtc TEXT NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_order_items_OrderId_ClientLineId ON order_items (OrderId, ClientLineId);
+
+            CREATE TABLE IF NOT EXISTS local_mutations (
+                DeviceId TEXT NOT NULL,
+                MutationId TEXT NOT NULL,
+                UserId INTEGER NOT NULL,
+                Operation TEXT NOT NULL,
+                RequestHash TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                ErrorCode TEXT NULL,
+                ErrorMessage TEXT NULL,
+                ResponseJson TEXT NOT NULL,
+                ClientOccurredAt TEXT NULL,
+                ProcessedAtUtc TEXT NOT NULL,
+                PRIMARY KEY (DeviceId, MutationId)
+            );
+            CREATE INDEX IF NOT EXISTS IX_local_mutations_ProcessedAtUtc ON local_mutations (ProcessedAtUtc);
+
+            CREATE TABLE IF NOT EXISTS local_changes (
+                Sequence INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                EntityType TEXT NOT NULL,
+                EntityId TEXT NOT NULL,
+                Operation TEXT NOT NULL,
+                OwnerUserId INTEGER NULL,
+                DataJson TEXT NULL,
+                OccurredAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_local_changes_EntityType_EntityId ON local_changes (EntityType, EntityId);
+            CREATE INDEX IF NOT EXISTS IX_local_changes_OwnerUserId ON local_changes (OwnerUserId);
+            """;
+
+        await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
     }
 }
