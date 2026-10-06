@@ -45,6 +45,44 @@
     </div>
 
     <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <p class="text-xs font-black uppercase tracking-[0.18em] text-sky-600">BusinessOS connectivity</p>
+                <h2 class="mt-1 text-lg font-black">Desktop & mobile synchronization</h2>
+                <p class="mt-1 max-w-3xl text-sm text-slate-500">
+                    The Windows desktop remains the local restaurant host while this Laravel tenant stays the cloud authority for subscription, staff, configuration and reconciliation.
+                    Waiter phones can be paired from Desktop → Settings using a short-lived one-time QR code.
+                </p>
+            </div>
+            <div class="rounded-xl bg-slate-950 px-4 py-3 text-white">
+                <p class="text-xs font-bold uppercase tracking-wide text-slate-400">Mobile activations</p>
+                <p class="mt-1 text-xl font-black">{{ $activeMobileCount }} / {{ $mobileDeviceLimit ?? 'Unlimited' }}</p>
+            </div>
+        </div>
+
+        <div class="mt-5 overflow-hidden rounded-xl border border-slate-200">
+            <div class="grid grid-cols-4 gap-3 bg-slate-50 px-4 py-2 text-xs font-black uppercase tracking-wide text-slate-500">
+                <span>Device</span>
+                <span>Platform</span>
+                <span>Status</span>
+                <span>Last seen</span>
+            </div>
+            @forelse ($mobileDevices as $device)
+                <div class="grid grid-cols-4 gap-3 border-t border-slate-100 px-4 py-3 text-sm">
+                    <span class="font-semibold">{{ $device->device_name ?: 'Unnamed mobile' }}</span>
+                    <span class="uppercase text-slate-500">{{ $device->platform }}</span>
+                    <span class="font-semibold {{ $device->status->value === 'active' ? 'text-emerald-600' : 'text-rose-600' }}">
+                        {{ ucfirst($device->status->value) }}
+                    </span>
+                    <span class="text-slate-500">{{ $device->last_seen_at?->diffForHumans() ?: 'Never' }}</span>
+                </div>
+            @empty
+                <p class="px-4 py-5 text-sm text-slate-500">No mobile devices have been activated yet.</p>
+            @endforelse
+        </div>
+    </section>
+
+    <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="font-black">Current structure</h2>
         <div class="mt-4 grid gap-4 lg:grid-cols-2">
             @forelse ($branches as $branch)
