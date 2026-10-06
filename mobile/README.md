@@ -71,6 +71,18 @@ Batch 11 keeps Flutter business logic in source control and generates the standa
 Batch 12 owns the production Android packaging/signing and deployment artifacts.
 
 
+## Desktop QR pairing
+
+The preferred first-run path is now Desktop → Settings → Generate pairing QR.
+
+The QR contains only short-lived connection bootstrap data: local URL, cloud URL and a one-time pairing token. It never contains the restaurant license key, a staff password or a reusable device secret.
+
+The waiter app scans the QR, redeems the token against the Laravel tenant API, receives its own device credential and signed offline lease, and then asks the waiter to sign in. Pairing tokens expire after five minutes and are consumed once.
+
+Manual Local / Cloud / Automatic setup remains available when a camera is unavailable or an administrator prefers to enter connection details.
+
+SaaS plans can set `max_mobile_devices` independently from the overall `max_devices` limit. If a plan omits the mobile entitlement, the platform default is used.
+
 ## Three connection modes
 
 The waiter setup screen supports Local, Cloud and Automatic connection modes.
