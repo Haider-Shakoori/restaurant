@@ -65,6 +65,24 @@ class AppStrings {
     ps: 'کلاوډ',
   );
 
+  String get pairingCode => _value(
+    en: 'Desktop pairing code',
+    fa: 'کد اتصال دسکتاپ',
+    ps: 'د ډیسټاپ نښلونې کوډ',
+  );
+
+  String get pairingHint => _value(
+    en: 'Generate this code from the restaurant desktop app.',
+    fa: 'این کد را از برنامه دسکتاپ رستورانت ایجاد کنید.',
+    ps: 'دا کوډ د رستورانت له ډیسټاپ اپ څخه جوړ کړئ.',
+  );
+
+  String get pairDevice => _value(
+    en: 'Pair with desktop',
+    fa: 'اتصال به دسکتاپ',
+    ps: 'له ډیسټاپ سره ونښلوئ',
+  );
+
   String get licenseKey => _value(
     en: 'License key',
     fa: 'کلید لایسنس',
