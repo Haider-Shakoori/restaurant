@@ -305,6 +305,77 @@ public sealed class LocalDatabaseFactory
             );
             CREATE INDEX IF NOT EXISTS IX_receipt_print_jobs_BillId ON receipt_print_jobs (BillId);
             CREATE INDEX IF NOT EXISTS IX_receipt_print_jobs_Status_CreatedAtUtc ON receipt_print_jobs (Status, CreatedAtUtc);
+
+            CREATE TABLE IF NOT EXISTS daily_closings (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                BusinessDate TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                CreatedByUserId INTEGER NOT NULL,
+                FinalizedAt TEXT NULL,
+                ReopenedAt TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_daily_closings_BranchId_BusinessDate ON daily_closings (BranchId, BusinessDate);
+            CREATE INDEX IF NOT EXISTS IX_daily_closings_BranchId_Status ON daily_closings (BranchId, Status);
+
+            CREATE TABLE IF NOT EXISTS daily_closing_snapshots (
+                Id TEXT NOT NULL PRIMARY KEY,
+                DailyClosingId TEXT NOT NULL,
+                Version INTEGER NOT NULL,
+                FinalizedByUserId INTEGER NOT NULL,
+                BillCount INTEGER NOT NULL,
+                PaymentCount INTEGER NOT NULL,
+                CashierSessionCount INTEGER NOT NULL,
+                GrossSales TEXT NOT NULL,
+                Discounts TEXT NOT NULL,
+                NetSales TEXT NOT NULL,
+                PaymentsTotal TEXT NOT NULL,
+                CashPayments TEXT NOT NULL,
+                CardPayments TEXT NOT NULL,
+                BankPayments TEXT NOT NULL,
+                MobileMoneyPayments TEXT NOT NULL,
+                OtherPayments TEXT NOT NULL,
+                ExpectedCash TEXT NOT NULL,
+                DeclaredCash TEXT NOT NULL,
+                CashVariance TEXT NOT NULL,
+                FinalizedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_daily_closing_snapshots_DailyClosingId_Version ON daily_closing_snapshots (DailyClosingId, Version);
+
+            CREATE TABLE IF NOT EXISTS waiter_shifts (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                UserId INTEGER NOT NULL,
+                UserPublicId TEXT NOT NULL,
+                UserName TEXT NOT NULL,
+                Role TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                StartedAt TEXT NOT NULL,
+                EndedAt TEXT NULL,
+                BreakMinutes INTEGER NOT NULL,
+                ClosingNote TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_waiter_shifts_UserId_Status ON waiter_shifts (UserId, Status);
+            CREATE INDEX IF NOT EXISTS IX_waiter_shifts_BranchId_StartedAt ON waiter_shifts (BranchId, StartedAt);
+
+            CREATE TABLE IF NOT EXISTS audit_events (
+                Sequence INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                EventId TEXT NOT NULL,
+                Category TEXT NOT NULL,
+                EventType TEXT NOT NULL,
+                ActorUserId INTEGER NOT NULL,
+                ActorName TEXT NOT NULL,
+                ActorRole TEXT NOT NULL,
+                BranchId TEXT NULL,
+                EntityType TEXT NULL,
+                EntityId TEXT NULL,
+                PayloadJson TEXT NULL,
+                OccurredAtUtc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_audit_events_EventId ON audit_events (EventId);
+            CREATE INDEX IF NOT EXISTS IX_audit_events_Category_OccurredAtUtc ON audit_events (Category, OccurredAtUtc);
+            CREATE INDEX IF NOT EXISTS IX_audit_events_EntityType_EntityId ON audit_events (EntityType, EntityId);
+            CREATE INDEX IF NOT EXISTS IX_audit_events_ActorUserId ON audit_events (ActorUserId);
             """;
 
         await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
