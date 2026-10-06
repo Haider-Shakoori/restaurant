@@ -14,11 +14,11 @@ public sealed record LocalClosingReport(DateOnly BusinessDate, int Version, deci
 
 public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
 {
-    public async Task<LocalReportSummary> SummaryAsync(string branchId, DateOnly from, DateOnly to, CancellationToken token = default)
+    public async Task<LocalReportSummary> SummaryAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
         await using var db = databaseFactory.CreateDbContext();
-        var start = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var end = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
 
         var bills = await db.Bills.AsNoTracking()
             .Where(x => x.BranchId == branchId && x.IssuedAt >= start && x.IssuedAt < end && x.Status != "void")
@@ -34,7 +34,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
         var inventoryValue = await db.InventoryValuations.AsNoTracking()
             .Where(x => x.BranchId == branchId).SumAsync(x => (decimal?)x.Value, token) ?? 0m;
         var closingIds = await db.DailyClosings.AsNoTracking()
-            .Where(x => x.BranchId == branchId && x.BusinessDate >= from && x.BusinessDate <= to)
+            .Where(x => x.BranchId == branchId && x.BusinessDate >= fromDate && x.BusinessDate <= toDate)
             .Select(x => x.Id).ToArrayAsync(token);
         var variance = await db.DailyClosingSnapshots.AsNoTracking()
             .Where(x => closingIds.Contains(x.DailyClosingId))
@@ -44,14 +44,14 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
         var gross = bills.Sum(x => x.Subtotal);
         var discounts = bills.Sum(x => x.DiscountAmount);
         var net = bills.Sum(x => x.Total);
-        return new(branchId, from, to, bills.Count, gross, discounts, net, payments, cogs, net - cogs, inventoryValue, variance);
+        return new(branchId, fromDate, toDate, bills.Count, gross, discounts, net, payments, cogs, net - cogs, inventoryValue, variance);
     }
 
-    public async Task<IReadOnlyList<LocalPaymentBreakdown>> PaymentsAsync(string branchId, DateOnly from, DateOnly to, CancellationToken token = default)
+    public async Task<IReadOnlyList<LocalPaymentBreakdown>> PaymentsAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
         await using var db = databaseFactory.CreateDbContext();
-        var start = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var end = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         return await (from payment in db.Payments.AsNoTracking()
                       join bill in db.Bills.AsNoTracking() on payment.BillId equals bill.Id
                       where bill.BranchId == branchId && payment.ReceivedAt >= start && payment.ReceivedAt < end && payment.Status != "void"
@@ -60,11 +60,11 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
                       select new LocalPaymentBreakdown(g.Key, g.Count(), g.Sum(x => x.Amount))).ToListAsync(token);
     }
 
-    public async Task<IReadOnlyList<LocalTopItem>> TopItemsAsync(string branchId, DateOnly from, DateOnly to, int take = 10, CancellationToken token = default)
+    public async Task<IReadOnlyList<LocalTopItem>> TopItemsAsync(string branchId, DateOnly fromDate, DateOnly toDate, int take = 10, CancellationToken token = default)
     {
         await using var db = databaseFactory.CreateDbContext();
-        var start = new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        var end = new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var start = new DateTimeOffset(fromDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+        var end = new DateTimeOffset(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         return await (from line in db.BillLines.AsNoTracking()
                       join bill in db.Bills.AsNoTracking() on line.BillId equals bill.Id
                       where bill.BranchId == branchId && bill.IssuedAt >= start && bill.IssuedAt < end && bill.Status != "void"
@@ -73,12 +73,12 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
                       select new LocalTopItem(g.Key, g.Sum(x => x.Quantity), g.Sum(x => x.LineTotal))).Take(Math.Clamp(take, 1, 100)).ToListAsync(token);
     }
 
-    public async Task<IReadOnlyList<LocalClosingReport>> ClosingsAsync(string branchId, DateOnly from, DateOnly to, CancellationToken token = default)
+    public async Task<IReadOnlyList<LocalClosingReport>> ClosingsAsync(string branchId, DateOnly fromDate, DateOnly toDate, CancellationToken token = default)
     {
         await using var db = databaseFactory.CreateDbContext();
         var rows = await (from closing in db.DailyClosings.AsNoTracking()
                           join snapshot in db.DailyClosingSnapshots.AsNoTracking() on closing.Id equals snapshot.DailyClosingId
-                          where closing.BranchId == branchId && closing.BusinessDate >= from && closing.BusinessDate <= to
+                          where closing.BranchId == branchId && closing.BusinessDate >= fromDate && closing.BusinessDate <= to
                           select new { closing.BusinessDate, snapshot.Version, snapshot.NetSales, snapshot.PaymentsTotal, snapshot.CashVariance }).ToListAsync(token);
         return rows.GroupBy(x => x.BusinessDate).Select(g => g.OrderByDescending(x => x.Version).First())
             .OrderByDescending(x => x.BusinessDate)
