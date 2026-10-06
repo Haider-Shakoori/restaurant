@@ -80,6 +80,27 @@ class MobileApiClient implements SyncApi, ServerProbe {
     );
   }
 
+  Future<Map<String, Object?>> redeemPairing({
+    required String cloudUrl,
+    required String pairingToken,
+    required String deviceUid,
+    required String deviceName,
+    required String platform,
+    required String appVersion,
+  }) {
+    return _request(
+      'POST',
+      _uri(cloudUrl, '/api/v1/mobile/pair/redeem'),
+      body: <String, Object?>{
+        'pairing_token': pairingToken,
+        'device_uid': deviceUid,
+        'device_name': deviceName,
+        'platform': platform,
+        'app_version': appVersion,
+      },
+    );
+  }
+
   Future<Map<String, Object?>> login({
     required String baseUrl,
     required String email,
