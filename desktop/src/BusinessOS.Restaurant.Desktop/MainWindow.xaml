@@ -6,28 +6,133 @@
         Height="800"
         MinWidth="1024"
         MinHeight="640"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded">
     <Grid Background="#F5F7FB">
-        <Border Margin="24"
-                Padding="28"
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Margin="24,24,24,0"
+                Padding="24"
                 CornerRadius="18"
                 Background="White">
-            <StackPanel>
-                <TextBlock FontSize="30"
-                           FontWeight="SemiBold"
-                           Text="BusinessOS Restaurant" />
-                <TextBlock Margin="0,8,0,0"
-                           FontSize="16"
-                           Foreground="#64748B"
-                           Text="Native Windows KOT, cashier and restaurant operations client" />
-                <Border Margin="0,28,0,0"
-                        Padding="18"
-                        CornerRadius="12"
-                        Background="#F8FAFC">
-                    <TextBlock FontSize="15"
-                               Text="Desktop foundation is ready. KOT workflow modules will be added in the next batches." />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock FontSize="30"
+                               FontWeight="SemiBold"
+                               Text="BusinessOS Restaurant" />
+                    <TextBlock Margin="0,6,0,0"
+                               FontSize="15"
+                               Foreground="#64748B"
+                               Text="Local-first restaurant operations • Android waiter LAN host" />
+                </StackPanel>
+                <Border Grid.Column="1"
+                        Padding="14,8"
+                        CornerRadius="20"
+                        Background="#ECFDF5"
+                        VerticalAlignment="Center">
+                    <TextBlock x:Name="LocalServerStatus"
+                               Foreground="#047857"
+                               FontWeight="SemiBold"
+                               Text="Local host starting…" />
                 </Border>
-            </StackPanel>
+            </Grid>
         </Border>
+
+        <Grid Grid.Row="1" Margin="24">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Padding="24"
+                    CornerRadius="18"
+                    Background="White">
+                <StackPanel>
+                    <TextBlock FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="Restaurant operations" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="#64748B"
+                               TextWrapping="Wrap"
+                               Text="Menu, tables and active service data are cached locally. Android orders will reach this desktop over the restaurant Wi-Fi even when the Internet is unavailable." />
+                    <Border Margin="0,24,0,0"
+                            Padding="18"
+                            CornerRadius="12"
+                            Background="#F8FAFC">
+                        <StackPanel>
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="LAN endpoint" />
+                            <TextBlock x:Name="LanEndpointText"
+                                       Margin="0,6,0,0"
+                                       Foreground="#475569"
+                                       Text="Detecting…" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2"
+                    Padding="24"
+                    CornerRadius="18"
+                    Background="White">
+                <StackPanel>
+                    <TextBlock FontSize="20"
+                               FontWeight="SemiBold"
+                               Text="Pair waiter device" />
+                    <TextBlock Margin="0,8,0,16"
+                               Foreground="#64748B"
+                               TextWrapping="Wrap"
+                               Text="Select a staff member, generate a five-minute code, then enter it in the Android app's Local connection mode." />
+
+                    <TextBlock Margin="0,0,0,6"
+                               FontWeight="SemiBold"
+                               Text="Staff member" />
+                    <ComboBox x:Name="StaffCombo"
+                              MinHeight="40"
+                              DisplayMemberPath="DisplayName"
+                              SelectedValuePath="Id" />
+
+                    <Button Margin="0,14,0,0"
+                            MinHeight="42"
+                            Click="GeneratePairingCode_Click"
+                            Content="Generate pairing code" />
+
+                    <Border Margin="0,18,0,0"
+                            Padding="18"
+                            CornerRadius="12"
+                            Background="#F8FAFC">
+                        <StackPanel>
+                            <TextBlock Foreground="#64748B"
+                                       Text="Pairing code" />
+                            <TextBlock x:Name="PairingCodeText"
+                                       Margin="0,6,0,0"
+                                       FontSize="34"
+                                       FontWeight="Bold"
+                                       LetterSpacing="4"
+                                       Text="—" />
+                            <TextBlock x:Name="PairingExpiryText"
+                                       Margin="0,6,0,0"
+                                       Foreground="#64748B"
+                                       Text="" />
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock x:Name="PairingErrorText"
+                               Margin="0,12,0,0"
+                               Foreground="#B91C1C"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
