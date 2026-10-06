@@ -78,6 +78,23 @@ class MobileApiClient implements SyncApi, ServerProbe {
     );
   }
 
+  Future<Map<String, Object?>> pairLocal({
+    required String baseUrl,
+    required String pairingCode,
+    required String deviceUid,
+    required String deviceName,
+  }) {
+    return _request(
+      'POST',
+      _uri(baseUrl, '/api/v1/local/pair'),
+      body: <String, Object?>{
+        'pairing_code': pairingCode.trim(),
+        'device_uid': deviceUid,
+        'device_name': deviceName,
+      },
+    );
+  }
+
   Future<Map<String, Object?>> login({
     required String baseUrl,
     required String email,
