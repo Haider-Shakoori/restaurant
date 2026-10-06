@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../BusinessOS.Restaurant.Domain/BusinessOS.Restaurant.Domain.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+</Project>

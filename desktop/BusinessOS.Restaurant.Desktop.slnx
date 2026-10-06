@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BusinessOS.Restaurant.Domain/BusinessOS.Restaurant.Domain.csproj" />
+    <Project Path="src/BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
+    <Project Path="src/BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
+    <Project Path="src/BusinessOS.Restaurant.Desktop/BusinessOS.Restaurant.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BusinessOS.Restaurant.Tests/BusinessOS.Restaurant.Tests.csproj" />
+  </Folder>
+</Solution>
