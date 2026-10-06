@@ -7,24 +7,23 @@ use App\Models\CashierSession;
 use App\Models\DailyClosing;
 use App\Models\DesktopEntityLink;
 use App\Models\DesktopOperationalRecord;
-use App\Models\StockMovement;
-use App\Models\Recipe;
-use App\Models\MenuItem;
-use App\Models\InventoryBalance;
-use App\Models\GoodsReceipt;
-use App\Models\DiningTable;
 use App\Models\DeviceActivation;
+use App\Models\DiningTable;
+use App\Models\GoodsReceipt;
+use App\Models\InventoryBalance;
 use App\Models\InventoryItem;
+use App\Models\MenuItem;
 use App\Models\Order;
 use App\Models\PurchaseOrder;
+use App\Models\Recipe;
 use App\Models\RestaurantBranch;
+use App\Models\StockMovement;
 use App\Models\Supplier;
 use App\Models\SyncChange;
 use App\Models\SyncMutation;
 use App\Models\TenantUser;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class DesktopReconciliationService
@@ -441,7 +440,7 @@ class DesktopReconciliationService
     private function createRecipe(DeviceActivation $device, string $localId, array $payload): array
     {
         $branch = RestaurantBranch::query()->findOrFail($payload['branch_id'] ?? null);
-        $menuItem = \App\Models\MenuItem::query()->findOrFail($payload['menu_item_id'] ?? null);
+        $menuItem = MenuItem::query()->findOrFail($payload['menu_item_id'] ?? null);
 
         $items = collect($payload['items'] ?? [])->map(function (array $item) use ($device): array {
             return [
