@@ -7,12 +7,14 @@ use App\Models\Bill;
 use App\Models\Business;
 use App\Models\CashierSession;
 use App\Models\DailyClosing;
+use App\Models\DeviceActivation;
 use App\Models\DiningTable;
 use App\Models\InventoryItem;
 use App\Models\JournalEntry;
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
 use App\Models\MenuCategory;
+use App\Models\LicenseKey;
 use App\Models\OperatingExpense;
 use App\Models\Order;
 use App\Models\PurchaseOrder;
@@ -172,8 +174,29 @@ class TenantPortalController extends Controller
 
     public function settings(): View
     {
+        $business = Business::query()->where('tenant_id', tenant('id'))->first();
+
+        $activeLicense = $business
+            ? LicenseKey::query()
+                ->where('business_id', $business->id)
+                ->where('status', 'active')
+                ->latest('version')
+                ->first()
+            : null;
+
+        $mobileDevices = $business
+            ? DeviceActivation::query()
+                ->where('business_id', $business->id)
+                ->whereIn('platform', ['android', 'ios'])
+                ->latest('last_seen_at')
+                ->get()
+            : collect();
+
         return $this->view('tenant.settings.index', [
             'branches' => RestaurantBranch::query()->with(['diningAreas', 'kitchenStations'])->orderBy('name')->get(),
+            'mobileDevices' => $mobileDevices,
+            'activeMobileCount' => $mobileDevices->where('status', 'active')->count(),
+            'mobileDeviceLimit' => $activeLicense?->max_mobile_devices_snapshot,
         ]);
     }
 
