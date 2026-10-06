@@ -57,7 +57,8 @@ public sealed class LocalTerminalManagementService
         HttpRequest request,
         CancellationToken cancellationToken = default)
     {
-        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        // Authentication already ensures the local schema before heartbeat recording.
+        // Avoid repeating schema checks on every order/sync request.
         await using var db = _databaseFactory.Create();
 
         var runtime = await db.TerminalRuntimes
