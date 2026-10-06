@@ -189,7 +189,7 @@ public sealed class OperationalSnapshotStore
             }
         }
 
-        foreach (var station in snapshot.Kitchen.Stations)
+        foreach (var station in snapshot.Kitchen?.Stations ?? [])
         {
             var entity = await db.KitchenStations.FindAsync([station.Id], cancellationToken);
 
@@ -212,7 +212,7 @@ public sealed class OperationalSnapshotStore
             entity.IsActive = station.IsActive;
         }
 
-        foreach (var route in snapshot.Kitchen.Routes)
+        foreach (var route in snapshot.Kitchen?.Routes ?? [])
         {
             db.MenuItemKitchenRoutes.Add(new LocalMenuItemKitchenRoute
             {
