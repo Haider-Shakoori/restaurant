@@ -7,6 +7,12 @@ use App\Models\CashierSession;
 use App\Models\DailyClosing;
 use App\Models\DesktopEntityLink;
 use App\Models\DesktopOperationalRecord;
+use App\Models\StockMovement;
+use App\Models\Recipe;
+use App\Models\MenuItem;
+use App\Models\InventoryBalance;
+use App\Models\GoodsReceipt;
+use App\Models\DiningTable;
 use App\Models\DeviceActivation;
 use App\Models\InventoryItem;
 use App\Models\Order;
@@ -75,7 +81,7 @@ class DesktopReconciliationService
                 'entity_type' => $change->entity_type,
                 'entity_id' => $change->entity_id,
                 'operation' => $change->operation,
-                'payload' => $change->payload,
+                'payload' => $this->changeSnapshot($change),
                 'occurred_at' => $change->occurred_at?->utc()->toIso8601String(),
                 'local_links' => DesktopEntityLink::query()
                     ->where('central_device_id', $device->id)
@@ -615,6 +621,67 @@ class DesktopReconciliationService
             ->where('public_id', $publicId)
             ->where('is_active', true)
             ->firstOrFail();
+    }
+
+    private function changeSnapshot(SyncChange $change): ?array
+    {
+        if ($change->operation === 'delete') {
+            return $change->payload;
+        }
+
+        return match ($change->entity_type) {
+            'order' => Order::query()
+                ->with(['table.diningArea.branch', 'waiter', 'items', 'kitchenTickets.station'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'bill' => Bill::query()
+                ->with(['lines', 'payments', 'order.table'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'cashier_session' => CashierSession::query()
+                ->with(['branch', 'cashier'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'inventory_item' => InventoryItem::query()
+                ->with('balances')
+                ->find($change->entity_id)
+                ?->toArray(),
+            'inventory_balance' => InventoryBalance::query()
+                ->with(['branch', 'item'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'stock_movement' => StockMovement::query()
+                ->with(['branch', 'item'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'supplier' => Supplier::query()
+                ->find($change->entity_id)
+                ?->toArray(),
+            'recipe' => Recipe::query()
+                ->with(['branch', 'menuItem', 'items.inventoryItem'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'purchase_order' => PurchaseOrder::query()
+                ->with(['branch', 'supplier', 'lines.item', 'receipts.lines.item'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'goods_receipt' => GoodsReceipt::query()
+                ->with(['purchaseOrder', 'supplier', 'branch', 'lines.item'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'daily_closing' => DailyClosing::query()
+                ->with(['branch', 'snapshots', 'events'])
+                ->find($change->entity_id)
+                ?->toArray(),
+            'dining_table' => DiningTable::query()
+                ->with('diningArea.branch')
+                ->find($change->entity_id)
+                ?->toArray(),
+            'menu_item' => MenuItem::query()
+                ->find($change->entity_id)
+                ?->toArray(),
+            default => $change->payload,
+        };
     }
 
     private function failure(
