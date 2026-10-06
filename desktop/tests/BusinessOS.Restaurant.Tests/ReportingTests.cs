@@ -10,8 +10,8 @@ public sealed class ReportingTests
     [Fact]
     public async Task Summary_uses_local_financial_inventory_and_closing_data()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"bos-report-{Guid.NewGuid():N}.db");
-        var factory = new LocalDatabaseFactory(path);
+        var root = Path.Combine(Path.GetTempPath(), $"bos-report-{Guid.NewGuid():N}");
+        var factory = new LocalDatabaseFactory(root);
         await factory.EnsureCreatedAsync();
 
         await using (var db = factory.Create())
@@ -37,14 +37,14 @@ public sealed class ReportingTests
         Assert.Equal(500m, report.InventoryValue);
         Assert.Equal(-20m, report.CashVariance);
 
-        File.Delete(path);
+        Directory.Delete(root, recursive: true);
     }
 
     [Fact]
     public async Task Breakdowns_are_local_and_period_scoped()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"bos-report-{Guid.NewGuid():N}.db");
-        var factory = new LocalDatabaseFactory(path);
+        var root = Path.Combine(Path.GetTempPath(), $"bos-report-{Guid.NewGuid():N}");
+        var factory = new LocalDatabaseFactory(root);
         await factory.EnsureCreatedAsync();
         await using (var db = factory.Create())
         {
@@ -62,6 +62,6 @@ public sealed class ReportingTests
         Assert.Single(items);
         Assert.Equal("Kabuli Pulao", items[0].ItemName);
         Assert.Equal(2, items[0].Quantity);
-        File.Delete(path);
+        Directory.Delete(root, recursive: true);
     }
 }
