@@ -32,6 +32,210 @@ public static class LocalEndpointMappings
             proxy.ForwardAsync(request, "api/v1/license/lease", token));
     }
 
+    public static void MapLocalDiagnostics(this WebApplication app)
+    {
+        app.MapPost("/api/v1/local/heartbeat", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalTerminalManagementService terminals,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new
+                    {
+                        code = "unauthenticated",
+                        message = "This terminal is not allowed to use the local restaurant host.",
+                    },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            var diagnostics = await terminals.GetDiagnosticsAsync(
+                options.TenantId,
+                cancellationToken: token);
+
+            return Results.Ok(new
+            {
+                data = new
+                {
+                    terminal_id = principal.DeviceId,
+                    network_mode = diagnostics.NetworkMode,
+                    local_operations_allowed = diagnostics.LocalOperationsAllowed,
+                    sync_enabled = diagnostics.SyncEnabled,
+                    offline_valid_until = diagnostics.OfflineValidUntil,
+                    server_time = DateTimeOffset.UtcNow,
+                },
+            });
+        });
+
+        app.MapGet("/api/v1/local/diagnostics", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalTerminalManagementService terminals,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: false,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (!IsTerminalManager(principal))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "Only an owner or manager can view LAN diagnostics." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(new
+            {
+                data = await terminals.GetDiagnosticsAsync(
+                    options.TenantId,
+                    cancellationToken: token),
+            });
+        });
+
+        app.MapGet("/api/v1/local/terminals", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalTerminalManagementService terminals,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: false,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (!IsTerminalManager(principal))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "Only an owner or manager can manage LAN terminals." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(new
+            {
+                data = await terminals.GetTerminalsAsync(cancellationToken: token),
+            });
+        });
+
+        app.MapPut("/api/v1/local/terminals/{deviceId}/enabled", async (
+            string deviceId,
+            LocalTerminalEnabledRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalTerminalManagementService terminals,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: false,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (!IsTerminalManager(principal))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "Only an owner or manager can manage LAN terminals." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            if (string.Equals(principal.DeviceId, deviceId, StringComparison.Ordinal) && !body.Enabled)
+            {
+                return Results.Json(
+                    new { code = "self_disable_blocked", message = "The current management terminal cannot disable itself." },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            var updated = await terminals.SetEnabledAsync(
+                deviceId,
+                body.Enabled,
+                principal.UserId,
+                token);
+
+            return updated
+                ? Results.Ok(new { data = new { device_id = deviceId, enabled = body.Enabled } })
+                : Results.Json(
+                    new { code = "terminal_not_found", message = "The terminal does not exist." },
+                    statusCode: StatusCodes.Status404NotFound);
+        });
+
+        app.MapDelete("/api/v1/local/terminals/{deviceId}", async (
+            string deviceId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalTerminalManagementService terminals,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: false,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (!IsTerminalManager(principal))
+            {
+                return Results.Json(
+                    new { code = "forbidden", message = "Only an owner or manager can unpair LAN terminals." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            if (string.Equals(principal.DeviceId, deviceId, StringComparison.Ordinal))
+            {
+                return Results.Json(
+                    new { code = "self_unpair_blocked", message = "The current management terminal cannot unpair itself." },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return await terminals.UnpairAsync(deviceId, token)
+                ? Results.NoContent()
+                : Results.Json(
+                    new { code = "terminal_not_found", message = "The terminal does not exist." },
+                    statusCode: StatusCodes.Status404NotFound);
+        });
+    }
+
     public static void MapLocalSync(this WebApplication app)
     {
         app.MapGet("/api/v1/sync/bootstrap", async (
@@ -1173,6 +1377,10 @@ public static class LocalEndpointMappings
             }
         });
     }
+
+    private static bool IsTerminalManager(LocalTerminalPrincipal principal) =>
+        principal.UserRole.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
+        principal.UserRole.Equals("manager", StringComparison.OrdinalIgnoreCase);
 
     private static IResult CashierConflict(LocalSyncConflictException conflict) =>
         Results.Json(
