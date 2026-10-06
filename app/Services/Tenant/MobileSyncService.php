@@ -8,6 +8,7 @@ use App\Models\DiningTable;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\Order;
+use App\Models\RestaurantBranch;
 use App\Models\SyncChange;
 use App\Models\SyncMutation;
 use App\Models\TenantUser;
@@ -48,6 +49,8 @@ class MobileSyncService
             'tenant_id' => tenant('id'),
             'device_id' => $device->id,
             'user' => $this->userSnapshot($user),
+            'branches' => $this->branchSnapshot(),
+            'staff' => $this->staffSnapshot(),
             'menu' => $this->menuSnapshot(),
             'tables' => $this->tableSnapshot(),
             'orders' => $this->activeOrderSnapshot($user),
@@ -502,12 +505,48 @@ class MobileSyncService
         ];
     }
 
+    private function branchSnapshot(): array
+    {
+        return RestaurantBranch::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (RestaurantBranch $branch) => [
+                'id' => $branch->id,
+                'code' => $branch->code,
+                'name' => $branch->name,
+                'is_active' => $branch->is_active,
+            ])
+            ->all();
+    }
+
+    private function staffSnapshot(): array
+    {
+        return TenantUser::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get()
+            ->map(fn (TenantUser $staff) => [
+                'id' => $staff->id,
+                'public_id' => $staff->public_id,
+                'name' => $staff->name,
+                'email' => $staff->email,
+                'role' => $staff->role,
+                'is_active' => $staff->is_active,
+            ])
+            ->all();
+    }
+
     private function menuSnapshot(): array
     {
         return MenuCategory::query()
             ->where('is_active', true)
             ->with(['items' => fn ($query) => $query
                 ->where('is_available', true)
+                ->with(['modifierGroups' => fn ($groups) => $groups
+                    ->where('menu_modifier_groups.is_active', true)
+                    ->with(['options' => fn ($options) => $options
+                        ->where('is_active', true)])])
                 ->orderBy('sort_order')
                 ->orderBy('name')])
             ->orderBy('sort_order')
@@ -526,6 +565,19 @@ class MobileSyncService
                     'price' => $item->price,
                     'currency' => 'AFN',
                     'sort_order' => $item->sort_order,
+                    'modifier_groups' => $item->modifierGroups->map(fn ($group) => [
+                        'id' => $group->id,
+                        'name' => $group->name,
+                        'min_selections' => $group->min_selections,
+                        'max_selections' => $group->max_selections,
+                        'sort_order' => $group->pivot->sort_order ?? $group->sort_order,
+                        'options' => $group->options->map(fn ($option) => [
+                            'id' => $option->id,
+                            'name' => $option->name,
+                            'price_delta' => $option->price_delta,
+                            'sort_order' => $option->sort_order,
+                        ])->all(),
+                    ])->all(),
                 ])->all(),
             ])->all();
     }

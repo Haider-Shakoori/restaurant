@@ -11,6 +11,7 @@ use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
+use App\Models\MenuModifierGroup;
 use App\Models\Order;
 use App\Models\Plan;
 use App\Models\RestaurantBranch;
@@ -266,6 +267,54 @@ class MobileOfflineSyncTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.results.0.status', 'rejected')
             ->assertJsonPath('data.results.0.code', 'mutation_id_reused');
+    }
+
+    public function test_bootstrap_includes_branches_staff_and_menu_modifiers(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'sync-device-modifiers');
+
+        tenancy()->initialize($tenant);
+        [, , $menuItem] = $this->seedRestaurant('waiter1@restaurant.test');
+
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Manager',
+            'email' => 'manager@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+
+        $group = MenuModifierGroup::query()->create([
+            'name' => 'Size',
+            'min_selections' => 1,
+            'max_selections' => 1,
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $group->options()->create([
+            'name' => 'Large',
+            'price_delta' => '50.00',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $menuItem->modifierGroups()->attach($group->id, ['sort_order' => 1]);
+        tenancy()->end();
+
+        $token = $this->login($domain, 'waiter1@restaurant.test');
+
+        $this->withHeaders($this->syncHeaders($token, $credentials))
+            ->getJson("http://{$domain}/api/v1/sync/bootstrap")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.branches')
+            ->assertJsonCount(2, 'data.staff')
+            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.name', 'Size')
+            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.min_selections', 1)
+            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.options.0.name', 'Large')
+            ->assertJsonPath('data.menu.0.items.0.modifier_groups.0.options.0.price_delta', '50.00');
     }
 
     public function test_sync_requires_valid_activated_device_secret_in_addition_to_user_token(): void

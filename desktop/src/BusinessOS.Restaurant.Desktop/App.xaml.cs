@@ -1,5 +1,9 @@
+using System.Net.Http;
+using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
+using BusinessOS.Restaurant.Persistence;
+using BusinessOS.Restaurant.Sync;
 
 namespace BusinessOS.Restaurant.Desktop;
 
@@ -11,10 +15,36 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        var activationStore = new WindowsActivationStore();
+        var settingsStore = new ConnectionSettingsStore();
+        var databaseFactory = new LocalDatabaseFactory();
+        await databaseFactory.EnsureCreatedAsync();
+
+        try
+        {
+            using var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(15),
+            };
+
+            var refresh = new OperationalDataRefreshService(
+                activationStore,
+                new WindowsSessionStore(),
+                settingsStore,
+                new CloudOperationalDataClient(httpClient),
+                new OperationalSnapshotStore(databaseFactory));
+
+            await refresh.RefreshIfPossibleAsync();
+        }
+        catch
+        {
+            // Cached reference data remains available while cloud synchronization is unavailable.
+        }
+
         _localHost = new LocalHostBootstrapper(
-            new WindowsActivationStore(),
-            new LocalRestaurantServer(),
-            new ConnectionSettingsStore());
+            activationStore,
+            new LocalRestaurantServer(databaseFactory),
+            settingsStore);
 
         try
         {
