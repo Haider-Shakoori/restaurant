@@ -35,8 +35,10 @@ public sealed class Batch14MaintenanceTests
         await factory.EnsureCreatedAsync();
         var bundle=await maintenance.CreateDiagnosticsBundleAsync();
         Assert.True(File.Exists(bundle));
-        using var zip=System.IO.Compression.ZipFile.OpenRead(bundle);
-        Assert.Single(zip.Entries); Assert.Equal("diagnostics.json",zip.Entries[0].FullName);
+        using (var zip=System.IO.Compression.ZipFile.OpenRead(bundle))
+        {
+            Assert.Single(zip.Entries); Assert.Equal("diagnostics.json",zip.Entries[0].FullName);
+        }
         Directory.Delete(root,true);
     }
 
