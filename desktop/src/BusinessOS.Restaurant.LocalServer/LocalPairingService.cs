@@ -18,9 +18,9 @@ public sealed record LocalPairingCode(
     DateTimeOffset ExpiresAtUtc);
 
 public sealed record LocalPairRequest(
-    string PairingCode,
-    string DeviceUid,
-    string DeviceName);
+    [System.Text.Json.Serialization.JsonPropertyName("pairing_code")] string PairingCode,
+    [System.Text.Json.Serialization.JsonPropertyName("device_uid")] string DeviceUid,
+    [System.Text.Json.Serialization.JsonPropertyName("device_name")] string DeviceName);
 
 public sealed record LocalPairedDevice(
     string Id,
