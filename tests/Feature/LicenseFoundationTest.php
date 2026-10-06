@@ -176,6 +176,45 @@ class LicenseFoundationTest extends TestCase
         $this->assertSame(1, $business->fresh()->devices()->where('status', DeviceStatus::Active)->count());
     }
 
+
+    public function test_mobile_activation_limit_is_enforced_separately_from_total_device_limit(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness([
+            'max_devices' => '5',
+            'max_mobile_devices' => '1',
+        ]);
+
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $this->assertSame(5, $license['license']->max_devices_snapshot);
+        $this->assertSame(1, $license['license']->max_mobile_devices_snapshot);
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'desktop-main',
+            'platform' => 'windows',
+        ])->assertCreated();
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'waiter-phone-1',
+            'platform' => 'android',
+        ])->assertCreated()
+            ->assertJsonPath('lease.payload.mobile_device_limit', 1);
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'waiter-phone-2',
+            'platform' => 'ios',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('device_uid');
+
+        $this->assertSame(
+            2,
+            $business->fresh()->devices()->where('status', DeviceStatus::Active)->count(),
+        );
+    }
+
     public function test_license_rotation_revokes_old_license_and_device_credentials(): void
     {
         [$business, , $domain] = $this->createActiveBusiness();
