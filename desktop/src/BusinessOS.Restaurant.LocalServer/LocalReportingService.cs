@@ -78,7 +78,7 @@ public sealed class LocalReportingService(LocalDatabaseFactory databaseFactory)
         await using var db = databaseFactory.CreateDbContext();
         var rows = await (from closing in db.DailyClosings.AsNoTracking()
                           join snapshot in db.DailyClosingSnapshots.AsNoTracking() on closing.Id equals snapshot.DailyClosingId
-                          where closing.BranchId == branchId && closing.BusinessDate >= fromDate && closing.BusinessDate <= to
+                          where closing.BranchId == branchId && closing.BusinessDate >= fromDate && closing.BusinessDate <= toDate
                           select new { closing.BusinessDate, snapshot.Version, snapshot.NetSales, snapshot.PaymentsTotal, snapshot.CashVariance }).ToListAsync(token);
         return rows.GroupBy(x => x.BusinessDate).Select(g => g.OrderByDescending(x => x.Version).First())
             .OrderByDescending(x => x.BusinessDate)
