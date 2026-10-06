@@ -434,6 +434,66 @@ class MobileOfflineSyncTest extends TestCase
         tenancy()->end();
     }
 
+    public function test_manager_can_generate_one_time_mobile_pairing_and_redeem_it_once(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+
+        $plan = $business->plan()->firstOrFail();
+        $plan->features()->create([
+            'feature_key' => 'max_mobile_devices',
+            'value' => ['value' => '1'],
+        ]);
+
+        app(LicenseService::class)->generate(
+            $business->fresh(),
+            AdminUser::factory()->create([
+                'role' => PlatformRole::Operator,
+                'is_active' => true,
+            ]),
+        );
+
+        tenancy()->initialize($tenant);
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Manager',
+            'email' => 'manager-pairing@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        tenancy()->end();
+
+        $token = $this->login($domain, 'manager-pairing@restaurant.test');
+
+        $pairing = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->postJson("http://{$domain}/api/v1/mobile/pairings")
+            ->assertCreated()
+            ->assertJsonStructure([
+                'pairing_token',
+                'expires_at',
+                'tenant_id',
+            ])
+            ->json();
+
+        $this->postJson("http://{$domain}/api/v1/mobile/pair/redeem", [
+            'pairing_token' => $pairing['pairing_token'],
+            'device_uid' => 'paired-mobile-001',
+            'device_name' => 'Waiter Phone',
+            'platform' => 'android',
+            'app_version' => '1.0.0',
+        ])->assertCreated()
+            ->assertJsonPath('lease.payload.mobile_device_limit', 1);
+
+        $this->postJson("http://{$domain}/api/v1/mobile/pair/redeem", [
+            'pairing_token' => $pairing['pairing_token'],
+            'device_uid' => 'paired-mobile-002',
+            'device_name' => 'Second Phone',
+            'platform' => 'android',
+            'app_version' => '1.0.0',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('pairing_token');
+    }
+
     /**
      * @return array{Business, string, Tenant}
      */
