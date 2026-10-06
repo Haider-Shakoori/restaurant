@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="../BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
     <ProjectReference Include="../BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
+    <ProjectReference Include="../BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
