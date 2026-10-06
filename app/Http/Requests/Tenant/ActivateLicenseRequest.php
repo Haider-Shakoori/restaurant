@@ -17,7 +17,7 @@ class ActivateLicenseRequest extends FormRequest
             'license_key' => ['required', 'string', 'max:64'],
             'device_uid' => ['required', 'string', 'max:191'],
             'device_name' => ['nullable', 'string', 'max:255'],
-            'platform' => ['required', 'in:android,windows'],
+            'platform' => ['required', 'in:android,ios,windows'],
             'app_version' => ['nullable', 'string', 'max:50'],
         ];
     }
