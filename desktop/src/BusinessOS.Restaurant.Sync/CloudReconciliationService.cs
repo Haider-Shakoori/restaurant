@@ -50,11 +50,12 @@ public sealed class CloudReconciliationService
         await using (var db = _databaseFactory.Create())
         {
             var state = await StateAsync(db, cancellationToken);
-            var pending = await db.CloudOutbox
-                .Where(value => PendingStatuses.Contains(value.Status))
+            var pending = (await db.CloudOutbox
+                    .Where(value => PendingStatuses.Contains(value.Status))
+                    .ToArrayAsync(cancellationToken))
                 .OrderBy(value => value.OccurredAtUtc)
                 .Take(50)
-                .ToArrayAsync(cancellationToken);
+                .ToArray();
 
             if (pending.Length > 0)
             {
@@ -251,13 +252,14 @@ public sealed class CloudReconciliationService
 
             if (hasPending)
             {
-                var mutation = await db.CloudOutbox
-                    .Where(value =>
-                        value.EntityType == change.EntityType &&
-                        value.LocalEntityId == localId &&
-                        PendingStatuses.Contains(value.Status))
+                var mutation = (await db.CloudOutbox
+                        .Where(value =>
+                            value.EntityType == change.EntityType &&
+                            value.LocalEntityId == localId &&
+                            PendingStatuses.Contains(value.Status))
+                        .ToArrayAsync(cancellationToken))
                     .OrderBy(value => value.OccurredAtUtc)
-                    .FirstAsync(cancellationToken);
+                    .First();
 
                 AddConflict(
                     db,
