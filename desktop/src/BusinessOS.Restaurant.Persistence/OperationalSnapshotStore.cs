@@ -44,8 +44,12 @@ public sealed class OperationalSnapshotStore
         await db.StaffUsers.ExecuteUpdateAsync(
             setters => setters.SetProperty(value => value.IsActive, false),
             cancellationToken);
+        await db.KitchenStations.ExecuteUpdateAsync(
+            setters => setters.SetProperty(value => value.IsActive, false),
+            cancellationToken);
 
         db.MenuItemModifierGroups.RemoveRange(db.MenuItemModifierGroups);
+        db.MenuItemKitchenRoutes.RemoveRange(db.MenuItemKitchenRoutes);
 
         foreach (var branch in snapshot.Branches)
         {
@@ -185,6 +189,40 @@ public sealed class OperationalSnapshotStore
             }
         }
 
+        foreach (var station in snapshot.Kitchen.Stations)
+        {
+            var entity = await db.KitchenStations.FindAsync([station.Id], cancellationToken);
+
+            if (entity is null)
+            {
+                entity = new LocalKitchenStation
+                {
+                    Id = station.Id,
+                    BranchId = station.BranchId,
+                    Code = station.Code,
+                    Name = station.Name,
+                };
+                db.KitchenStations.Add(entity);
+            }
+
+            entity.BranchId = station.BranchId;
+            entity.Code = station.Code;
+            entity.Name = station.Name;
+            entity.SortOrder = station.SortOrder;
+            entity.IsActive = station.IsActive;
+        }
+
+        foreach (var route in snapshot.Kitchen.Routes)
+        {
+            db.MenuItemKitchenRoutes.Add(new LocalMenuItemKitchenRoute
+            {
+                Id = route.Id,
+                MenuItemId = route.MenuItemId,
+                BranchId = route.BranchId,
+                KitchenStationId = route.KitchenStationId,
+            });
+        }
+
         foreach (var table in snapshot.Tables)
         {
             var branch = await db.Branches.FindAsync([table.Branch.Id], cancellationToken);
@@ -316,9 +354,32 @@ public sealed class OperationalSnapshotStore
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        var stations = await db.KitchenStations
+            .Where(value => value.IsActive)
+            .OrderBy(value => value.BranchId)
+            .ThenBy(value => value.SortOrder)
+            .ThenBy(value => value.Name)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var kitchenRoutes = await db.MenuItemKitchenRoutes
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
         var state = await db.OperationalStates.AsNoTracking().SingleOrDefaultAsync(value => value.Id == 1, cancellationToken);
 
-        return new LocalCatalogSnapshot(branches, areas, tables, categories, items, groups, options, links, state);
+        return new LocalCatalogSnapshot(
+            branches,
+            areas,
+            tables,
+            categories,
+            items,
+            groups,
+            options,
+            links,
+            stations,
+            kitchenRoutes,
+            state);
     }
 }
 
@@ -331,4 +392,6 @@ public sealed record LocalCatalogSnapshot(
     IReadOnlyDictionary<string, LocalModifierGroup> ModifierGroups,
     IReadOnlyList<LocalModifierOption> ModifierOptions,
     IReadOnlyList<LocalMenuItemModifierGroup> MenuItemModifierGroups,
+    IReadOnlyList<LocalKitchenStation> KitchenStations,
+    IReadOnlyList<LocalMenuItemKitchenRoute> KitchenRoutes,
     LocalOperationalState? State);
