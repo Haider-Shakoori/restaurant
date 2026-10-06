@@ -7,6 +7,7 @@
     <Project Path="src/BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
     <Project Path="src/BusinessOS.Restaurant.LocalServer/BusinessOS.Restaurant.LocalServer.csproj" />
     <Project Path="src/BusinessOS.Restaurant.Sync/BusinessOS.Restaurant.Sync.csproj" />
+    <Project Path="src/BusinessOS.Restaurant.Printing/BusinessOS.Restaurant.Printing.csproj" />
     <Project Path="src/BusinessOS.Restaurant.Desktop/BusinessOS.Restaurant.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
