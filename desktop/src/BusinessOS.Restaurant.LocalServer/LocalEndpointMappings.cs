@@ -1412,6 +1412,32 @@ public static class LocalEndpointMappings
             if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
             return Results.Ok(new { data = await reports.ClosingsAsync(branch_id, from, to, token) });
         });
+
+        app.MapGet("/api/v1/reports/sales-trend", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            try { return Results.Ok(new { data = await reports.SalesTrendAsync(branch_id, from, to, token) }); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { code = "invalid_period", message = ex.Message }); }
+        });
+
+        app.MapGet("/api/v1/reports/accounting", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            try { return Results.Ok(new { data = await reports.AccountingSummaryAsync(branch_id, from, to, token) }); }
+            catch (ArgumentException ex) { return Results.BadRequest(new { code = "invalid_period", message = ex.Message }); }
+        });
+
+        app.MapGet("/api/v1/reports/inventory", async (string branch_id, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+            return Results.Ok(new { data = await reports.InventoryAsync(branch_id, token) });
+        });
     }
 
     private static bool CanViewReports(LocalTerminalPrincipal principal) =>
