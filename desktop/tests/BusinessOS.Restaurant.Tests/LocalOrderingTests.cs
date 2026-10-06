@@ -256,11 +256,22 @@ public sealed class LocalOrderingTests
             context.Request.Headers.Authorization = "Bearer access-token";
             context.Request.Headers["X-Device-Id"] = "device-1";
             context.Request.Headers["X-Device-Secret"] = "device-secret";
+            context.Request.Headers["X-App-Version"] = "1.0.0";
+
+            var activationStore = new WindowsActivationStore(root);
+            await activationStore.SaveAsync(ValidActivation("tenant-1"));
+            var settingsStore = new ConnectionSettingsStore(root);
+            var terminalManagement = new LocalTerminalManagementService(
+                factory,
+                settingsStore,
+                activationStore);
 
             var authenticator = new LocalTerminalAuthenticator(
                 factory,
-                new ConnectionSettingsStore(root),
+                activationStore,
+                settingsStore,
                 store,
+                terminalManagement,
                 new HttpClient());
 
             var principal = await authenticator.AuthenticateAsync(
@@ -300,6 +311,40 @@ public sealed class LocalOrderingTests
             await sync.PushAsync(principal, request, CancellationToken.None));
 
         return response.GetProperty("results")[0];
+    }
+
+    private static ActivationState ValidActivation(string tenantId)
+    {
+        var payload = JsonSerializer.SerializeToElement(new { });
+        var lease = new SignedLease(payload, "signature", "Ed25519", "key-1");
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = new LeaseSnapshot(
+            1,
+            "lease-1",
+            "key-1",
+            tenantId,
+            "business-1",
+            "subscription-1",
+            1,
+            "desktop-device",
+            "desktop-uid",
+            "standard",
+            "Standard",
+            now.AddHours(-1),
+            now.AddDays(2),
+            now.AddDays(30),
+            payload);
+
+        return new ActivationState(
+            "https://restaurant.example.test",
+            "desktop-device",
+            "desktop-uid",
+            "desktop-secret",
+            "public-key",
+            "key-1",
+            lease,
+            snapshot,
+            now);
     }
 
     private static OperationalSnapshot Snapshot() =>
