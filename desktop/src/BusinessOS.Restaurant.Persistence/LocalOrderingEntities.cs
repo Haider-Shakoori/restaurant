@@ -447,6 +447,23 @@ public sealed class LocalGoodsReceiptLine
 }
 
 
+
+public sealed class LocalExpense
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public long RecordedByUserId { get; set; }
+    public required string Category { get; set; }
+    public required string Description { get; set; }
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "AFN";
+    public required string PaymentMethod { get; set; }
+    public string? Reference { get; set; }
+    public DateOnly ExpenseDate { get; set; }
+    public DateTimeOffset RecordedAtUtc { get; set; }
+}
+
+
 public sealed class LocalCloudOutboxMutation
 {
     public required string Id { get; set; }
