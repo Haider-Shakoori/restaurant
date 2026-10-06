@@ -1,22 +1,26 @@
 # Desktop Batch 13 — Reports and accounting surfaces
 
-Batch 13 adds local-first management reporting without changing operational authority.
+Batch 13 turns the desktop local SQLite operational data into management reporting without moving authority to the cloud.
 
 ## Delivered
 
-- Period/branch financial summary: gross sales, discounts, net sales, payments, COGS and gross profit.
-- Current local inventory valuation and daily-closing cash variance.
-- Payment-method breakdown and top-selling item report.
-- Finalized daily-closing history using the latest immutable snapshot version.
-- Authenticated local report endpoints for owner, manager, accountant and auditor roles.
-- Native WPF Reports & Accounting dashboard.
-- Regression tests proving reports are derived from local SQLite and remain independent of cloud availability.
+- period sales summary: gross sales, discounts, net sales, collections, outstanding balance, COGS, gross profit and margin;
+- daily sales/profit trend;
+- payment-method and top-item breakdowns;
+- latest-version daily-closing history and cash variance;
+- inventory valuation, average cost, quantity and low-stock view;
+- accounting summary for payment clearing, receivables, sales, discounts, COGS and inventory snapshot;
+- WPF reporting workspace with dedicated tabs and AFN presentation;
+- role-protected local report endpoints for owner, manager, accountant and auditor;
+- period validation and regression tests.
 
-## Architecture
+## Accounting boundary
 
-Reports are read models over the same local SQLite records used by POS, daily closing and inventory. Android ordering remains Android -> Desktop LAN -> SQLite. Reporting never becomes a cloud dependency and does not mutate operational records.
+The accounting surface is a derived management view. It does not create a second ledger and does not mutate bills, payments, stock movements, valuation or daily-closing snapshots.
 
-Cloud reconciliation continues independently through the durable Batch 11 outbox. A temporary WAN outage therefore does not prevent the restaurant from viewing locally available operational reports.
+## Local-first behavior
+
+Reports are generated from desktop SQLite. Cloud connectivity is not required. Android ordering, KOT/KDS, cashier and inventory continue through the Desktop LAN host during degraded or isolated-local operation while the signed offline lease is valid.
 
 ## Endpoints
 
@@ -24,5 +28,10 @@ Cloud reconciliation continues independently through the durable Batch 11 outbox
 - GET /api/v1/reports/payments
 - GET /api/v1/reports/top-items
 - GET /api/v1/reports/closings
+- GET /api/v1/reports/sales-trend
+- GET /api/v1/reports/accounting
+- GET /api/v1/reports/inventory
 
-All endpoints accept branch_id, from and to. top-items additionally accepts limit.
+## Next batch
+
+Batch 14 covers backup/restore, updater and diagnostics.
