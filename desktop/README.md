@@ -28,7 +28,7 @@ Native Windows operational client and local-network host for the existing Busine
 10. ✅ Inventory, recipes, weighted-average valuation and purchasing
 11. ✅ Desktop -> cloud reconciliation, two-way synchronization and conflict handling
 12. ✅ LAN terminal management, diagnostics and degraded-network controls
-13. Reports and accounting surfaces
+13. ✅ Reports and accounting surfaces
 14. Backup/restore, updater and diagnostics
 15. Branding, Windows Firewall/installer integration and signed release pipeline
 
