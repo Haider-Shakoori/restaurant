@@ -25,3 +25,7 @@ Backup, restore and diagnostics do not require cloud connectivity. They do not a
 - Keep a pre-restore safety copy.
 - Never include credentials, license secrets or the restaurant database in diagnostic bundles.
 - Never execute an update whose checksum is not verified.
+
+## Release gate
+
+Batch 14 may merge only after the repository's Windows desktop and cross-stack CI workflows complete successfully, including Laravel/PHP, frontend, Flutter and Android validation where configured.
