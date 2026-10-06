@@ -445,3 +445,57 @@ public sealed class LocalGoodsReceiptLine
     public decimal UnitCost { get; set; }
     public decimal LineTotal { get; set; }
 }
+
+
+public sealed class LocalCloudOutboxMutation
+{
+    public required string Id { get; set; }
+    public required string Operation { get; set; }
+    public required string EntityType { get; set; }
+    public required string LocalEntityId { get; set; }
+    public long ActorUserId { get; set; }
+    public required string ActorPublicId { get; set; }
+    public required string PayloadJson { get; set; }
+    public required string Status { get; set; }
+    public int Attempts { get; set; }
+    public string? CloudEntityId { get; set; }
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+    public DateTimeOffset OccurredAtUtc { get; set; }
+    public DateTimeOffset? LastAttemptAtUtc { get; set; }
+    public DateTimeOffset? SyncedAtUtc { get; set; }
+}
+
+public sealed class LocalCloudEntityLink
+{
+    public required string EntityType { get; set; }
+    public required string LocalEntityId { get; set; }
+    public required string CloudEntityId { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class LocalCloudSyncState
+{
+    public int Id { get; set; }
+    public long PullCursor { get; set; }
+    public DateTimeOffset? LastPushAtUtc { get; set; }
+    public DateTimeOffset? LastPullAtUtc { get; set; }
+    public DateTimeOffset? LastSuccessAtUtc { get; set; }
+    public string? LastError { get; set; }
+}
+
+public sealed class LocalCloudConflict
+{
+    public required string Id { get; set; }
+    public required string MutationId { get; set; }
+    public required string Operation { get; set; }
+    public required string EntityType { get; set; }
+    public required string LocalEntityId { get; set; }
+    public required string Code { get; set; }
+    public required string Message { get; set; }
+    public string? LocalPayloadJson { get; set; }
+    public string? CloudPayloadJson { get; set; }
+    public required string Status { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? ResolvedAtUtc { get; set; }
+}
