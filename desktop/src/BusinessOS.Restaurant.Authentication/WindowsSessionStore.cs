@@ -20,7 +20,10 @@ public sealed class WindowsSessionStore
 
     public async Task<AuthSession?> LoadAsync(CancellationToken cancellationToken = default)
     {
-        EnsureWindows();
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Protected restaurant session storage requires Windows DPAPI.");
+        }
 
         if (!File.Exists(_sessionPath))
         {
@@ -46,7 +49,10 @@ public sealed class WindowsSessionStore
 
     public async Task SaveAsync(AuthSession session, CancellationToken cancellationToken = default)
     {
-        EnsureWindows();
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Protected restaurant session storage requires Windows DPAPI.");
+        }
 
         Directory.CreateDirectory(Path.GetDirectoryName(_sessionPath)!);
         var plainBytes = JsonSerializer.SerializeToUtf8Bytes(session, JsonOptions);
@@ -76,13 +82,5 @@ public sealed class WindowsSessionStore
         }
 
         return Task.CompletedTask;
-    }
-
-    private static void EnsureWindows()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            throw new PlatformNotSupportedException("Protected restaurant session storage requires Windows DPAPI.");
-        }
     }
 }
