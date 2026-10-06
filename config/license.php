@@ -5,6 +5,7 @@ return [
     'schema_version' => (int) env('PLATFORM_LICENSE_SCHEMA_VERSION', 1),
     'offline_grace_days' => (int) env('PLATFORM_LICENSE_OFFLINE_GRACE_DAYS', 7),
     'default_max_devices' => (int) env('PLATFORM_LICENSE_DEFAULT_MAX_DEVICES', 5),
+    'default_max_mobile_devices' => (int) env('PLATFORM_LICENSE_DEFAULT_MAX_MOBILE_DEVICES', 3),
 
     'signing' => [
         'algorithm' => 'Ed25519',
