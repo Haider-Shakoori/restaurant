@@ -4,6 +4,7 @@
     <Project Path="src/BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
     <Project Path="src/BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
     <Project Path="src/BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
+    <Project Path="src/BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
     <Project Path="src/BusinessOS.Restaurant.Desktop/BusinessOS.Restaurant.Desktop.csproj" />
   </Folder>
   <Folder Name="/tests/">
