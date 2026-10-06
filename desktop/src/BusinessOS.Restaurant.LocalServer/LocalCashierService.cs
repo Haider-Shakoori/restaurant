@@ -20,10 +20,14 @@ public sealed class LocalCashierService
     private static readonly string[] PaymentMethods = ["cash", "card", "bank", "mobile_money", "other"];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
+    private readonly LocalInventoryService _inventory;
 
-    public LocalCashierService(LocalDatabaseFactory databaseFactory)
+    public LocalCashierService(
+        LocalDatabaseFactory databaseFactory,
+        LocalInventoryService? inventory = null)
     {
         _databaseFactory = databaseFactory;
+        _inventory = inventory ?? new LocalInventoryService(databaseFactory);
     }
 
     public async Task<object> OpenSessionAsync(
@@ -173,6 +177,8 @@ public sealed class LocalCashierService
                 "order_state_conflict",
                 "The order can only be served after every kitchen ticket is ready.");
         }
+
+        await _inventory.ConsumeOrderAsync(db, order, actor, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         order.Status = "served";

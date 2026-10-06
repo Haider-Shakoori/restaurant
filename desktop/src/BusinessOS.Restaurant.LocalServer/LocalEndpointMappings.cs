@@ -794,6 +794,386 @@ public static class LocalEndpointMappings
         });
     }
 
+    public static void MapLocalInventory(this WebApplication app)
+    {
+        app.MapGet("/api/v1/inventory/items", async (
+            string? branch_id,
+            bool? low_stock,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.ItemsAsync(
+                        branch_id,
+                        low_stock ?? false,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/inventory/items", async (
+            LocalInventoryItemRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.CreateItemAsync(
+                        body.Sku,
+                        body.Name,
+                        body.BaseUnit,
+                        body.PurchaseUnit,
+                        body.PurchaseToBaseFactor,
+                        body.ReorderLevel,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/inventory/items/{itemId}/adjustments", async (
+            string itemId,
+            LocalInventoryAdjustmentRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.AdjustAsync(
+                        body.BranchId,
+                        itemId,
+                        body.QuantityDelta,
+                        body.ClientAdjustmentId,
+                        body.Reason,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/inventory/movements", async (
+            string? branch_id,
+            string? inventory_item_id,
+            int? limit,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.MovementsAsync(
+                        branch_id,
+                        inventory_item_id,
+                        limit ?? 100,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/suppliers", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await inventory.SuppliersAsync(principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/suppliers", async (
+            LocalSupplierRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.CreateSupplierAsync(
+                        body.Code,
+                        body.Name,
+                        body.Phone,
+                        body.Email,
+                        body.Address,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/recipes", async (
+            string? branch_id,
+            string? menu_item_id,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.RecipesAsync(
+                        branch_id,
+                        menu_item_id,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/menu/items/{menuItemId}/recipes", async (
+            string menuItemId,
+            LocalRecipeRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var components = body.Items
+                    .Select(value => new LocalRecipeComponentRequest(
+                        value.InventoryItemId,
+                        value.QuantityBase))
+                    .ToArray();
+
+                return Results.Ok(new
+                {
+                    data = await inventory.CreateRecipeVersionAsync(
+                        body.BranchId,
+                        menuItemId,
+                        body.Name,
+                        components,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/purchasing/orders", async (
+            string? branch_id,
+            string? status,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await inventory.PurchaseOrdersAsync(
+                        branch_id,
+                        status,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/purchasing/orders", async (
+            LocalPurchaseOrderRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var lines = body.Lines
+                    .Select(value => new LocalPurchaseOrderLineRequest(
+                        value.InventoryItemId,
+                        value.PurchaseQuantity,
+                        value.UnitCost))
+                    .ToArray();
+
+                return Results.Ok(new
+                {
+                    data = await inventory.CreatePurchaseOrderAsync(
+                        body.BranchId,
+                        body.SupplierId,
+                        lines,
+                        body.Notes,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/purchasing/orders/{purchaseOrderId}/receive", async (
+            string purchaseOrderId,
+            LocalGoodsReceiptRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalInventoryService inventory,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Inventory authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var lines = body.Lines
+                    .Select(value => new LocalReceivePurchaseOrderLineRequest(
+                        value.PurchaseOrderLineId,
+                        value.PurchaseQuantity))
+                    .ToArray();
+
+                return Results.Ok(new
+                {
+                    data = await inventory.ReceivePurchaseOrderAsync(
+                        purchaseOrderId,
+                        lines,
+                        body.ClientReceiptId,
+                        body.Notes,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+    }
+
     private static IResult CashierConflict(LocalSyncConflictException conflict) =>
         Results.Json(
             new { code = conflict.Code, message = conflict.Message },

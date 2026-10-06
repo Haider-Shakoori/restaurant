@@ -72,3 +72,54 @@ public sealed record LocalFinalizeDailyClosingRequest(
 
 public sealed record LocalReopenDailyClosingRequest(
     [property: JsonPropertyName("reason")] string Reason);
+
+
+public sealed record LocalInventoryItemRequest(
+    [property: JsonPropertyName("sku")] string Sku,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("base_unit")] string BaseUnit,
+    [property: JsonPropertyName("purchase_unit")] string? PurchaseUnit,
+    [property: JsonPropertyName("purchase_to_base_factor")] decimal PurchaseToBaseFactor = 1m,
+    [property: JsonPropertyName("reorder_level")] decimal ReorderLevel = 0m);
+
+public sealed record LocalInventoryAdjustmentRequest(
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("quantity_delta")] decimal QuantityDelta,
+    [property: JsonPropertyName("client_adjustment_id")] string ClientAdjustmentId,
+    [property: JsonPropertyName("reason")] string Reason);
+
+public sealed record LocalSupplierRequest(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("phone")] string? Phone,
+    [property: JsonPropertyName("email")] string? Email,
+    [property: JsonPropertyName("address")] string? Address);
+
+public sealed record LocalRecipeRequest(
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("items")] IReadOnlyList<LocalRecipeItemRequest> Items);
+
+public sealed record LocalRecipeItemRequest(
+    [property: JsonPropertyName("inventory_item_id")] string InventoryItemId,
+    [property: JsonPropertyName("quantity_base")] decimal QuantityBase);
+
+public sealed record LocalPurchaseOrderRequest(
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("supplier_id")] string SupplierId,
+    [property: JsonPropertyName("notes")] string? Notes,
+    [property: JsonPropertyName("lines")] IReadOnlyList<LocalPurchaseOrderLineBody> Lines);
+
+public sealed record LocalPurchaseOrderLineBody(
+    [property: JsonPropertyName("inventory_item_id")] string InventoryItemId,
+    [property: JsonPropertyName("purchase_quantity")] decimal PurchaseQuantity,
+    [property: JsonPropertyName("unit_cost")] decimal UnitCost);
+
+public sealed record LocalGoodsReceiptRequest(
+    [property: JsonPropertyName("client_receipt_id")] string? ClientReceiptId,
+    [property: JsonPropertyName("notes")] string? Notes,
+    [property: JsonPropertyName("lines")] IReadOnlyList<LocalGoodsReceiptLineBody> Lines);
+
+public sealed record LocalGoodsReceiptLineBody(
+    [property: JsonPropertyName("purchase_order_line_id")] string PurchaseOrderLineId,
+    [property: JsonPropertyName("purchase_quantity")] decimal PurchaseQuantity);

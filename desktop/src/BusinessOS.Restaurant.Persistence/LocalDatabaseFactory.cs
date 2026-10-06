@@ -376,6 +376,167 @@ public sealed class LocalDatabaseFactory
             CREATE INDEX IF NOT EXISTS IX_audit_events_Category_OccurredAtUtc ON audit_events (Category, OccurredAtUtc);
             CREATE INDEX IF NOT EXISTS IX_audit_events_EntityType_EntityId ON audit_events (EntityType, EntityId);
             CREATE INDEX IF NOT EXISTS IX_audit_events_ActorUserId ON audit_events (ActorUserId);
+
+            CREATE TABLE IF NOT EXISTS suppliers (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Code TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Phone TEXT NULL,
+                Email TEXT NULL,
+                Address TEXT NULL,
+                IsActive INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_suppliers_Code ON suppliers (Code);
+            CREATE INDEX IF NOT EXISTS IX_suppliers_IsActive ON suppliers (IsActive);
+
+            CREATE TABLE IF NOT EXISTS inventory_items (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Sku TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                BaseUnit TEXT NOT NULL,
+                PurchaseUnit TEXT NULL,
+                PurchaseToBaseFactor TEXT NOT NULL,
+                ReorderLevel TEXT NOT NULL,
+                IsActive INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_items_Sku ON inventory_items (Sku);
+            CREATE INDEX IF NOT EXISTS IX_inventory_items_IsActive ON inventory_items (IsActive);
+
+            CREATE TABLE IF NOT EXISTS inventory_balances (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                Quantity TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_balances_BranchId_InventoryItemId ON inventory_balances (BranchId, InventoryItemId);
+
+            CREATE TABLE IF NOT EXISTS inventory_valuations (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                Quantity TEXT NOT NULL,
+                Value TEXT NOT NULL,
+                AverageUnitCost TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_valuations_BranchId_InventoryItemId ON inventory_valuations (BranchId, InventoryItemId);
+
+            CREATE TABLE IF NOT EXISTS stock_movements (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                ActorUserId INTEGER NOT NULL,
+                MovementType TEXT NOT NULL,
+                QuantityDelta TEXT NOT NULL,
+                UnitCost TEXT NULL,
+                SourceType TEXT NOT NULL,
+                SourceId TEXT NOT NULL,
+                SourceLineId TEXT NULL,
+                IdempotencyKey TEXT NOT NULL,
+                Notes TEXT NULL,
+                OccurredAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_stock_movements_IdempotencyKey ON stock_movements (IdempotencyKey);
+            CREATE INDEX IF NOT EXISTS IX_stock_movements_BranchId_InventoryItemId_OccurredAt ON stock_movements (BranchId, InventoryItemId, OccurredAt);
+            CREATE INDEX IF NOT EXISTS IX_stock_movements_SourceType_SourceId ON stock_movements (SourceType, SourceId);
+
+            CREATE TABLE IF NOT EXISTS recipes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                MenuItemId TEXT NOT NULL,
+                Name TEXT NOT NULL,
+                Version INTEGER NOT NULL,
+                IsActive INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_recipes_BranchId_MenuItemId_Version ON recipes (BranchId, MenuItemId, Version);
+            CREATE INDEX IF NOT EXISTS IX_recipes_IsActive ON recipes (IsActive);
+
+            CREATE TABLE IF NOT EXISTS recipe_items (
+                Id TEXT NOT NULL PRIMARY KEY,
+                RecipeId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                QuantityBase TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_recipe_items_RecipeId_InventoryItemId ON recipe_items (RecipeId, InventoryItemId);
+
+            CREATE TABLE IF NOT EXISTS inventory_consumptions (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                ConsumedByUserId INTEGER NOT NULL,
+                ConsumedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_consumptions_OrderId ON inventory_consumptions (OrderId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_BranchId_ConsumedAt ON inventory_consumptions (BranchId, ConsumedAt);
+
+            CREATE TABLE IF NOT EXISTS inventory_consumption_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                InventoryConsumptionId TEXT NOT NULL,
+                OrderItemId TEXT NOT NULL,
+                RecipeId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                StockMovementId TEXT NOT NULL,
+                QuantityBase TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_consumption_lines_Consumption_Order_Item
+                ON inventory_consumption_lines (InventoryConsumptionId, OrderItemId, InventoryItemId);
+
+            CREATE TABLE IF NOT EXISTS purchase_orders (
+                Id TEXT NOT NULL PRIMARY KEY,
+                BranchId TEXT NOT NULL,
+                SupplierId TEXT NOT NULL,
+                OrderedByUserId INTEGER NOT NULL,
+                PoNumber TEXT NOT NULL,
+                Status TEXT NOT NULL,
+                EstimatedTotal TEXT NOT NULL,
+                Notes TEXT NULL,
+                OrderedAt TEXT NOT NULL,
+                CompletedAt TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_purchase_orders_PoNumber ON purchase_orders (PoNumber);
+            CREATE INDEX IF NOT EXISTS IX_purchase_orders_BranchId_Status_OrderedAt ON purchase_orders (BranchId, Status, OrderedAt);
+
+            CREATE TABLE IF NOT EXISTS purchase_order_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                PurchaseOrderId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                ItemName TEXT NOT NULL,
+                PurchaseUnit TEXT NOT NULL,
+                ConversionFactor TEXT NOT NULL,
+                OrderedPurchaseQuantity TEXT NOT NULL,
+                OrderedBaseQuantity TEXT NOT NULL,
+                ReceivedBaseQuantity TEXT NOT NULL,
+                UnitCost TEXT NOT NULL,
+                LineTotal TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_purchase_order_lines_PurchaseOrderId ON purchase_order_lines (PurchaseOrderId);
+
+            CREATE TABLE IF NOT EXISTS goods_receipts (
+                Id TEXT NOT NULL PRIMARY KEY,
+                PurchaseOrderId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                SupplierId TEXT NOT NULL,
+                ReceivedByUserId INTEGER NOT NULL,
+                ReceiptNumber TEXT NOT NULL,
+                ClientReceiptId TEXT NULL,
+                Status TEXT NOT NULL,
+                ReceivedAt TEXT NOT NULL,
+                Notes TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_goods_receipts_ReceiptNumber ON goods_receipts (ReceiptNumber);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_goods_receipts_ClientReceiptId ON goods_receipts (ClientReceiptId);
+            CREATE INDEX IF NOT EXISTS IX_goods_receipts_PurchaseOrderId_ReceivedAt ON goods_receipts (PurchaseOrderId, ReceivedAt);
+
+            CREATE TABLE IF NOT EXISTS goods_receipt_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                GoodsReceiptId TEXT NOT NULL,
+                PurchaseOrderLineId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                ReceivedPurchaseQuantity TEXT NOT NULL,
+                ReceivedBaseQuantity TEXT NOT NULL,
+                UnitCost TEXT NOT NULL,
+                LineTotal TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_goods_receipt_lines_GoodsReceiptId ON goods_receipt_lines (GoodsReceiptId);
             """;
 
         await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);

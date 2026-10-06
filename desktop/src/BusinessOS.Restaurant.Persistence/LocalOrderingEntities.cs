@@ -293,3 +293,155 @@ public sealed class LocalAuditEvent
     public string? PayloadJson { get; set; }
     public DateTimeOffset OccurredAtUtc { get; set; }
 }
+
+
+public sealed class LocalSupplier
+{
+    public required string Id { get; set; }
+    public required string Code { get; set; }
+    public required string Name { get; set; }
+    public string? Phone { get; set; }
+    public string? Email { get; set; }
+    public string? Address { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class LocalInventoryItem
+{
+    public required string Id { get; set; }
+    public required string Sku { get; set; }
+    public required string Name { get; set; }
+    public required string BaseUnit { get; set; }
+    public string? PurchaseUnit { get; set; }
+    public decimal PurchaseToBaseFactor { get; set; }
+    public decimal ReorderLevel { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class LocalInventoryBalance
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public decimal Quantity { get; set; }
+}
+
+public sealed class LocalInventoryValuation
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public decimal Quantity { get; set; }
+    public decimal Value { get; set; }
+    public decimal AverageUnitCost { get; set; }
+}
+
+public sealed class LocalStockMovement
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public long ActorUserId { get; set; }
+    public required string MovementType { get; set; }
+    public decimal QuantityDelta { get; set; }
+    public decimal? UnitCost { get; set; }
+    public required string SourceType { get; set; }
+    public required string SourceId { get; set; }
+    public string? SourceLineId { get; set; }
+    public required string IdempotencyKey { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+}
+
+public sealed class LocalRecipe
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string MenuItemId { get; set; }
+    public required string Name { get; set; }
+    public int Version { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class LocalRecipeItem
+{
+    public required string Id { get; set; }
+    public required string RecipeId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public decimal QuantityBase { get; set; }
+}
+
+public sealed class LocalInventoryConsumption
+{
+    public required string Id { get; set; }
+    public required string OrderId { get; set; }
+    public required string BranchId { get; set; }
+    public long ConsumedByUserId { get; set; }
+    public DateTimeOffset ConsumedAt { get; set; }
+}
+
+public sealed class LocalInventoryConsumptionLine
+{
+    public required string Id { get; set; }
+    public required string InventoryConsumptionId { get; set; }
+    public required string OrderItemId { get; set; }
+    public required string RecipeId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public required string StockMovementId { get; set; }
+    public decimal QuantityBase { get; set; }
+}
+
+public sealed class LocalPurchaseOrder
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public required string SupplierId { get; set; }
+    public long OrderedByUserId { get; set; }
+    public required string PoNumber { get; set; }
+    public required string Status { get; set; }
+    public decimal EstimatedTotal { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset OrderedAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+}
+
+public sealed class LocalPurchaseOrderLine
+{
+    public required string Id { get; set; }
+    public required string PurchaseOrderId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public required string ItemName { get; set; }
+    public required string PurchaseUnit { get; set; }
+    public decimal ConversionFactor { get; set; }
+    public decimal OrderedPurchaseQuantity { get; set; }
+    public decimal OrderedBaseQuantity { get; set; }
+    public decimal ReceivedBaseQuantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal LineTotal { get; set; }
+}
+
+public sealed class LocalGoodsReceipt
+{
+    public required string Id { get; set; }
+    public required string PurchaseOrderId { get; set; }
+    public required string BranchId { get; set; }
+    public required string SupplierId { get; set; }
+    public long ReceivedByUserId { get; set; }
+    public required string ReceiptNumber { get; set; }
+    public string? ClientReceiptId { get; set; }
+    public required string Status { get; set; }
+    public DateTimeOffset ReceivedAt { get; set; }
+    public string? Notes { get; set; }
+}
+
+public sealed class LocalGoodsReceiptLine
+{
+    public required string Id { get; set; }
+    public required string GoodsReceiptId { get; set; }
+    public required string PurchaseOrderLineId { get; set; }
+    public required string InventoryItemId { get; set; }
+    public decimal ReceivedPurchaseQuantity { get; set; }
+    public decimal ReceivedBaseQuantity { get; set; }
+    public decimal UnitCost { get; set; }
+    public decimal LineTotal { get; set; }
+}

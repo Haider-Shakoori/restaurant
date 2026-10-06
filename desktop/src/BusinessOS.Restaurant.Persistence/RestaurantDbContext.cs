@@ -36,6 +36,19 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalDailyClosingSnapshot> DailyClosingSnapshots => Set<LocalDailyClosingSnapshot>();
     public DbSet<LocalWaiterShift> WaiterShifts => Set<LocalWaiterShift>();
     public DbSet<LocalAuditEvent> AuditEvents => Set<LocalAuditEvent>();
+    public DbSet<LocalSupplier> Suppliers => Set<LocalSupplier>();
+    public DbSet<LocalInventoryItem> InventoryItems => Set<LocalInventoryItem>();
+    public DbSet<LocalInventoryBalance> InventoryBalances => Set<LocalInventoryBalance>();
+    public DbSet<LocalInventoryValuation> InventoryValuations => Set<LocalInventoryValuation>();
+    public DbSet<LocalStockMovement> StockMovements => Set<LocalStockMovement>();
+    public DbSet<LocalRecipe> Recipes => Set<LocalRecipe>();
+    public DbSet<LocalRecipeItem> RecipeItems => Set<LocalRecipeItem>();
+    public DbSet<LocalInventoryConsumption> InventoryConsumptions => Set<LocalInventoryConsumption>();
+    public DbSet<LocalInventoryConsumptionLine> InventoryConsumptionLines => Set<LocalInventoryConsumptionLine>();
+    public DbSet<LocalPurchaseOrder> PurchaseOrders => Set<LocalPurchaseOrder>();
+    public DbSet<LocalPurchaseOrderLine> PurchaseOrderLines => Set<LocalPurchaseOrderLine>();
+    public DbSet<LocalGoodsReceipt> GoodsReceipts => Set<LocalGoodsReceipt>();
+    public DbSet<LocalGoodsReceiptLine> GoodsReceiptLines => Set<LocalGoodsReceiptLine>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -314,6 +327,128 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasIndex(value => new { value.Category, value.OccurredAtUtc });
             entity.HasIndex(value => new { value.EntityType, value.EntityId });
             entity.HasIndex(value => value.ActorUserId);
+        });
+
+
+        modelBuilder.Entity<LocalSupplier>(entity =>
+        {
+            entity.ToTable("suppliers");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.Code).IsUnique();
+            entity.HasIndex(value => value.IsActive);
+        });
+
+        modelBuilder.Entity<LocalInventoryItem>(entity =>
+        {
+            entity.ToTable("inventory_items");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.Sku).IsUnique();
+            entity.HasIndex(value => value.IsActive);
+            entity.Property(value => value.PurchaseToBaseFactor).HasPrecision(18, 6);
+            entity.Property(value => value.ReorderLevel).HasPrecision(18, 4);
+        });
+
+        modelBuilder.Entity<LocalInventoryBalance>(entity =>
+        {
+            entity.ToTable("inventory_balances");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.InventoryItemId }).IsUnique();
+            entity.Property(value => value.Quantity).HasPrecision(18, 4);
+        });
+
+        modelBuilder.Entity<LocalInventoryValuation>(entity =>
+        {
+            entity.ToTable("inventory_valuations");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.InventoryItemId }).IsUnique();
+            entity.Property(value => value.Quantity).HasPrecision(18, 4);
+            entity.Property(value => value.Value).HasPrecision(18, 2);
+            entity.Property(value => value.AverageUnitCost).HasPrecision(18, 6);
+        });
+
+        modelBuilder.Entity<LocalStockMovement>(entity =>
+        {
+            entity.ToTable("stock_movements");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.IdempotencyKey).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.InventoryItemId, value.OccurredAt });
+            entity.HasIndex(value => new { value.SourceType, value.SourceId });
+            entity.Property(value => value.QuantityDelta).HasPrecision(18, 4);
+            entity.Property(value => value.UnitCost).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalRecipe>(entity =>
+        {
+            entity.ToTable("recipes");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.BranchId, value.MenuItemId, value.Version }).IsUnique();
+            entity.HasIndex(value => value.IsActive);
+        });
+
+        modelBuilder.Entity<LocalRecipeItem>(entity =>
+        {
+            entity.ToTable("recipe_items");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.RecipeId, value.InventoryItemId }).IsUnique();
+            entity.Property(value => value.QuantityBase).HasPrecision(18, 4);
+        });
+
+        modelBuilder.Entity<LocalInventoryConsumption>(entity =>
+        {
+            entity.ToTable("inventory_consumptions");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.OrderId).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.ConsumedAt });
+        });
+
+        modelBuilder.Entity<LocalInventoryConsumptionLine>(entity =>
+        {
+            entity.ToTable("inventory_consumption_lines");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.InventoryConsumptionId, value.OrderItemId, value.InventoryItemId }).IsUnique();
+            entity.Property(value => value.QuantityBase).HasPrecision(18, 4);
+        });
+
+        modelBuilder.Entity<LocalPurchaseOrder>(entity =>
+        {
+            entity.ToTable("purchase_orders");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.PoNumber).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.Status, value.OrderedAt });
+            entity.Property(value => value.EstimatedTotal).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalPurchaseOrderLine>(entity =>
+        {
+            entity.ToTable("purchase_order_lines");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.PurchaseOrderId);
+            entity.Property(value => value.ConversionFactor).HasPrecision(18, 6);
+            entity.Property(value => value.OrderedPurchaseQuantity).HasPrecision(18, 4);
+            entity.Property(value => value.OrderedBaseQuantity).HasPrecision(18, 4);
+            entity.Property(value => value.ReceivedBaseQuantity).HasPrecision(18, 4);
+            entity.Property(value => value.UnitCost).HasPrecision(18, 2);
+            entity.Property(value => value.LineTotal).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<LocalGoodsReceipt>(entity =>
+        {
+            entity.ToTable("goods_receipts");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.ReceiptNumber).IsUnique();
+            entity.HasIndex(value => value.ClientReceiptId).IsUnique();
+            entity.HasIndex(value => new { value.PurchaseOrderId, value.ReceivedAt });
+        });
+
+        modelBuilder.Entity<LocalGoodsReceiptLine>(entity =>
+        {
+            entity.ToTable("goods_receipt_lines");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.GoodsReceiptId);
+            entity.Property(value => value.ReceivedPurchaseQuantity).HasPrecision(18, 4);
+            entity.Property(value => value.ReceivedBaseQuantity).HasPrecision(18, 4);
+            entity.Property(value => value.UnitCost).HasPrecision(18, 2);
+            entity.Property(value => value.LineTotal).HasPrecision(18, 2);
         });
 
 
