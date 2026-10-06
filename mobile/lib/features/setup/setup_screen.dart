@@ -25,6 +25,7 @@ class _SetupScreenState extends State<SetupScreen> {
   final _localServer = TextEditingController();
   final _cloudServer = TextEditingController();
   final _license = TextEditingController();
+  final _pairingCode = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
 
@@ -37,6 +38,7 @@ class _SetupScreenState extends State<SetupScreen> {
     _localServer.dispose();
     _cloudServer.dispose();
     _license.dispose();
+    _pairingCode.dispose();
     _email.dispose();
     _password.dispose();
     super.dispose();
@@ -60,6 +62,7 @@ class _SetupScreenState extends State<SetupScreen> {
         licenseKey: _license.text,
         email: _email.text,
         password: _password.text,
+        pairingCode: _pairingCode.text,
       );
       widget.dependencies.syncCoordinator.start();
       widget.onConnected();
@@ -83,6 +86,8 @@ class _SetupScreenState extends State<SetupScreen> {
     final s = widget.strings;
     final showLocal = _mode != ConnectionMode.cloud;
     final showCloud = _mode != ConnectionMode.local;
+    final showPairing = _mode != ConnectionMode.cloud;
+    final showCloudCredentials = _mode != ConnectionMode.local;
 
     return Scaffold(
       body: SafeArea(
@@ -159,6 +164,20 @@ class _SetupScreenState extends State<SetupScreen> {
                           ),
                         ),
                       ],
+                      if (showPairing) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _pairingCode,
+                          keyboardType: TextInputType.number,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: s.pairingCode,
+                            helperText: s.pairingHint,
+                            prefixIcon: const Icon(Icons.phonelink_lock),
+                            border: const OutlineInputBorder(),
+                          ),
+                        ),
+                      ],
                       if (showCloud) ...[
                         const SizedBox(height: 12),
                         TextField(
@@ -173,35 +192,37 @@ class _SetupScreenState extends State<SetupScreen> {
                           ),
                         ),
                       ],
+                      if (showCloudCredentials) ...[
                       const SizedBox(height: 20),
-                      TextField(
-                        controller: _license,
-                        autocorrect: false,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: InputDecoration(
-                          labelText: s.licenseKey,
-                          border: const OutlineInputBorder(),
+                        TextField(
+                          controller: _license,
+                          autocorrect: false,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: InputDecoration(
+                            labelText: s.licenseKey,
+                            border: const OutlineInputBorder(),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _email,
-                        keyboardType: TextInputType.emailAddress,
-                        autocorrect: false,
-                        decoration: InputDecoration(
-                          labelText: s.email,
-                          border: const OutlineInputBorder(),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _email,
+                          keyboardType: TextInputType.emailAddress,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: s.email,
+                            border: const OutlineInputBorder(),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _password,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: s.password,
-                          border: const OutlineInputBorder(),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _password,
+                          obscureText: true,
+                          decoration: InputDecoration(
+                            labelText: s.password,
+                            border: const OutlineInputBorder(),
+                          ),
                         ),
-                      ),
+                        ],
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -222,7 +243,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                 ),
                               )
                             : const Icon(Icons.lock_open),
-                        label: Text(s.connect),
+                        label: Text(_mode == ConnectionMode.local ? s.pairDevice : s.connect),
                       ),
                     ],
                   ),
