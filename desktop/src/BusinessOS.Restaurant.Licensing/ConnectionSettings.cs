@@ -2,7 +2,11 @@ using System.Text.Json;
 
 namespace BusinessOS.Restaurant.Licensing;
 
-public sealed record ConnectionSettings(string TenantBaseUrl, bool SyncEnabled = true);
+public sealed record ConnectionSettings(
+    string TenantBaseUrl,
+    bool SyncEnabled = true,
+    bool LocalServerEnabled = true,
+    int LocalServerPort = 8787);
 
 public sealed class ConnectionSettingsStore
 {
@@ -58,6 +62,11 @@ public sealed class ConnectionSettingsStore
             (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
             throw new ArgumentException("TenantBaseUrl must be an absolute HTTP or HTTPS URL.", nameof(settings));
+        }
+
+        if (settings.LocalServerPort is < 1024 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(settings), "LocalServerPort must be between 1024 and 65535.");
         }
     }
 }

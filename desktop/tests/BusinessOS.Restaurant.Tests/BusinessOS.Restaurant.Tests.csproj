@@ -8,6 +8,7 @@
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Application/BusinessOS.Restaurant.Application.csproj" />
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Licensing/BusinessOS.Restaurant.Licensing.csproj" />
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
+    <ProjectReference Include="../../src/BusinessOS.Restaurant.LocalServer/BusinessOS.Restaurant.LocalServer.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
