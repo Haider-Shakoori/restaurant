@@ -12,3 +12,9 @@ public sealed record LocalSyncMutationRequest(
     [property: JsonPropertyName("operation")] string Operation,
     [property: JsonPropertyName("occurred_at")] DateTimeOffset? OccurredAt,
     [property: JsonPropertyName("payload")] JsonElement Payload);
+
+
+public sealed record LocalPrinterBindingRequest(
+    [property: JsonPropertyName("printer_name")] string PrinterName,
+    [property: JsonPropertyName("copies")] int Copies = 1,
+    [property: JsonPropertyName("enabled")] bool Enabled = true);
