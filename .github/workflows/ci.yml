@@ -110,3 +110,46 @@ jobs:
       - name: Build Android debug APK
         working-directory: mobile
         run: flutter build apk --debug
+
+
+  ios-unsigned:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate iOS platform scaffold
+        working-directory: mobile
+        run: |
+          flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+
+      - name: Install Flutter dependencies
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Build unsigned iOS app
+        working-directory: mobile
+        run: flutter build ios --release --no-codesign
+
+      - name: Package unsigned IPA
+        working-directory: mobile
+        run: |
+          mkdir -p build/unsigned-ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/unsigned-ipa/Payload/
+          cd build/unsigned-ipa
+          zip -r ../BusinessOS-Restaurant-Waiter-unsigned.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: BusinessOS-Restaurant-Waiter-unsigned-ipa
+          path: mobile/build/BusinessOS-Restaurant-Waiter-unsigned.ipa
+          if-no-files-found: error
