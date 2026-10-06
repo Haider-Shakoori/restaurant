@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import '../../core/connection/connection_mode.dart';
 import '../../core/security/offline_lease_verifier.dart';
 import '../../core/security/secure_credential_store.dart';
 import '../../data/local/local_database.dart';
@@ -89,7 +90,9 @@ class OfflineOrderRepository {
     final verification = await _leaseVerifier.verify(
       signedLease: session.lease,
       publicKey: session.publicKey,
-      expectedDeviceId: session.deviceId,
+      expectedDeviceId: session.activeChannel == ConnectionChannel.local
+          ? null
+          : session.deviceId,
     );
 
     if (!verification.valid) {
