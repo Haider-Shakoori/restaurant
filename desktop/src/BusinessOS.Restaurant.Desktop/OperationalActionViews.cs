@@ -21,6 +21,12 @@ internal static class OperationalActionViews
             .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
         var orders = await db.Orders.AsNoTracking().Where(x => x.Status != "closed").OrderByDescending(x => x.UpdatedAtUtc)
             .Select(x => new OrderChoice(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total)).Take(100).ToListAsync();
+        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+            .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
+        var sessions = await db.CashierSessions.AsNoTracking().Where(x => x.Status == "open").OrderByDescending(x => x.OpenedAt)
+            .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt)).ToListAsync();
+        var bills = await db.Bills.AsNoTracking().Where(x => x.Status == "open").OrderByDescending(x => x.IssuedAt)
+            .Select(x => new BillChoice(x.Id, x.OrderId, x.BillNumber, x.Total, x.PaidAmount, x.BalanceDue)).ToListAsync();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -89,7 +95,43 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
         Grid.SetColumn(form, 0); Grid.SetColumn(grid, 2);
         root.Children.Add(Card(form)); root.Children.Add(grid);
-        return root;
+
+        var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+        cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
+        var cashierStatus = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
+        var branchBox = Combo(branches, "Label");
+        var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
+        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260;
+        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 260;
+        var billBox = Combo(bills, "Display"); billBox.Width = 360;
+        var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
+        var amountBox = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
+        var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
+        var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
+
+        cashier.Children.Add(Label("Branch / opening cash"));
+        var sessionOpenRow = new WrapPanel(); sessionOpenRow.Children.Add(branchBox); sessionOpenRow.Children.Add(openingCash);
+        var openSession = Button("Open cashier session"); sessionOpenRow.Children.Add(openSession); cashier.Children.Add(sessionOpenRow);
+        cashier.Children.Add(Label("Open cashier session")); cashier.Children.Add(sessionBox);
+        cashier.Children.Add(Label("Order")); cashier.Children.Add(orderBox);
+        var orderActions = new WrapPanel(); var serve = Button("Mark served"); var issue = Button("Issue bill"); orderActions.Children.Add(serve); orderActions.Children.Add(issue); cashier.Children.Add(orderActions);
+        cashier.Children.Add(Label("Open bill")); cashier.Children.Add(billBox);
+        var discountRow = new WrapPanel(); discountRow.Children.Add(discountBox); var discount = Button("Apply % discount"); discountRow.Children.Add(discount); discountRow.Children.Add(splitCountBox); var split = Button("Split equally"); discountRow.Children.Add(split); cashier.Children.Add(discountRow);
+        var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
+        cashier.Children.Add(cashierStatus);
+
+        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        pay.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (sessionBox.SelectedItem is not CashierSessionChoice s) throw new InvalidOperationException("Select an open cashier session."); if (!decimal.TryParse(amountBox.Text, out var amount)) throw new InvalidOperationException("Enter payment amount."); await workflow.AddPaymentAsync(b.Id, s.Id, amount, paymentMethod.SelectedItem?.ToString() ?? "cash"); cashierStatus.Text = "Payment posted. A fully paid bill releases the table through the restaurant settlement workflow."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+
+        var page = new StackPanel();
+        page.Children.Add(root);
+        page.Children.Add(Card(cashier));
+        return new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
     public static async Task<FrameworkElement> TablesAsync()
@@ -240,6 +282,7 @@ internal static class OperationalActionViews
     private sealed record Choice(string Id, string Label);
     private sealed record MenuChoice(string Id, string Name, decimal Price) { public string Display => $"{Name} — AFN {Price:N2}"; }
     private sealed record OrderChoice(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total);
+    private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
     private sealed record KitchenChoice(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
     private sealed record CashierSessionChoice(string Id, string Cashier, string Status, decimal OpeningCash, decimal? ExpectedCash, decimal? DeclaredCash, decimal? Variance, DateTimeOffset OpenedAt);
