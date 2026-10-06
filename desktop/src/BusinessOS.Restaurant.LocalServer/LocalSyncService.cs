@@ -144,7 +144,7 @@ public sealed class LocalSyncService
                 entity_id = change.EntityId,
                 operation = change.Operation,
                 data = change.DataJson is null
-                    ? null
+                    ? (JsonElement?)null
                     : JsonSerializer.Deserialize<JsonElement>(change.DataJson, JsonOptions),
             })
             .ToArray();
