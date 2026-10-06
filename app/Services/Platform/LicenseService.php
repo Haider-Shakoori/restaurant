@@ -145,6 +145,76 @@ class LicenseService
             ]);
         }
 
+        return $this->activateResolvedDevice(
+            $business,
+            $license,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+        );
+    }
+
+    /**
+     * Activate an Android/iOS device from a short-lived manager-approved pairing token.
+     *
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    public function activatePairedMobile(
+        Business $business,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+    ): array {
+        if (! $this->isMobilePlatform($platform)) {
+            throw ValidationException::withMessages([
+                'platform' => 'Pairing is limited to Android and iOS mobile devices.',
+            ]);
+        }
+
+        $business->refresh();
+        $access = $this->subscriptions->access($business);
+
+        if (! $access->allowed) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'An active trial or subscription is required for mobile pairing.',
+            ]);
+        }
+
+        $license = LicenseKey::query()
+            ->where('business_id', $business->id)
+            ->where('status', LicenseStatus::Active)
+            ->latest('version')
+            ->first();
+
+        if (! $license) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'No active restaurant license is available for mobile pairing.',
+            ]);
+        }
+
+        return $this->activateResolvedDevice(
+            $business,
+            $license,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+        );
+    }
+
+    /**
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    private function activateResolvedDevice(
+        Business $business,
+        LicenseKey $license,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+    ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($business, $license, $deviceUid, $deviceName, $platform, $appVersion): array {
                 $existing = DeviceActivation::query()
@@ -193,7 +263,7 @@ class LicenseService
                     [
                         'license_key_id' => $license->id,
                         'device_name' => $deviceName,
-                        'platform' => $platform,
+                        'platform' => strtolower(trim($platform)),
                         'app_version' => $appVersion,
                         'credential_hash' => $this->hashDeviceSecret($secret),
                         'credential_last4' => substr($secret, -4),
