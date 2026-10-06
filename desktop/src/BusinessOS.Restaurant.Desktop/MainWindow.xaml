@@ -118,7 +118,6 @@
                                        Margin="0,6,0,0"
                                        FontSize="34"
                                        FontWeight="Bold"
-                                       LetterSpacing="4"
                                        Text="—" />
                             <TextBlock x:Name="PairingExpiryText"
                                        Margin="0,6,0,0"
