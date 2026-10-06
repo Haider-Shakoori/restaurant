@@ -25,6 +25,7 @@ public sealed class LocalDatabaseFactory
         {
             DataSource = _databasePath,
             ForeignKeys = true,
+            Pooling = false,
         }.ToString();
 
         var options = new DbContextOptionsBuilder<RestaurantDbContext>()
