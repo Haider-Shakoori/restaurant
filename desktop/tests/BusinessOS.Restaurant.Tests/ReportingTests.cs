@@ -13,7 +13,7 @@ public sealed class ReportingTests
         var factory = new LocalDatabaseFactory(path);
         await factory.EnsureCreatedAsync();
 
-        await using (var db = factory.CreateDbContext())
+        await using (var db = factory.Create())
         {
             db.Bills.Add(new LocalBill { Id="bill-1", OrderId="order-1", BranchId="branch-1", CreatedByUserId=1, BillNumber="B-1", Status="paid", Subtotal=1200m, DiscountAmount=200m, Total=1000m, PaidAmount=1000m, BalanceDue=0m, IssuedAt=new DateTimeOffset(2026,10,6,10,0,0,TimeSpan.Zero) });
             db.Payments.Add(new LocalTenantPayment { Id="pay-1", BillId="bill-1", CashierSessionId="shift-1", ReceivedByUserId=1, Method="cash", Amount=1000m, Status="completed", ReceivedAt=new DateTimeOffset(2026,10,6,10,5,0,TimeSpan.Zero) });
@@ -45,7 +45,7 @@ public sealed class ReportingTests
         var path = Path.Combine(Path.GetTempPath(), $"bos-report-{Guid.NewGuid():N}.db");
         var factory = new LocalDatabaseFactory(path);
         await factory.EnsureCreatedAsync();
-        await using (var db = factory.CreateDbContext())
+        await using (var db = factory.Create())
         {
             db.Bills.Add(new LocalBill { Id="bill-1", OrderId="order-1", BranchId="branch-1", CreatedByUserId=1, BillNumber="B-1", Status="paid", Subtotal=600m, DiscountAmount=0m, Total=600m, PaidAmount=600m, BalanceDue=0m, IssuedAt=new DateTimeOffset(2026,10,6,12,0,0,TimeSpan.Zero) });
             db.BillLines.Add(new LocalBillLine { Id="line-1", BillId="bill-1", OrderItemId="oi-1", ItemName="Kabuli Pulao", Quantity=2, UnitPrice=300m, LineTotal=600m });
