@@ -20,12 +20,16 @@ class _PairingScannerScreenState extends State<PairingScannerScreen> {
       return;
     }
 
-    final raw = capture.barcodes
-        .map((barcode) => barcode.rawValue)
-        .whereType<String>()
-        .firstOrNull;
+    String? raw;
+    for (final barcode in capture.barcodes) {
+      final value = barcode.rawValue;
+      if (value != null && value.isNotEmpty) {
+        raw = value;
+        break;
+      }
+    }
 
-    if (raw == null || raw.isEmpty) {
+    if (raw == null) {
       return;
     }
 
