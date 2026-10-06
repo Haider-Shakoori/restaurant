@@ -44,6 +44,7 @@ class LicenseService
                 $version = ((int) $business->licenseKeys()->max('version')) + 1;
                 $rawKey = $this->makeRawLicenseKey();
                 $deviceLimit = $this->resolveDeviceLimit($access->features);
+                $mobileDeviceLimit = $this->resolveMobileDeviceLimit($access->features);
 
                 $license = $business->licenseKeys()->create([
                     'generated_by_admin_id' => $admin->id,
@@ -53,6 +54,7 @@ class LicenseService
                     'key_last4' => substr($rawKey, -4),
                     'status' => LicenseStatus::Active,
                     'max_devices_snapshot' => $deviceLimit,
+                    'max_mobile_devices_snapshot' => $mobileDeviceLimit,
                     'generated_at' => now(),
                 ]);
 
@@ -66,6 +68,7 @@ class LicenseService
                     [
                         'version' => $version,
                         'max_devices' => $deviceLimit,
+                        'max_mobile_devices' => $mobileDeviceLimit,
                     ],
                 );
 
@@ -161,6 +164,23 @@ class LicenseService
                     throw ValidationException::withMessages([
                         'device_uid' => "The restaurant has reached its {$limit}-device activation limit.",
                     ]);
+                }
+
+                if ($this->isMobilePlatform($platform)) {
+                    $activeOtherMobiles = DeviceActivation::query()
+                        ->where('business_id', $business->id)
+                        ->where('status', DeviceStatus::Active)
+                        ->whereIn('platform', ['android', 'ios'])
+                        ->when($existing, fn ($query) => $query->whereKeyNot($existing->getKey()))
+                        ->count();
+
+                    $mobileLimit = $license->max_mobile_devices_snapshot;
+
+                    if ($mobileLimit !== null && $activeOtherMobiles >= $mobileLimit) {
+                        throw ValidationException::withMessages([
+                            'device_uid' => "The restaurant has reached its {$mobileLimit}-mobile activation limit.",
+                        ]);
+                    }
                 }
 
                 $secret = $this->makeDeviceSecret();
@@ -362,6 +382,7 @@ class LicenseService
             ],
             'features' => $access->features,
             'device_limit' => $device->licenseKey->max_devices_snapshot,
+            'mobile_device_limit' => $device->licenseKey->max_mobile_devices_snapshot,
             'issued_at' => $issuedAt->copy()->utc()->toIso8601String(),
             'offline_valid_until' => $expiresAt->copy()->utc()->toIso8601String(),
             'subscription_ends_at' => $access->endsAt->copy()->utc()->toIso8601String(),
@@ -424,6 +445,31 @@ class LicenseService
         $default = (int) config('license.default_max_devices', 5);
 
         return $default > 0 ? $default : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $features
+     */
+    private function resolveMobileDeviceLimit(array $features): ?int
+    {
+        $value = data_get($features, 'max_mobile_devices');
+
+        if (is_string($value) && strtolower(trim($value)) === 'unlimited') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            $limit = (int) $value;
+
+            return $limit > 0 ? $limit : null;
+        }
+
+        return null;
+    }
+
+    private function isMobilePlatform(string $platform): bool
+    {
+        return in_array(strtolower(trim($platform)), ['android', 'ios'], true);
     }
 
     private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void
