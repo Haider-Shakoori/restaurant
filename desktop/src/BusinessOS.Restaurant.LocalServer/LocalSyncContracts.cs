@@ -57,3 +57,18 @@ public sealed record LocalReceiptPrinterRequest(
     [property: JsonPropertyName("printer_name")] string PrinterName,
     [property: JsonPropertyName("copies")] int Copies = 1,
     [property: JsonPropertyName("enabled")] bool Enabled = true);
+
+
+public sealed record LocalStartShiftRequest(
+    [property: JsonPropertyName("branch_id")] string BranchId);
+
+public sealed record LocalEndShiftRequest(
+    [property: JsonPropertyName("break_minutes")] int BreakMinutes,
+    [property: JsonPropertyName("note")] string? Note);
+
+public sealed record LocalFinalizeDailyClosingRequest(
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("business_date")] DateOnly BusinessDate);
+
+public sealed record LocalReopenDailyClosingRequest(
+    [property: JsonPropertyName("reason")] string Reason);
