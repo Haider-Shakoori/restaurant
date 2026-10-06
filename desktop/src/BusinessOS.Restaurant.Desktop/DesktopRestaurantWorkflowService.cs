@@ -11,10 +11,12 @@ public sealed class DesktopRestaurantWorkflowService
     private readonly WindowsSessionStore _sessions = new();
     private readonly LocalKitchenService _kitchen;
     private readonly LocalSyncService _sync;
+    private readonly LocalCashierService _cashier;
 
     public DesktopRestaurantWorkflowService()
     {
         _kitchen = new LocalKitchenService(_factory);
+        _cashier = new LocalCashierService(_factory);
         _sync = new LocalSyncService(_factory, new OperationalSnapshotStore(_factory), _kitchen);
     }
 
@@ -70,6 +72,35 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task MarkKitchenTicketReadyAsync(string ticketId, CancellationToken token = default)
         => _ = await _kitchen.ReadyAsync(ticketId, await CurrentPrincipalAsync(token), token);
+
+
+    public async Task<object> OpenCashierSessionAsync(string branchId, decimal openingCash, CancellationToken token = default)
+        => await _cashier.OpenSessionAsync(branchId, openingCash, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> CloseCashierSessionAsync(string sessionId, decimal declaredCash, CancellationToken token = default)
+        => await _cashier.CloseSessionAsync(sessionId, declaredCash, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> ServeOrderAsync(string orderId, CancellationToken token = default)
+        => await _cashier.ServeOrderAsync(orderId, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> CreateBillAsync(string orderId, CancellationToken token = default)
+        => await _cashier.CreateBillAsync(orderId, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> ApplyDiscountAsync(string billId, string type, decimal value, string? reason, CancellationToken token = default)
+        => await _cashier.ApplyDiscountAsync(billId, type, value, reason, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> AddPaymentAsync(string billId, string sessionId, decimal amount, string method, string? reference = null, CancellationToken token = default)
+        => await _cashier.AddPaymentAsync(
+            billId,
+            new LocalPaymentRequest(sessionId, amount, method, $"DESK-PAY-{Guid.CreateVersion7():N}", reference),
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task QueueReceiptAsync(string billId, CancellationToken token = default)
+        => await _cashier.QueueReceiptAsync(billId, await CurrentPrincipalAsync(token), token);
+
+    public Task<object[]> OpenBillsAsync(CancellationToken token = default)
+        => _cashier.OpenBillsAsync(token);
 
     private async Task PushSingleAsync(string operation, JsonElement payload, CancellationToken token)
     {
