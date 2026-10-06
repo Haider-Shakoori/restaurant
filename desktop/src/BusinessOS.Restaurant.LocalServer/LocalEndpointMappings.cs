@@ -284,4 +284,316 @@ public static class LocalEndpointMappings
         });
     }
 
+    public static void MapLocalCashier(this WebApplication app)
+    {
+        app.MapGet("/api/v1/pos/bills", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            if (principal.UserRole is not ("owner" or "admin" or "manager" or "cashier"))
+            {
+                return Results.Json(new { code = "forbidden", message = "This user cannot operate the cashier POS." }, statusCode: StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(new { data = await cashier.OpenBillsAsync(token) });
+        });
+
+        app.MapPost("/api/v1/cashier/sessions", async (
+            LocalOpenCashierSessionRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.OpenSessionAsync(body.BranchId, body.OpeningCash, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/cashier/sessions/{sessionId}/close", async (
+            string sessionId,
+            LocalCloseCashierSessionRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.CloseSessionAsync(sessionId, body.DeclaredCash, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/orders/{orderId}/serve", async (
+            string orderId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Restaurant authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.ServeOrderAsync(orderId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/orders/{orderId}/bill", async (
+            string orderId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.CreateBillAsync(orderId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/pos/bills/{billId}/discount", async (
+            string billId,
+            LocalDiscountRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.ApplyDiscountAsync(billId, body.Type, body.Value, body.Reason, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/pos/bills/{billId}/splits", async (
+            string billId,
+            LocalBillSplitRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var parts = body.Parts.Select(value => new LocalBillSplitPart(value.Label, value.Amount)).ToArray();
+                return Results.Ok(new { data = await cashier.CreateSplitsAsync(billId, parts, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/pos/bills/{billId}/payments", async (
+            string billId,
+            LocalPaymentBody body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var payment = new LocalPaymentRequest(
+                    body.CashierSessionId,
+                    body.Amount,
+                    body.Method,
+                    body.ClientPaymentId,
+                    body.Reference,
+                    body.BillSplitId);
+
+                return Results.Ok(new { data = await cashier.AddPaymentAsync(billId, payment, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/orders/{orderId}/transfer", async (
+            string orderId,
+            LocalTransferOrderRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.TransferOrderAsync(orderId, body.TargetTableId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/orders/{targetOrderId}/merge", async (
+            string targetOrderId,
+            LocalMergeOrdersRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new { data = await cashier.MergeDraftOrdersAsync(targetOrderId, body.SourceOrderId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPut("/api/v1/pos/receipt-printer", async (
+            LocalReceiptPrinterRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Management authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                await cashier.ConfigureReceiptPrinterAsync(body.PrinterName, body.Copies, body.Enabled, principal, token);
+                return Results.NoContent();
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/pos/bills/{billId}/receipt", async (
+            string billId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+            {
+                return Results.Json(new { code = "unauthenticated", message = "Cashier authentication is required." }, statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                await cashier.QueueReceiptAsync(billId, principal, token);
+                return Results.Accepted();
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+    }
+
+    private static IResult CashierConflict(LocalSyncConflictException conflict) =>
+        Results.Json(
+            new { code = conflict.Code, message = conflict.Message },
+            statusCode: conflict.Status == "rejected"
+                ? StatusCodes.Status403Forbidden
+                : StatusCodes.Status409Conflict);
+
 }
