@@ -226,3 +226,70 @@ public sealed class LocalReceiptPrintJob
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? PrintedAtUtc { get; set; }
 }
+
+
+public sealed class LocalDailyClosing
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public DateOnly BusinessDate { get; set; }
+    public required string Status { get; set; }
+    public long CreatedByUserId { get; set; }
+    public DateTimeOffset? FinalizedAt { get; set; }
+    public DateTimeOffset? ReopenedAt { get; set; }
+}
+
+public sealed class LocalDailyClosingSnapshot
+{
+    public required string Id { get; set; }
+    public required string DailyClosingId { get; set; }
+    public int Version { get; set; }
+    public long FinalizedByUserId { get; set; }
+    public int BillCount { get; set; }
+    public int PaymentCount { get; set; }
+    public int CashierSessionCount { get; set; }
+    public decimal GrossSales { get; set; }
+    public decimal Discounts { get; set; }
+    public decimal NetSales { get; set; }
+    public decimal PaymentsTotal { get; set; }
+    public decimal CashPayments { get; set; }
+    public decimal CardPayments { get; set; }
+    public decimal BankPayments { get; set; }
+    public decimal MobileMoneyPayments { get; set; }
+    public decimal OtherPayments { get; set; }
+    public decimal ExpectedCash { get; set; }
+    public decimal DeclaredCash { get; set; }
+    public decimal CashVariance { get; set; }
+    public DateTimeOffset FinalizedAt { get; set; }
+}
+
+public sealed class LocalWaiterShift
+{
+    public required string Id { get; set; }
+    public required string BranchId { get; set; }
+    public long UserId { get; set; }
+    public required string UserPublicId { get; set; }
+    public required string UserName { get; set; }
+    public required string Role { get; set; }
+    public required string Status { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? EndedAt { get; set; }
+    public int BreakMinutes { get; set; }
+    public string? ClosingNote { get; set; }
+}
+
+public sealed class LocalAuditEvent
+{
+    public long Sequence { get; set; }
+    public required string EventId { get; set; }
+    public required string Category { get; set; }
+    public required string EventType { get; set; }
+    public long ActorUserId { get; set; }
+    public required string ActorName { get; set; }
+    public required string ActorRole { get; set; }
+    public string? BranchId { get; set; }
+    public string? EntityType { get; set; }
+    public string? EntityId { get; set; }
+    public string? PayloadJson { get; set; }
+    public DateTimeOffset OccurredAtUtc { get; set; }
+}
