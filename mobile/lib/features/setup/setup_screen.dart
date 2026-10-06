@@ -4,6 +4,8 @@ import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
 import '../../core/api/mobile_api_client.dart';
 import '../../core/connection/connection_mode.dart';
+import 'pairing_payload.dart';
+import 'pairing_scanner_screen.dart';
 
 class SetupScreen extends StatefulWidget {
   const SetupScreen({
@@ -31,6 +33,7 @@ class _SetupScreenState extends State<SetupScreen> {
   ConnectionMode _mode = ConnectionMode.automatic;
   bool _working = false;
   String? _error;
+  String? _pairingToken;
 
   @override
   void dispose() {
@@ -53,14 +56,24 @@ class _SetupScreenState extends State<SetupScreen> {
     });
 
     try {
-      await widget.dependencies.session.activateAndLogin(
-        connectionMode: _mode,
-        localUrl: _localServer.text,
-        cloudUrl: _cloudServer.text,
-        licenseKey: _license.text,
-        email: _email.text,
-        password: _password.text,
-      );
+      if (_pairingToken != null) {
+        await widget.dependencies.session.pairAndLogin(
+          localUrl: _localServer.text.trim().isEmpty ? null : _localServer.text,
+          cloudUrl: _cloudServer.text,
+          pairingToken: _pairingToken!,
+          email: _email.text,
+          password: _password.text,
+        );
+      } else {
+        await widget.dependencies.session.activateAndLogin(
+          connectionMode: _mode,
+          localUrl: _localServer.text,
+          cloudUrl: _cloudServer.text,
+          licenseKey: _license.text,
+          email: _email.text,
+          password: _password.text,
+        );
+      }
       widget.dependencies.syncCoordinator.start();
       widget.onConnected();
     } on ApiException catch (error) {
@@ -76,6 +89,27 @@ class _SetupScreenState extends State<SetupScreen> {
         setState(() => _working = false);
       }
     }
+  }
+
+  Future<void> _scanPairingCode() async {
+    final payload = await Navigator.of(context).push<RestaurantPairingPayload>(
+      MaterialPageRoute<RestaurantPairingPayload>(
+        builder: (_) => const PairingScannerScreen(),
+      ),
+    );
+
+    if (payload == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _pairingToken = payload.pairingToken;
+      _mode = ConnectionMode.automatic;
+      _localServer.text = payload.localUrl ?? '';
+      _cloudServer.text = payload.cloudUrl;
+      _license.clear();
+      _error = null;
+    });
   }
 
   @override
@@ -103,6 +137,19 @@ class _SetupScreenState extends State<SetupScreen> {
                         s.setupTitle,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: _working ? null : _scanPairingCode,
+                        icon: const Icon(Icons.qr_code_scanner_rounded),
+                        label: const Text('Scan desktop QR code'),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _pairingToken == null
+                            ? 'Or enter the restaurant connection details manually below.'
+                            : 'Desktop pairing code loaded. Enter your staff sign-in details to finish connecting.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 24),
                       Text(
@@ -173,9 +220,10 @@ class _SetupScreenState extends State<SetupScreen> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 20),
-                      TextField(
-                        controller: _license,
+                      if (_pairingToken == null) ...[
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: _license,
                         autocorrect: false,
                         textCapitalization: TextCapitalization.characters,
                         decoration: InputDecoration(
@@ -183,6 +231,24 @@ class _SetupScreenState extends State<SetupScreen> {
                           border: const OutlineInputBorder(),
                         ),
                       ),
+                      ] else ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const Icon(Icons.verified_rounded, size: 20),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text('Secure one-time pairing token ready'),
+                            ),
+                            TextButton(
+                              onPressed: _working
+                                  ? null
+                                  : () => setState(() => _pairingToken = null),
+                              child: const Text('Use manual setup'),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       TextField(
                         controller: _email,
