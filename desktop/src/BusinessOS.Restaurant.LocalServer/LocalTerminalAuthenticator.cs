@@ -23,6 +23,7 @@ public sealed class LocalTerminalAuthenticator
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
+    private readonly WindowsActivationStore _activationStore;
     private readonly ConnectionSettingsStore _settingsStore;
     private readonly OperationalSnapshotStore _snapshotStore;
     private readonly LocalTerminalManagementService _terminalManagement;
@@ -30,12 +31,14 @@ public sealed class LocalTerminalAuthenticator
 
     public LocalTerminalAuthenticator(
         LocalDatabaseFactory databaseFactory,
+        WindowsActivationStore activationStore,
         ConnectionSettingsStore settingsStore,
         OperationalSnapshotStore snapshotStore,
         LocalTerminalManagementService terminalManagement,
         HttpClient httpClient)
     {
         _databaseFactory = databaseFactory;
+        _activationStore = activationStore;
         _settingsStore = settingsStore;
         _snapshotStore = snapshotStore;
         _terminalManagement = terminalManagement;
@@ -48,6 +51,15 @@ public sealed class LocalTerminalAuthenticator
         bool allowCloudPairing,
         CancellationToken cancellationToken)
     {
+        var activation = await _activationStore.LoadAsync(cancellationToken);
+
+        if (activation is null ||
+            !string.Equals(activation.Snapshot.TenantId, serverOptions.TenantId, StringComparison.Ordinal) ||
+            !LicenseManager.CanRunOffline(activation, DateTimeOffset.UtcNow))
+        {
+            return null;
+        }
+
         if (!TryCredentials(request, out var deviceId, out var deviceSecret, out var accessToken))
         {
             return null;
