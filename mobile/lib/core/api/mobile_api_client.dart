@@ -74,7 +74,7 @@ class MobileApiClient implements SyncApi, ServerProbe {
         'license_key': licenseKey,
         'device_uid': deviceUid,
         'device_name': deviceName,
-        'platform': 'android',
+        'platform': Platform.isIOS ? 'ios' : 'android',
         'app_version': appVersion,
       },
     );
@@ -180,6 +180,8 @@ class MobileApiClient implements SyncApi, ServerProbe {
       'X-Device-Id': credentials.deviceId,
       'X-Device-Secret': credentials.deviceSecret,
       'X-App-Version': '1.0.0',
+      'X-Terminal-Type': Platform.isIOS ? 'ios' : 'android',
+      'X-Device-Name': 'BusinessOS Waiter',
     };
   }
 
