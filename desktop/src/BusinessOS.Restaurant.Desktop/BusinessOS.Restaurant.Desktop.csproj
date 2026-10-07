@@ -11,7 +11,7 @@
     <Authors>BusinessOS.af</Authors>
     <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets\BusinessOS.Restaurant.ico</ApplicationIcon>
+    <ApplicationIcon Condition="Exists('Assets\BusinessOS.Restaurant.ico')">Assets\BusinessOS.Restaurant.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
