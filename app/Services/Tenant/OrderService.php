@@ -43,6 +43,7 @@ class OrderService
                 'table.diningArea',
                 'waiter',
                 'items',
+                'kotRounds.tickets.station',
             ]);
         });
     }
@@ -54,7 +55,7 @@ class OrderService
                 $existing = Order::query()->where('client_order_id', $data['client_order_id'])->first();
 
                 if ($existing) {
-                    return $existing->load(['table.diningArea', 'items']);
+                    return $existing->load(['table.diningArea', 'items', 'kotRounds.tickets.station']);
                 }
             }
 
@@ -108,9 +109,9 @@ class OrderService
         return DB::connection('tenant')->transaction(function () use ($order, $actor, $data): OrderItem {
             $order = Order::query()->lockForUpdate()->findOrFail($order->getKey());
 
-            if ($order->status !== Order::STATUS_DRAFT) {
+            if (! in_array($order->status, Order::EDITABLE_STATUSES, true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Items can only be edited while the order is in draft.',
+                    'order' => 'New items cannot be added after the order is financially closed or cancelled.',
                 ]);
             }
 
@@ -145,6 +146,7 @@ class OrderService
                 'item_name' => $menuItem->name,
                 'unit_price' => $unitPrice,
                 'quantity' => $quantity,
+                'dispatched_quantity' => 0,
                 'line_total' => $lineTotal,
                 'notes' => $data['notes'] ?? null,
                 'status' => 'pending',
@@ -160,35 +162,28 @@ class OrderService
                 'order_item_id' => $line->id,
                 'menu_item_id' => $menuItem->id,
                 'quantity' => $quantity,
+                'unsent_quantity' => $quantity,
             ]);
 
             return $line->fresh();
         });
     }
 
-    public function submit(Order $order, TenantUser $actor): Order
-    {
-        return DB::connection('tenant')->transaction(function () use ($order, $actor): Order {
-            $order = Order::query()->withCount('items')->lockForUpdate()->findOrFail($order->getKey());
+    public function submit(
+        Order $order,
+        TenantUser $actor,
+        ?string $mutationId = null,
+        string $priority = 'normal',
+    ): Order {
+        return DB::connection('tenant')->transaction(function () use ($order, $actor, $mutationId, $priority): Order {
+            $order = Order::query()
+                ->withCount('items')
+                ->lockForUpdate()
+                ->findOrFail($order->getKey());
 
-            if (in_array($order->status, [
-                Order::STATUS_SUBMITTED,
-                Order::STATUS_PREPARING,
-                Order::STATUS_READY,
-            ], true)) {
-                $this->kitchen->dispatch($order, $actor);
-
-                return $order->fresh()->load([
-                    'table.diningArea',
-                    'waiter',
-                    'items',
-                    'kitchenTickets.station',
-                ]);
-            }
-
-            if ($order->status !== Order::STATUS_DRAFT) {
+            if (! in_array($order->status, Order::EDITABLE_STATUSES, true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Only draft orders can be submitted.',
+                    'order' => 'This order can no longer send kitchen production.',
                 ]);
             }
 
@@ -198,20 +193,34 @@ class OrderService
                 ]);
             }
 
-            $from = $order->status;
+            $hasUnsent = $order->items()
+                ->whereColumn('dispatched_quantity', '<', 'quantity')
+                ->exists();
 
-            $order->update([
-                'status' => Order::STATUS_SUBMITTED,
-                'submitted_at' => now(),
-            ]);
+            if ($hasUnsent && in_array($order->status, [
+                Order::STATUS_DRAFT,
+                Order::STATUS_READY,
+                Order::STATUS_SERVED,
+            ], true)) {
+                $from = $order->status;
+                $event = $from === Order::STATUS_DRAFT ? 'order.submitted' : 'order.reopened_for_kitchen';
 
-            $this->event($order, $actor, 'order.submitted', $from, Order::STATUS_SUBMITTED);
-            $this->kitchen->dispatch($order, $actor);
+                $order->update([
+                    'status' => Order::STATUS_SUBMITTED,
+                    'submitted_at' => $order->submitted_at ?? now(),
+                ]);
+
+                $this->event($order, $actor, $event, $from, Order::STATUS_SUBMITTED);
+            }
+
+            $this->kitchen->dispatch($order->fresh(), $actor, $mutationId, $priority);
 
             return $order->fresh()->load([
                 'table.diningArea',
                 'waiter',
                 'items',
+                'kotRounds.tickets.station',
+                'kotRounds.tickets.items',
                 'kitchenTickets.station',
             ]);
         });
