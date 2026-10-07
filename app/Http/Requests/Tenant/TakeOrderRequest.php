@@ -16,6 +16,8 @@ class TakeOrderRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'existing_order_id' => ['nullable', 'string', 'exists:orders,id'],
+            'client_mutation_id' => ['nullable', 'string', 'max:80'],
             'branch_id' => ['nullable', 'string', 'exists:branches,id'],
             'service_type' => ['required', Rule::in(Order::SERVICE_TYPES)],
             'service_reference' => ['nullable', 'string', 'max:120'],
@@ -23,13 +25,14 @@ class TakeOrderRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:40',
-                'required_if:service_type,dine_in',
+                Rule::requiredIf(fn () => ! $this->filled('existing_order_id') && $this->input('service_type') === Order::SERVICE_DINE_IN),
                 'exists:dining_tables,id',
             ],
             'guest_count' => ['required', 'integer', 'min:1', 'max:100'],
             'notes' => ['nullable', 'string', 'max:2000'],
             'submit_action' => ['required', Rule::in(['draft', 'kitchen'])],
             'lines' => ['required', 'array', 'min:1', 'max:100'],
+            'lines.*.client_line_id' => ['nullable', 'string', 'max:40'],
             'lines.*.menu_item_id' => ['required', 'string', 'max:40'],
             'lines.*.quantity' => ['required', 'integer', 'min:1', 'max:999'],
             'lines.*.notes' => ['nullable', 'string', 'max:1000'],
