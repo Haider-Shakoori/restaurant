@@ -110,17 +110,18 @@ class KitchenService
 
             $tickets = collect();
             $dateToken = str_replace('-', '', $businessDate);
+            $branchToken = substr(strtoupper(preg_replace('/[^A-Z0-9]+/i', '', (string) $order->table->diningArea->branch->code) ?: 'BR'), 0, 8);
             $numberToken = str_pad((string) $displayNumber, 4, '0', STR_PAD_LEFT);
 
             foreach ($groups as $stationId => $items) {
                 $station = $stations->get($stationId) ?? KitchenStation::query()->findOrFail($stationId);
-                $stationToken = strtoupper(preg_replace('/[^A-Z0-9]+/i', '', (string) $station->code) ?: 'STATION');
+                $stationToken = substr(strtoupper(preg_replace('/[^A-Z0-9]+/i', '', (string) $station->code) ?: 'STATION'), 0, 12);
 
                 $ticket = $order->kitchenTickets()->create([
                     'kot_round_id' => $round->id,
                     'kitchen_station_id' => $stationId,
                     'submitted_by_user_id' => $actor->getKey(),
-                    'ticket_number' => "KOT-{$dateToken}-{$numberToken}-{$stationToken}",
+                    'ticket_number' => "KOT-{$dateToken}-{$branchToken}-{$numberToken}-{$stationToken}",
                     'status' => KitchenTicket::STATUS_QUEUED,
                     'queued_at' => now(),
                 ]);
