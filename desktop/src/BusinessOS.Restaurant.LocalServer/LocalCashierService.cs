@@ -277,8 +277,7 @@ public sealed class LocalCashierService
             throw new LocalSyncConflictException("order_state_conflict", "A bill can only be issued after the order has been served.");
         }
 
-        var table = await db.DiningTables.SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var area = await db.DiningAreas.SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
+        var branchId = await ResolveOrderBranchIdAsync(db, order, cancellationToken);
         var lines = await db.OrderItems.Where(value => value.OrderId == order.Id).ToArrayAsync(cancellationToken);
         var subtotal = Money(lines.Sum(value => value.LineTotal));
         var now = DateTimeOffset.UtcNow;
@@ -287,7 +286,7 @@ public sealed class LocalCashierService
         {
             Id = Guid.CreateVersion7().ToString("N"),
             OrderId = order.Id,
-            BranchId = area.BranchId,
+            BranchId = branchId,
             CreatedByUserId = actor.UserId,
             BillNumber = $"BILL-{Guid.CreateVersion7():N}".ToUpperInvariant(),
             Status = "open",
@@ -890,12 +889,21 @@ public sealed class LocalCashierService
         bill.BalanceDue = 0m;
 
         var order = await db.Orders.SingleAsync(value => value.Id == bill.OrderId, cancellationToken);
-        var table = await db.DiningTables.SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
+        LocalDiningTable? table = null;
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            table = await db.DiningTables.SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+        }
 
         order.Status = "closed";
         order.ClosedAt = DateTimeOffset.UtcNow;
         order.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        table.Status = "available";
+        if (table is not null)
+        {
+            table.Status = "available";
+        }
 
         var splits = await db.BillSplits.Where(value => value.BillId == bill.Id).ToArrayAsync(cancellationToken);
         if (splits.Length > 0 && splits.Any(value => value.BalanceDue != 0m))
@@ -944,14 +952,27 @@ public sealed class LocalCashierService
         CancellationToken cancellationToken)
     {
         var order = await db.Orders.AsNoTracking().SingleAsync(value => value.Id == bill.OrderId, cancellationToken);
-        var table = await db.DiningTables.AsNoTracking().SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
+        LocalDiningTable? table = null;
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            table = await db.DiningTables.AsNoTracking().SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+        }
         var lines = await db.BillLines.Where(value => value.BillId == bill.Id).AsNoTracking().ToArrayAsync(cancellationToken);
         var payments = await db.Payments.Where(value => value.BillId == bill.Id && value.Status == "posted").AsNoTracking().ToArrayAsync(cancellationToken);
 
         var builder = new StringBuilder();
         builder.AppendLine("BUSINESSOS RESTAURANT");
         builder.AppendLine($"RECEIPT: {bill.BillNumber}");
-        builder.AppendLine($"TABLE: {table.Name} ({table.Code})");
+        builder.AppendLine(order.ServiceType switch
+        {
+            "takeaway" => $"TAKEAWAY: {order.ServiceReference ?? order.ClientOrderId}",
+            "delivery" => $"DELIVERY: {order.ServiceReference ?? order.ClientOrderId}",
+            "counter" => $"COUNTER: {order.ServiceReference ?? order.ClientOrderId}",
+            _ when table is not null => $"DINE-IN: {table.Name} ({table.Code})",
+            _ => "DINE-IN",
+        });
         builder.AppendLine($"WAITER: {order.WaiterName}");
         builder.AppendLine($"DATE: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}");
         builder.AppendLine("--------------------------------");
@@ -1066,20 +1087,33 @@ public sealed class LocalCashierService
         LocalOrder order,
         CancellationToken cancellationToken)
     {
-        var table = await db.DiningTables.AsNoTracking().SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var items = await db.OrderItems.Where(value => value.OrderId == order.Id).AsNoTracking().ToArrayAsync(cancellationToken);
+        LocalDiningTable? table = null;
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            table = await db.DiningTables.AsNoTracking().SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+        }
+
+        var items = await db.OrderItems
+            .Where(value => value.OrderId == order.Id)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
 
         return new
         {
             id = order.Id,
             client_order_id = order.ClientOrderId,
+            branch_id = order.BranchId,
+            service_type = order.ServiceType,
+            service_reference = order.ServiceReference,
             status = order.Status,
             guest_count = order.GuestCount,
             subtotal = order.Subtotal.ToString("0.00"),
             total = order.Total.ToString("0.00"),
             served_at = order.ServedAt,
             closed_at = order.ClosedAt,
-            table = new
+            table = table is null ? null : new
             {
                 id = table.Id,
                 code = table.Code,
@@ -1094,8 +1128,34 @@ public sealed class LocalCashierService
                 quantity = value.Quantity,
                 line_total = value.LineTotal.ToString("0.00"),
                 status = value.Status,
+                seat_number = value.SeatNumber,
             }).ToArray(),
         };
+    }
+
+    private static async Task<string> ResolveOrderBranchIdAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(order.BranchId))
+        {
+            return order.BranchId;
+        }
+
+        if (string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            throw new LocalSyncConflictException("dependency_missing", "Order branch context is unavailable.");
+        }
+
+        var table = await db.DiningTables.SingleAsync(
+            value => value.Id == order.DiningTableId,
+            cancellationToken);
+        var area = await db.DiningAreas.SingleAsync(
+            value => value.Id == table.DiningAreaId,
+            cancellationToken);
+        order.BranchId = area.BranchId;
+        return area.BranchId;
     }
 
     private static object TableSnapshot(RestaurantDbContext db, LocalDiningTable table)
