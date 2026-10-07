@@ -41,6 +41,7 @@ use App\Http\Controllers\Tenant\TenantAuthController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Http\Request;
@@ -144,6 +145,10 @@ Route::middleware($tenantMiddleware)
         Route::post('/license/activate', LicenseActivationController::class)
             ->name('tenant.api.license.activate');
 
+        Route::post('/pairing-tokens/redeem', [WaiterPairingController::class, 'redeem'])
+            ->middleware('throttle:10,1')
+            ->name('tenant.api.pairing.redeem');
+
         Route::post('/license/lease', OfflineLeaseController::class)
             ->name('tenant.api.license.lease');
 
@@ -157,6 +162,12 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
+                Route::post('/pairing-tokens', [WaiterPairingController::class, 'store'])
+                    ->middleware('throttle:20,1')
+                    ->name('tenant.api.pairing.store');
+            });
 
             Route::middleware('tenant.role:owner,admin,manager,cashier,inventory,kitchen,waiter')->group(function (): void {
                 Route::post('/desktop/reconcile/push', [DesktopReconciliationController::class, 'push'])
