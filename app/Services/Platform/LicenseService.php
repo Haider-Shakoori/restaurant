@@ -149,17 +149,21 @@ class LicenseService
                     ->where('device_uid', $deviceUid)
                     ->first();
 
+                $mobile = $this->isMobilePlatform($platform);
                 $activeOtherDevices = DeviceActivation::query()
                     ->where('business_id', $business->id)
                     ->where('status', DeviceStatus::Active)
+                    ->when($mobile, fn ($query) => $query->whereIn('platform', ['android', 'ios']))
                     ->when($existing, fn ($query) => $query->whereKeyNot($existing->getKey()))
                     ->count();
 
-                $limit = $license->max_devices_snapshot;
+                $limit = $mobile
+                    ? $this->resolveMobileDeviceLimit($this->subscriptions->access($business)->features)
+                    : $license->max_devices_snapshot;
 
                 if ($limit !== null && $activeOtherDevices >= $limit) {
                     throw ValidationException::withMessages([
-                        'device_uid' => "The restaurant has reached its {$limit}-device activation limit.",
+                        'device_uid' => "The restaurant has reached its {$limit}-".($mobile ? "mobile waiter" : "device")." activation limit.",
                     ]);
                 }
 
@@ -362,6 +366,7 @@ class LicenseService
             ],
             'features' => $access->features,
             'device_limit' => $device->licenseKey->max_devices_snapshot,
+            'mobile_device_limit' => $this->resolveMobileDeviceLimit($access->features),
             'issued_at' => $issuedAt->copy()->utc()->toIso8601String(),
             'offline_valid_until' => $expiresAt->copy()->utc()->toIso8601String(),
             'subscription_ends_at' => $access->endsAt->copy()->utc()->toIso8601String(),
@@ -407,6 +412,31 @@ class LicenseService
     /**
      * @param  array<string, mixed>  $features
      */
+    private function resolveMobileDeviceLimit(array $features): ?int
+    {
+        $value = data_get($features, 'max_mobile_devices');
+
+        if ($value === null || $value === '') {
+            return $this->resolveDeviceLimit($features);
+        }
+
+        if (is_string($value) && strtolower(trim($value)) === 'unlimited') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            $limit = (int) $value;
+            return $limit > 0 ? $limit : null;
+        }
+
+        return $this->resolveDeviceLimit($features);
+    }
+
+    private function isMobilePlatform(string $platform): bool
+    {
+        return in_array(strtolower(trim($platform)), ['android', 'ios'], true);
+    }
+
     private function resolveDeviceLimit(array $features): ?int
     {
         $value = data_get($features, 'max_devices');
