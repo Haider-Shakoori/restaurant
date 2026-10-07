@@ -29,6 +29,9 @@ use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketItemController;
+use App\Http\Controllers\Tenant\RecallKitchenTicketItemController;
+use App\Http\Controllers\Tenant\RecordProductionWasteController;
+use App\Http\Controllers\Tenant\RefireKitchenTicketItemController;
 use App\Http\Controllers\Tenant\RecipeController;
 use App\Http\Controllers\Tenant\RestaurantSettingsController;
 use App\Http\Controllers\Tenant\ServeOrderController;
@@ -48,6 +51,7 @@ use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
 use App\Http\Controllers\Tenant\TenantWebOrderController;
+use App\Http\Controllers\Tenant\VoidKitchenTicketItemController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
@@ -245,6 +249,18 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/kitchen/items/{kitchenTicketItem}/ready', ReadyKitchenTicketItemController::class)
                     ->name('tenant.api.kitchen.items.ready');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/void', VoidKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.void');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/refire', RefireKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.refire');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/recall', RecallKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.recall');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/waste', RecordProductionWasteController::class)
+                    ->name('tenant.api.kitchen.items.waste');
 
                 Route::get('/kitchen/expo', ExpoController::class)
                     ->name('tenant.api.kitchen.expo');
