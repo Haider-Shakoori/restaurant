@@ -62,7 +62,10 @@ class KitchenService
             }
 
             $eligible = $order->items
-                ->filter(fn ($item) => (int) $item->dispatched_quantity < (int) $item->quantity)
+                ->filter(fn ($item) => (
+                    (int) $item->dispatched_quantity < (int) $item->quantity
+                    && $item->course_state !== 'held'
+                ))
                 ->values();
 
             if ($eligible->isEmpty()) {
