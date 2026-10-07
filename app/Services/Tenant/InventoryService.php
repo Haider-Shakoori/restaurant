@@ -367,12 +367,21 @@ class InventoryService
             }
 
             if ($addedCostMinor !== 0) {
+                $addedCost = Money::fromMinor($addedCostMinor);
+
                 $consumption->update([
                     'total_cost' => Money::add(
                         (string) $consumption->total_cost,
-                        Money::fromMinor($addedCostMinor),
+                        $addedCost,
                     ),
                 ]);
+
+                $this->accounting->postProductionConsumption(
+                    $consumption->fresh(),
+                    $productionItem,
+                    $actor,
+                    $addedCost,
+                );
             }
 
             $reservation->update([
@@ -536,11 +545,13 @@ class InventoryService
                 }
             }
 
-            $this->accounting->postInventoryConsumption(
-                $consumption->fresh(),
-                $actor,
-                (string) $consumption->fresh()->total_cost,
-            );
+            if ($productionItems->isEmpty()) {
+                $this->accounting->postInventoryConsumption(
+                    $consumption->fresh(),
+                    $actor,
+                    (string) $consumption->fresh()->total_cost,
+                );
+            }
 
             return $consumption->fresh()->load(['lines.stockMovement.item']);
         });
