@@ -80,6 +80,7 @@ class MobileOfflineSyncTest extends TestCase
 
         tenancy()->initialize($tenant);
         [$waiter, $table, $menuItem] = $this->seedRestaurant('waiter1@restaurant.test');
+        $menuItem->update(['image_path' => 'menu-items/kabuli.webp']);
         tenancy()->end();
 
         $token = $this->login($domain, 'waiter1@restaurant.test');
@@ -92,6 +93,11 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonCount(1, 'data.tables')
             ->assertJsonCount(1, 'data.menu')
             ->json('data');
+
+        $this->assertSame(
+            "http://{$domain}/media/menu-items/{$menuItem->id}",
+            $bootstrap['menu'][0]['items'][0]['image_url'],
+        );
 
         $cursor = $bootstrap['cursor'];
 
