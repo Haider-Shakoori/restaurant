@@ -357,7 +357,7 @@ public static class LocalEndpointMappings
                     statusCode: StatusCodes.Status401Unauthorized);
             }
 
-            if (principal.UserRole is not ("owner" or "manager" or "kitchen"))
+            if (principal.UserRole is not ("owner" or "manager" or "kitchen" or "expo"))
             {
                 return Results.Json(
                     new { code = "forbidden", message = "This user cannot operate the kitchen display." },
@@ -500,6 +500,84 @@ public static class LocalEndpointMappings
             try
             {
                 var data = await kitchen.ReadyItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/expo-pass", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Expo authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.PassExpoItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/refire", async (
+            string itemId,
+            LocalKitchenRefireRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.RefireItemAsync(
+                    itemId,
+                    body.ClientRefireId,
+                    body.Reason,
+                    principal,
+                    token);
                 return Results.Ok(new { data });
             }
             catch (LocalSyncConflictException conflict)
