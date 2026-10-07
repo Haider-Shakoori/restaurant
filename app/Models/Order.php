@@ -44,6 +44,14 @@ class Order extends Model
 
     public const STATUS_CANCELLED = 'cancelled';
 
+    public const EDITABLE_STATUSES = [
+        self::STATUS_DRAFT,
+        self::STATUS_SUBMITTED,
+        self::STATUS_PREPARING,
+        self::STATUS_READY,
+        self::STATUS_SERVED,
+    ];
+
     public const ACTIVE_STATUSES = [
         self::STATUS_DRAFT,
         self::STATUS_SUBMITTED,
@@ -85,6 +93,11 @@ class Order extends Model
     public function events(): HasMany
     {
         return $this->hasMany(OrderEvent::class)->orderBy('occurred_at');
+    }
+
+    public function kotRounds(): HasMany
+    {
+        return $this->hasMany(KotDispatchRound::class)->orderBy('sequence');
     }
 
     public function kitchenTickets(): HasMany
