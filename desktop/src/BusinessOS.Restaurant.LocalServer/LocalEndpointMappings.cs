@@ -357,10 +357,10 @@ public static class LocalEndpointMappings
                     statusCode: StatusCodes.Status401Unauthorized);
             }
 
-            if (principal.UserRole is not ("owner" or "manager" or "kitchen" or "expo"))
+            if (principal.UserRole is not ("owner" or "manager" or "kitchen" or "expo" or "runner"))
             {
                 return Results.Json(
-                    new { code = "forbidden", message = "This user cannot operate the kitchen display." },
+                    new { code = "forbidden", message = "This user cannot view the kitchen display." },
                     statusCode: StatusCodes.Status403Forbidden);
             }
 
