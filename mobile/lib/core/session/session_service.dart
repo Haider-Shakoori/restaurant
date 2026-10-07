@@ -29,6 +29,7 @@ class SessionService {
     String? localUrl,
     String? cloudUrl,
     required String licenseKey,
+    String? pairingToken,
     required String email,
     required String password,
     String deviceName = 'BusinessOS Waiter',
@@ -58,13 +59,22 @@ class SessionService {
     final keyResponse = await _api.publicKey(baseUrl);
     final publicKey = keyResponse['public_key']!.toString();
 
-    final activation = await _api.activate(
-      baseUrl: baseUrl,
-      licenseKey: licenseKey.trim(),
-      deviceUid: deviceUid,
-      deviceName: deviceName,
-      appVersion: '1.0.0',
-    );
+    final normalizedPairingToken = pairingToken?.trim() ?? '';
+    final activation = normalizedPairingToken.isNotEmpty
+        ? await _api.redeemPairing(
+            baseUrl: baseUrl,
+            pairingToken: normalizedPairingToken,
+            deviceUid: deviceUid,
+            deviceName: deviceName,
+            appVersion: '1.0.0',
+          )
+        : await _api.activate(
+            baseUrl: baseUrl,
+            licenseKey: licenseKey.trim(),
+            deviceUid: deviceUid,
+            deviceName: deviceName,
+            appVersion: '1.0.0',
+          );
     final device = Map<String, Object?>.from(
       activation['device']! as Map<Object?, Object?>,
     );
