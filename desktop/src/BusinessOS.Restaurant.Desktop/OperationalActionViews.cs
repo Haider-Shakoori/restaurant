@@ -550,132 +550,30 @@ internal static class OperationalActionViews
     {
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
 
         var settingsService = new LocalRestaurantSettingsService(factory);
         var settings = await settingsService.GetAsync();
-
-        var tickets = await db.KitchenTickets
-            .AsNoTracking()
-            .Where(x => x.Status == "queued" ||
-                        x.Status == "active" ||
-                        x.Status == "preparing" ||
-                        x.Status == "expo" ||
-                        x.Status == "ready")
-            .OrderByDescending(x => x.Priority == "rush")
-            .ThenBy(x => x.QueuedAt)
-            .ToArrayAsync();
-
-        var ticketIds = tickets.Select(x => x.Id).ToArray();
-        var ticketItems = await db.KitchenTicketItems
-            .AsNoTracking()
-            .Where(x => ticketIds.Contains(x.KitchenTicketId) &&
-                        x.Status != "completed" &&
-                        x.Status != "voided" &&
-                        x.Status != "cancelled")
-            .ToArrayAsync();
-
-        var stationIds = tickets.Select(x => x.KitchenStationId).Distinct().ToArray();
-        var stations = await db.KitchenStations
-            .AsNoTracking()
-            .Where(x => stationIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
-
-        var orderIds = tickets.Select(x => x.OrderId).Distinct().ToArray();
-        var orders = await db.Orders
-            .AsNoTracking()
-            .Where(x => orderIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
-
-        var tableIds = orders.Values
-            .Where(x => !string.IsNullOrWhiteSpace(x.DiningTableId))
-            .Select(x => x.DiningTableId)
-            .Distinct()
-            .ToArray();
-        var tables = await db.DiningTables
-            .AsNoTracking()
-            .Where(x => tableIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
-
-        var roundIds = tickets
-            .Where(x => !string.IsNullOrWhiteSpace(x.KotRoundId))
-            .Select(x => x.KotRoundId!)
-            .Distinct()
-            .ToArray();
-        var rounds = await db.KotRounds
-            .AsNoTracking()
-            .Where(x => roundIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
-
-        var rows = new List<KitchenItemCard>();
-        foreach (var ticket in tickets)
-        {
-            var station = stations[ticket.KitchenStationId];
-            orders.TryGetValue(ticket.OrderId, out var order);
-            LocalKotRound? round = null;
-            if (!string.IsNullOrWhiteSpace(ticket.KotRoundId))
-            {
-                rounds.TryGetValue(ticket.KotRoundId!, out round);
-            }
-
-            var serviceLabel = order?.ServiceType switch
-            {
-                "takeaway" => $"Takeaway · {order.ServiceReference ?? order.ClientOrderId}",
-                "delivery" => $"Delivery · {order.ServiceReference ?? order.ClientOrderId}",
-                "counter" => $"Counter · {order.ServiceReference ?? order.ClientOrderId}",
-                _ when order is not null &&
-                       !string.IsNullOrWhiteSpace(order.DiningTableId) &&
-                       tables.TryGetValue(order.DiningTableId, out var table)
-                    => $"Table {table.Name}",
-                _ => "Dine-in",
-            };
-
-            foreach (var item in ticketItems.Where(x => x.KitchenTicketId == ticket.Id))
-            {
-                rows.Add(new KitchenItemCard(
-                    item.Id,
-                    ticket.Id,
-                    ticket.KotNumber ?? ticket.TicketNumber,
-                    ticket.RoundNumber,
-                    station.Id,
-                    station.Name,
-                    serviceLabel,
-                    item.ItemName,
-                    item.Quantity,
-                    item.Notes,
-                    item.AllergyInstructions,
-                    item.KitchenInstructions,
-                    ModifierText(item.ModifiersJson),
-                    item.SeatNumber,
-                    item.CourseNumber,
-                    item.CourseName,
-                    item.Status,
-                    item.Priority,
-                    ticket.QueuedAt,
-                    round?.QueueEnabled ?? true,
-                    round?.PreparingEnabled ?? true,
-                    round?.ExpoEnabled ?? false,
-                    item.RefireReason));
-            }
-        }
+        var rows = await LoadKitchenBoardRowsAsync(factory);
 
         var workflow = new DesktopRestaurantWorkflowService();
+        var principal = await workflow.CurrentPrincipalAsync();
+        var canProduce = principal.UserRole is "owner" or "manager" or "kitchen";
+        var canExpo = principal.UserRole is "owner" or "manager" or "expo";
+        var canRefire = principal.UserRole is "owner" or "manager" or "kitchen";
+
         var root = new StackPanel();
         root.Children.Add(Header(
             "Kitchen / KOT",
             "Item-level KDS. Queue and Preparing are independent; Expo appears only when enabled. Rush and aging stay visible without changing the app shell."));
 
         var filterRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
-        var stationChoices = new List<Choice> { new("", "All stations") };
-        stationChoices.AddRange(stations.Values
-            .OrderBy(x => x.SortOrder)
-            .ThenBy(x => x.Name)
-            .Select(x => new Choice(x.Id, x.Name)));
-
-        var stationFilter = Combo(stationChoices, "Label");
-        stationFilter.Width = 220;
-        stationFilter.SelectedIndex = 0;
-
+        var stationFilter = new ComboBox
+        {
+            DisplayMemberPath = "Label",
+            Width = 220,
+            Height = 34,
+            Margin = new Thickness(0, 4, 0, 6),
+        };
         var statusFilter = new ComboBox
         {
             ItemsSource = new[] { "All states", "queued", "active", "preparing", "expo", "ready" },
@@ -706,11 +604,25 @@ internal static class OperationalActionViews
 
         var timerBindings = new List<(TextBlock Label, Border Badge, DateTimeOffset QueuedAt, string Priority)>();
 
+        void RefreshStationChoices()
+        {
+            var selected = (stationFilter.SelectedItem as Choice)?.Id ?? "";
+            var choices = new List<Choice> { new("", "All stations") };
+            choices.AddRange(rows
+                .GroupBy(row => new { row.StationId, row.Station })
+                .OrderBy(group => group.Key.Station)
+                .Select(group => new Choice(group.Key.StationId, group.Key.Station)));
+
+            stationFilter.ItemsSource = choices;
+            stationFilter.SelectedItem =
+                choices.FirstOrDefault(choice => choice.Id == selected) ?? choices[0];
+        }
+
         void UpdateAge(TextBlock label, Border badge, DateTimeOffset queuedAt, string priority)
         {
             var age = DateTimeOffset.UtcNow - queuedAt;
             var minutes = Math.Max(0, (int)Math.Floor(age.TotalMinutes));
-            label.Text = $"{minutes:00}:{age.Seconds:00}";
+            label.Text = $"{minutes:00}:{Math.Max(0, age.Seconds):00}";
 
             if (priority == "rush" || minutes >= settings.KitchenLateMinutes)
             {
@@ -820,7 +732,7 @@ internal static class OperationalActionViews
             Func<Task>? primaryAction = null;
             string? success = null;
 
-            if (row.Status is "queued" or "active")
+            if (canProduce && row.Status is "queued" or "active")
             {
                 if (row.PreparingEnabled)
                 {
@@ -835,13 +747,13 @@ internal static class OperationalActionViews
                     success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
                 }
             }
-            else if (row.Status == "preparing")
+            else if (canProduce && row.Status == "preparing")
             {
                 primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
                 primaryAction = () => workflow.MarkKitchenItemReadyAsync(row.ItemId);
                 success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
             }
-            else if (row.Status == "expo")
+            else if (canExpo && row.Status == "expo")
             {
                 primary = Button("PASS EXPO");
                 primaryAction = () => workflow.PassExpoItemAsync(row.ItemId);
@@ -858,7 +770,6 @@ internal static class OperationalActionViews
                         primary.IsEnabled = false;
                         await primaryAction();
                         statusText.Text = success ?? "Kitchen item updated.";
-                        primary.Content = "DONE";
                     }
                     catch (Exception ex)
                     {
@@ -868,7 +779,7 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (row.Status is "ready" or "expo")
+            if (canRefire && row.Status is "ready" or "expo")
             {
                 var refire = Button("RE-FIRE");
                 actions.Children.Add(refire);
@@ -881,7 +792,6 @@ internal static class OperationalActionViews
                             row.ItemId,
                             $"Desktop KDS re-fire of {row.KotNumber}");
                         statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
-                        refire.Content = "RE-FIRED";
                     }
                     catch (Exception ex)
                     {
@@ -889,6 +799,13 @@ internal static class OperationalActionViews
                         statusText.Text = ex.Message;
                     }
                 };
+            }
+
+            if (!canProduce && !canExpo && !canRefire)
+            {
+                var readOnly = KitchenDetail("Role", "Read-only kitchen visibility");
+                readOnly.FontStyle = FontStyles.Italic;
+                actions.Children.Add(readOnly);
             }
 
             panel.Children.Add(actions);
@@ -936,6 +853,7 @@ internal static class OperationalActionViews
             }
         }
 
+        RefreshStationChoices();
         stationFilter.SelectionChanged += (_, _) => RenderBoard();
         statusFilter.SelectionChanged += (_, _) => RenderBoard();
         RenderBoard();
@@ -947,16 +865,73 @@ internal static class OperationalActionViews
             SystemSounds.Exclamation.Play();
         }
 
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        timer.Tick += (_, _) =>
+        var ageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        ageTimer.Tick += (_, _) =>
         {
             foreach (var binding in timerBindings)
             {
                 UpdateAge(binding.Label, binding.Badge, binding.QueuedAt, binding.Priority);
             }
         };
-        timer.Start();
-        root.Unloaded += (_, _) => timer.Stop();
+
+        var refreshInProgress = false;
+        var knownIds = rows.Select(row => row.ItemId).ToHashSet(StringComparer.Ordinal);
+        var boardSignature = KitchenBoardSignature(rows);
+        var pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        pollTimer.Tick += async (_, _) =>
+        {
+            if (refreshInProgress)
+            {
+                return;
+            }
+
+            refreshInProgress = true;
+            try
+            {
+                var latestRows = await LoadKitchenBoardRowsAsync(factory);
+                var latestSettings = await settingsService.GetAsync();
+                var latestSignature = KitchenBoardSignature(latestRows);
+
+                if (!string.Equals(boardSignature, latestSignature, StringComparison.Ordinal) ||
+                    settings != latestSettings)
+                {
+                    var newProduction = latestRows
+                        .Where(row => !knownIds.Contains(row.ItemId) &&
+                                      row.Status is "queued" or "active")
+                        .ToArray();
+
+                    rows.Clear();
+                    rows.AddRange(latestRows);
+                    settings = latestSettings;
+                    knownIds = rows.Select(row => row.ItemId).ToHashSet(StringComparer.Ordinal);
+                    boardSignature = latestSignature;
+
+                    RefreshStationChoices();
+                    RenderBoard();
+
+                    if (settings.KotSoundEnabled && newProduction.Length > 0)
+                    {
+                        SystemSounds.Exclamation.Play();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                statusText.Text = $"KDS refresh: {ex.Message}";
+            }
+            finally
+            {
+                refreshInProgress = false;
+            }
+        };
+
+        ageTimer.Start();
+        pollTimer.Start();
+        root.Unloaded += (_, _) =>
+        {
+            ageTimer.Stop();
+            pollTimer.Stop();
+        };
 
         return new ScrollViewer
         {
@@ -1122,6 +1097,140 @@ internal static class OperationalActionViews
         grid.SetResourceReference(System.Windows.Controls.DataGrid.BorderBrushProperty, "BorderBrush");
         return grid;
     }
+    private static async Task<List<KitchenItemCard>> LoadKitchenBoardRowsAsync(
+        LocalDatabaseFactory factory)
+    {
+        await using var db = factory.Create();
+
+        var tickets = await db.KitchenTickets
+            .AsNoTracking()
+            .Where(x => x.Status == "queued" ||
+                        x.Status == "active" ||
+                        x.Status == "preparing" ||
+                        x.Status == "expo" ||
+                        x.Status == "ready")
+            .OrderByDescending(x => x.Priority == "rush")
+            .ThenBy(x => x.QueuedAt)
+            .ToArrayAsync();
+
+        var ticketIds = tickets.Select(x => x.Id).ToArray();
+        var ticketItems = ticketIds.Length == 0
+            ? []
+            : await db.KitchenTicketItems
+                .AsNoTracking()
+                .Where(x => ticketIds.Contains(x.KitchenTicketId) &&
+                            x.Status != "completed" &&
+                            x.Status != "voided" &&
+                            x.Status != "cancelled")
+                .ToArrayAsync();
+
+        var stationIds = tickets.Select(x => x.KitchenStationId).Distinct().ToArray();
+        var stations = stationIds.Length == 0
+            ? new Dictionary<string, LocalKitchenStation>(StringComparer.Ordinal)
+            : await db.KitchenStations
+                .AsNoTracking()
+                .Where(x => stationIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var orderIds = tickets.Select(x => x.OrderId).Distinct().ToArray();
+        var orders = orderIds.Length == 0
+            ? new Dictionary<string, LocalOrder>(StringComparer.Ordinal)
+            : await db.Orders
+                .AsNoTracking()
+                .Where(x => orderIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var tableIds = orders.Values
+            .Where(x => !string.IsNullOrWhiteSpace(x.DiningTableId))
+            .Select(x => x.DiningTableId)
+            .Distinct()
+            .ToArray();
+        var tables = tableIds.Length == 0
+            ? new Dictionary<string, LocalDiningTable>(StringComparer.Ordinal)
+            : await db.DiningTables
+                .AsNoTracking()
+                .Where(x => tableIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var roundIds = tickets
+            .Where(x => !string.IsNullOrWhiteSpace(x.KotRoundId))
+            .Select(x => x.KotRoundId!)
+            .Distinct()
+            .ToArray();
+        var rounds = roundIds.Length == 0
+            ? new Dictionary<string, LocalKotRound>(StringComparer.Ordinal)
+            : await db.KotRounds
+                .AsNoTracking()
+                .Where(x => roundIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var rows = new List<KitchenItemCard>();
+        foreach (var ticket in tickets)
+        {
+            if (!stations.TryGetValue(ticket.KitchenStationId, out var station))
+            {
+                continue;
+            }
+
+            orders.TryGetValue(ticket.OrderId, out var order);
+            LocalKotRound? round = null;
+            if (!string.IsNullOrWhiteSpace(ticket.KotRoundId))
+            {
+                rounds.TryGetValue(ticket.KotRoundId!, out round);
+            }
+
+            var serviceLabel = order?.ServiceType switch
+            {
+                "takeaway" => $"Takeaway · {order.ServiceReference ?? order.ClientOrderId}",
+                "delivery" => $"Delivery · {order.ServiceReference ?? order.ClientOrderId}",
+                "counter" => $"Counter · {order.ServiceReference ?? order.ClientOrderId}",
+                _ when order is not null &&
+                       !string.IsNullOrWhiteSpace(order.DiningTableId) &&
+                       tables.TryGetValue(order.DiningTableId, out var table)
+                    => $"Table {table.Name}",
+                _ => "Dine-in",
+            };
+
+            foreach (var item in ticketItems.Where(x => x.KitchenTicketId == ticket.Id))
+            {
+                rows.Add(new KitchenItemCard(
+                    item.Id,
+                    ticket.Id,
+                    ticket.KotNumber ?? ticket.TicketNumber,
+                    ticket.RoundNumber,
+                    station.Id,
+                    station.Name,
+                    serviceLabel,
+                    item.ItemName,
+                    item.Quantity,
+                    item.Notes,
+                    item.AllergyInstructions,
+                    item.KitchenInstructions,
+                    ModifierText(item.ModifiersJson),
+                    item.SeatNumber,
+                    item.CourseNumber,
+                    item.CourseName,
+                    item.Status,
+                    item.Priority,
+                    ticket.QueuedAt,
+                    round?.QueueEnabled ?? true,
+                    round?.PreparingEnabled ?? true,
+                    round?.ExpoEnabled ?? false,
+                    item.RefireReason));
+            }
+        }
+
+        return rows;
+    }
+
+    private static string KitchenBoardSignature(IEnumerable<KitchenItemCard> rows) =>
+        string.Join(
+            "|",
+            rows
+                .OrderBy(row => row.ItemId, StringComparer.Ordinal)
+                .Select(row =>
+                    $"{row.ItemId}:{row.Status}:{row.Priority}:{row.RoundNumber}:{row.ExpoEnabled}:{row.PreparingEnabled}"));
+
     private static Border KitchenChip(string text)
     {
         var block = new TextBlock
