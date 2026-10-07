@@ -45,6 +45,7 @@ return new class extends Migration
             ->select(['order_item_id'])
             ->distinct()
             ->orderBy('order_item_id')
+            ->get()
             ->each(function (object $row): void {
                 DB::table('order_items')
                     ->where('id', $row->order_item_id)
@@ -146,6 +147,7 @@ return new class extends Migration
         DB::table('inventory_consumption_lines')
             ->select(['id', 'order_item_id'])
             ->orderBy('id')
+            ->get()
             ->each(function (object $line): void {
                 $ticketItemId = DB::table('kitchen_ticket_items')
                     ->where('order_item_id', $line->order_item_id)
