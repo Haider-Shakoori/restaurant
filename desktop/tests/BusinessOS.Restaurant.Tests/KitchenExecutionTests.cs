@@ -157,6 +157,7 @@ public sealed class KitchenExecutionTests
 
             foreach (var ticketId in ticketIds)
             {
+                await kitchen.StartAsync(ticketId, kitchenUser, CancellationToken.None);
                 await kitchen.ReadyAsync(ticketId, kitchenUser, CancellationToken.None);
             }
 
