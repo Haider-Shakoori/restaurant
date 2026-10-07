@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
@@ -40,6 +43,28 @@ class _SetupScreenState extends State<SetupScreen> {
     _email.dispose();
     _password.dispose();
     super.dispose();
+  }
+
+  Future<void> _scanQr() async {
+    final payload = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _PairingQrScanner()),
+    );
+    if (payload == null || payload.isEmpty) return;
+    try {
+      final data = Map<String, dynamic>.from(jsonDecode(payload) as Map);
+      if (data['type'] != 'businessos.restaurant.pairing.v1') {
+        throw const FormatException('Unsupported Restaurant pairing QR.');
+      }
+      setState(() {
+        _mode = ConnectionMode.automatic;
+        _localServer.text = data['local_url']?.toString() ?? '';
+        _cloudServer.text = data['cloud_url']?.toString() ?? '';
+        _license.text = data['license_key']?.toString() ?? '';
+        _error = null;
+      });
+    } catch (_) {
+      setState(() => _error = 'This QR code is not a valid BusinessOS Restaurant pairing code.');
+    }
   }
 
   Future<void> _connect() async {
@@ -103,6 +128,18 @@ class _SetupScreenState extends State<SetupScreen> {
                         s.setupTitle,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton.tonalIcon(
+                        onPressed: _working ? null : _scanQr,
+                        icon: const Icon(Icons.qr_code_scanner_rounded),
+                        label: const Text('Scan Desktop QR'),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Scan the QR shown in Restaurant Desktop Settings, or enter the connection details below.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 24),
                       Text(
@@ -231,6 +268,58 @@ class _SetupScreenState extends State<SetupScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+class _PairingQrScanner extends StatefulWidget {
+  const _PairingQrScanner();
+
+  @override
+  State<_PairingQrScanner> createState() => _PairingQrScannerState();
+}
+
+class _PairingQrScannerState extends State<_PairingQrScanner> {
+  bool _handled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Scan Restaurant Desktop QR')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            onDetect: (capture) {
+              if (_handled) return;
+              final value = capture.barcodes
+                  .map((barcode) => barcode.rawValue)
+                  .whereType<String>()
+                  .where((value) => value.isNotEmpty)
+                  .firstOrNull;
+              if (value == null) return;
+              _handled = true;
+              Navigator.of(context).pop(value);
+            },
+          ),
+          IgnorePointer(
+            child: Center(
+              child: Container(
+                width: 250,
+                height: 250,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 3,
+                  ),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
