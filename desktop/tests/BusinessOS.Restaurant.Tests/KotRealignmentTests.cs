@@ -290,6 +290,53 @@ public sealed class KotRealignmentTests
     }
 
     [Fact]
+    public async Task Workflow_settings_persist_across_service_restart_and_enqueue_cloud_sync()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var settings = new LocalRestaurantSettingsService(factory);
+
+            await settings.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: false,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: true,
+                    CoursesEnabled: true,
+                    KotSoundEnabled: false,
+                    KitchenWarningMinutes: 7,
+                    KitchenLateMinutes: 15,
+                    RequireManagerApprovalForPostKotVoid: false),
+                Manager(),
+                CancellationToken.None);
+
+            var restartedFactory = new LocalDatabaseFactory(root);
+            var restarted = new LocalRestaurantSettingsService(restartedFactory);
+            var loaded = await restarted.GetAsync(CancellationToken.None);
+
+            Assert.False(loaded.KitchenQueueEnabled);
+            Assert.True(loaded.PreparingStageEnabled);
+            Assert.True(loaded.ExpoEnabled);
+            Assert.True(loaded.CoursesEnabled);
+            Assert.False(loaded.KotSoundEnabled);
+            Assert.Equal(7, loaded.KitchenWarningMinutes);
+            Assert.Equal(15, loaded.KitchenLateMinutes);
+            Assert.False(loaded.RequireManagerApprovalForPostKotVoid);
+
+            await using var db = restartedFactory.Create();
+            var outbox = await db.CloudOutbox
+                .SingleAsync(x => x.EntityType == "restaurant_settings" && x.LocalEntityId == "workflow");
+            Assert.Equal("restaurant.settings.update", outbox.Operation);
+            Assert.True(await db.Changes.AnyAsync(x => x.EntityType == "restaurant_settings"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Expo_enabled_gates_ready_until_expo_passes_item()
     {
         var root = CreateTemporaryDirectory();
