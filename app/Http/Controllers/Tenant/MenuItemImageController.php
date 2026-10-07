@@ -4,12 +4,12 @@ namespace App\Http\Controllers\Tenant;
 
 use App\Http\Controllers\Controller;
 use App\Models\MenuItem;
-use Illuminate\Http\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Illuminate\Support\Facades\Storage;
 
 class MenuItemImageController extends Controller
 {
-    public function __invoke(MenuItem $menuItem): Response
+    public function __invoke(MenuItem $menuItem): StreamedResponse
     {
         abort_unless(filled($menuItem->image_path), 404);
 
