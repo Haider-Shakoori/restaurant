@@ -142,7 +142,8 @@ class KitchenWorkflowTest extends TestCase
 
         $this->assertSame(Order::STATUS_PREPARING, $order->fresh()->status);
 
-        $kitchen->ready($barTicket, $waiter);
+        $kitchen->start($barTicket, $waiter);
+        $kitchen->ready($barTicket->fresh(), $waiter);
 
         $this->assertSame(Order::STATUS_READY, $order->fresh()->status);
         $this->assertNotNull($barTicket->fresh()->ready_at);
