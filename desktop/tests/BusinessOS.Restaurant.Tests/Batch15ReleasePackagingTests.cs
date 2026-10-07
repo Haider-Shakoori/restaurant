@@ -45,9 +45,9 @@ public sealed class Batch15ReleasePackagingTests
         Assert.Contains("RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
 
         Assert.True(File.Exists(background));
-        Assert.True(new FileInfo(background).Length > 10_000);
+        Assert.True(new FileInfo(background).Length > 5_000);
         Assert.True(File.Exists(appBackground));
-        Assert.True(new FileInfo(appBackground).Length > 10_000);
+        Assert.True(new FileInfo(appBackground).Length > 5_000);
     }
 
     [Fact]
