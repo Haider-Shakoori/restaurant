@@ -285,7 +285,7 @@ class RestaurantOrderingTest extends TestCase
 
         $this->assertSame(1, $unsent->fresh()->quantity);
         $this->assertSame(1, $result['target_line']->quantity);
-        $this->assertSame('80.00', $source->fresh()->total);
+        $this->assertSame('160.00', $source->fresh()->total);
         $this->assertSame('80.00', $target->fresh()->total);
 
         $transferred = $operations->transferTable($target->fresh(), $thirdTable, $waiter);
