@@ -1,4 +1,8 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text.Json;
+using System.Windows.Media.Imaging;
+using QRCoder;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
@@ -25,6 +29,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private AuthSession? _session;
     private bool _isBusy;
     private string _pairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
+    private string _pairingPayload = string.Empty;
+    private BitmapImage? _pairingQrImage;
 
     public LanDiagnosticsViewModel()
     {
@@ -97,6 +103,18 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
         private set => SetProperty(ref _pairingDetails, value);
     }
 
+    public string PairingPayload
+    {
+        get => _pairingPayload;
+        private set => SetProperty(ref _pairingPayload, value);
+    }
+
+    public BitmapImage? PairingQrImage
+    {
+        get => _pairingQrImage;
+        private set => SetProperty(ref _pairingQrImage, value);
+    }
+
     public int OpenCloudConflicts
     {
         get => _openCloudConflicts;
@@ -152,6 +170,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 StatusMessage = "Activate this Windows installation before enabling the local restaurant host.";
                 Terminals.Clear();
                 PairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
+                PairingPayload = string.Empty;
+                PairingQrImage = null;
                 return;
             }
 
@@ -163,9 +183,20 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
             var descriptor = LocalServerDescriptor.Create(
                 new LocalServerOptions(activation.Snapshot.TenantId, port));
             var localAddress = descriptor.BaseUrls.FirstOrDefault();
+            var cloudAddress = connection?.TenantBaseUrl ?? activation.TenantBaseUrl;
             PairingDetails = localAddress is null
-                ? "No private LAN address is currently available. Mobile devices can use the cloud endpoint."
-                : $"Local: {localAddress}\nCloud: {connection?.TenantBaseUrl ?? activation.TenantBaseUrl}\nMode: Automatic (LAN preferred)";
+                ? $"Local: unavailable\nCloud: {cloudAddress}\nMode: Automatic (cloud until LAN returns)"
+                : $"Local: {localAddress}\nCloud: {cloudAddress}\nMode: Automatic (LAN preferred)";
+
+            PairingPayload = JsonSerializer.Serialize(new
+            {
+                type = "businessos.restaurant.pairing.v1",
+                tenant_id = activation.Snapshot.TenantId,
+                local_url = localAddress,
+                cloud_url = cloudAddress,
+                connection_mode = "automatic",
+            });
+            PairingQrImage = CreateQrImage(PairingPayload);
 
             NetworkMode = diagnostics.NetworkMode switch
             {
@@ -267,6 +298,23 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
 
         SelectedTerminal = null;
         await RefreshAsync();
+    }
+
+    private static BitmapImage CreateQrImage(string payload)
+    {
+        using var generator = new QRCodeGenerator();
+        using var qrData = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.Q);
+        var qr = new PngByteQRCode(qrData);
+        var bytes = qr.GetGraphic(8);
+
+        using var stream = new MemoryStream(bytes);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private static bool IsManager(string role) =>
