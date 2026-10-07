@@ -12,15 +12,18 @@ class SyncEngine {
     required SyncStore store,
     required CredentialStore credentials,
     required LeaseValidator leaseVerifier,
+    required ConnectionResolver connectionResolver,
   }) : _api = api,
        _store = store,
        _credentials = credentials,
-       _leaseVerifier = leaseVerifier;
+       _leaseVerifier = leaseVerifier,
+       _connectionResolver = connectionResolver;
 
   final SyncApi _api;
   final SyncStore _store;
   final CredentialStore _credentials;
   final LeaseValidator _leaseVerifier;
+  final ConnectionResolver _connectionResolver;
 
   bool _running = false;
 
@@ -40,6 +43,7 @@ class SyncEngine {
 
     try {
       var session = await _requireSession();
+      session = await _resolveActiveChannel(session);
       session = await _refreshLeaseIfNeeded(session);
 
       if (session.activeChannel == ConnectionChannel.local) {
@@ -133,6 +137,37 @@ class SyncEngine {
       if (!hasMore) {
         return;
       }
+    }
+  }
+
+  Future<SessionCredentials> _resolveActiveChannel(SessionCredentials session) async {
+    if (session.connectionMode != ConnectionMode.automatic) return session;
+
+    try {
+      final target = await _connectionResolver.resolve(
+        mode: ConnectionMode.automatic,
+        localUrl: session.localBaseUrl,
+        cloudUrl: session.cloudBaseUrl,
+      );
+      if (target.tenantId != (session.tenantId ?? target.tenantId)) {
+        throw const ApiException(
+          code: 'tenant_mismatch',
+          message: 'The selected Restaurant endpoint belongs to another tenant.',
+        );
+      }
+      final switched = session.copyWith(
+        baseUrl: target.baseUrl,
+        activeChannel: target.channel,
+      );
+      await _credentials.saveActiveConnection(
+        baseUrl: target.baseUrl,
+        activeChannel: target.channel,
+      );
+      await _store.setSystemState('active_connection', target.channel.name);
+      return switched;
+    } on ApiException {
+      await _store.setSystemState('active_connection', 'offline');
+      return session;
     }
   }
 
