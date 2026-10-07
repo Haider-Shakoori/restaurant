@@ -1150,6 +1150,14 @@ internal static class RestaurantOperationalPages
         return grid;
     }
 
+    private static Border Cards(params (string Label, string Value)[] values)
+    {
+        var wrap = new WrapPanel();
+        foreach (var value in values)
+            wrap.Children.Add(Card(value.Label, value.Value, 235));
+        return new Border { Child = wrap, Margin = new Thickness(0, 0, 0, 6) };
+    }
+
     private static Border Card(string title, string value, double width = double.NaN)
     {
         var titleText = new TextBlock
