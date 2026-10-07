@@ -76,7 +76,13 @@ class KitchenService
                 ]);
             }
 
-            $branchId = $order->table->diningArea->branch_id;
+            $branchId = $order->branch_id ?? $order->table?->diningArea?->branch_id;
+
+            if (! $branchId) {
+                throw ValidationException::withMessages([
+                    'branch_id' => 'This order is missing a kitchen branch.',
+                ]);
+            }
             $workflow = $this->settings->all($branchId);
             $initialState = $workflow['kitchen_queue_enabled']
                 ? KitchenTicket::STATUS_QUEUED
@@ -146,6 +152,12 @@ class KitchenService
                         'item_name' => $item->item_name,
                         'quantity' => $quantity,
                         'notes' => $item->notes,
+                        'seat_number' => $item->seat_number,
+                        'course_number' => $item->course_number,
+                        'course_name' => $item->course_name,
+                        'modifiers_snapshot' => $item->modifiers_snapshot,
+                        'allergy_instructions' => $item->allergy_instructions,
+                        'kitchen_instructions' => $item->kitchen_instructions,
                         'status' => $initialState,
                     ]);
 
@@ -384,17 +396,17 @@ class KitchenService
 
     private function workflowForTicket(KitchenTicket $ticket): array
     {
-        $ticket->loadMissing(['round', 'order.table.diningArea']);
+        $ticket->loadMissing(['round', 'order.branch', 'order.table.diningArea']);
         $snapshot = $ticket->round?->workflow_snapshot;
 
         if (is_array($snapshot)) {
             return [
-                ...$this->settings->all($ticket->order->table->diningArea->branch_id),
+                ...$this->settings->all($ticket->order->branch_id ?? $ticket->order->table?->diningArea?->branch_id),
                 ...$snapshot,
             ];
         }
 
-        return $this->settings->all($ticket->order->table->diningArea->branch_id);
+        return $this->settings->all($ticket->order->branch_id ?? $ticket->order->table?->diningArea?->branch_id);
     }
 
     private function generalStation(string $branchId): KitchenStation
