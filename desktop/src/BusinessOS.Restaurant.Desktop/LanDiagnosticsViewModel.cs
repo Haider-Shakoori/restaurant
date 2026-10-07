@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Windows.Media.Imaging;
 using QRCoder;
@@ -17,6 +18,7 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private readonly WindowsActivationStore _activationStore;
     private readonly WindowsSessionStore _sessionStore;
     private readonly LocalTerminalManagementService _terminalManagement;
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
 
     private string _networkMode = "Loading";
     private string _leaseStatus = "Unknown";
@@ -192,9 +194,17 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 new LocalServerOptions(activation.Snapshot.TenantId, port));
             var localAddress = descriptor.BaseUrls.FirstOrDefault();
             var cloudAddress = connection?.TenantBaseUrl ?? activation.TenantBaseUrl;
+            var pairingToken = await TryCreateCloudPairingTokenAsync(
+                activation,
+                cloudAddress);
+
+            var pairingExpiry = pairingToken.ExpiresAt is null
+                ? "Cloud pairing token unavailable; QR configures connection addresses only."
+                : $"One-time mobile activation token expires {pairingToken.ExpiresAt:HH:mm:ss} UTC.";
+
             PairingDetails = localAddress is null
-                ? $"Local: unavailable\nCloud: {cloudAddress}\nMode: Automatic (cloud until LAN returns)"
-                : $"Local: {localAddress}\nCloud: {cloudAddress}\nMode: Automatic (LAN preferred)";
+                ? $"Local: unavailable\nCloud: {cloudAddress}\nMode: Automatic (cloud until LAN returns)\n{pairingExpiry}"
+                : $"Local: {localAddress}\nCloud: {cloudAddress}\nMode: Automatic (LAN preferred)\n{pairingExpiry}";
 
             PairingPayload = JsonSerializer.Serialize(new
             {
@@ -203,6 +213,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 local_url = localAddress,
                 cloud_url = cloudAddress,
                 connection_mode = "automatic",
+                pairing_token = pairingToken.Token,
+                pairing_expires_at = pairingToken.ExpiresAt,
             });
             PairingQrImage = CreateQrImage(PairingPayload);
 
@@ -315,6 +327,52 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
         await RefreshAsync();
     }
 
+    private async Task<(string? Token, DateTimeOffset? ExpiresAt)> TryCreateCloudPairingTokenAsync(
+        ActivationState activation,
+        string cloudAddress)
+    {
+        var session = _session;
+        if (session is null || !IsManager(session.User.Role))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var baseUri = new Uri(cloudAddress.TrimEnd('/') + "/", UriKind.Absolute);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                new Uri(baseUri, "api/v1/pairing-tokens"));
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                session.AccessToken);
+            request.Headers.TryAddWithoutValidation("X-Device-Id", activation.DeviceId);
+            request.Headers.TryAddWithoutValidation("X-Device-Secret", activation.DeviceSecret);
+            request.Headers.TryAddWithoutValidation("X-App-Version", "1.0.0");
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                return (null, null);
+            }
+
+            using var document = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync());
+            var data = document.RootElement.GetProperty("data");
+            var token = data.GetProperty("pairing_token").GetString();
+            var expires = data.TryGetProperty("expires_at", out var expiresProperty) &&
+                          DateTimeOffset.TryParse(expiresProperty.GetString(), out var parsed)
+                ? parsed
+                : (DateTimeOffset?)null;
+
+            return (string.IsNullOrWhiteSpace(token) ? null : token, expires);
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+    }
+
     private static BitmapImage CreateQrImage(string payload)
     {
         using var generator = new QRCodeGenerator();
@@ -334,5 +392,6 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
 
     private static bool IsManager(string role) =>
         role.Equals(RestaurantRoles.Owner, StringComparison.OrdinalIgnoreCase) ||
-        role.Equals(RestaurantRoles.Manager, StringComparison.OrdinalIgnoreCase);
+        role.Equals(RestaurantRoles.Manager, StringComparison.OrdinalIgnoreCase) ||
+        role.Equals("admin", StringComparison.OrdinalIgnoreCase);
 }
