@@ -76,6 +76,7 @@ class OrderOperationsService
         Order $target,
         TenantUser $actor,
         int $quantity,
+        ?string $targetClientLineId = null,
     ): array {
         return DB::connection('tenant')->transaction(function () use (
             $source,
@@ -123,7 +124,7 @@ class OrderOperationsService
 
             $targetLine = $target->items()->create([
                 'menu_item_id' => $line->menu_item_id,
-                'client_line_id' => (string) Str::ulid(),
+                'client_line_id' => $targetClientLineId ?: (string) Str::ulid(),
                 'item_name' => $line->item_name,
                 'unit_price' => $line->unit_price,
                 'quantity' => $quantity,
@@ -214,7 +215,7 @@ class OrderOperationsService
             foreach ($source->items as $line) {
                 $target->items()->create([
                     'menu_item_id' => $line->menu_item_id,
-                    'client_line_id' => (string) Str::ulid(),
+                    'client_line_id' => $line->client_line_id ?: (string) Str::ulid(),
                     'item_name' => $line->item_name,
                     'unit_price' => $line->unit_price,
                     'quantity' => $line->quantity,
