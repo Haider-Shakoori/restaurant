@@ -1,127 +1,56 @@
 # Local inventory, recipes and purchasing
 
-Batch 10 makes ingredient stock and procurement operational while the Windows desktop is the restaurant LAN authority.
+The existing Desktop inventory ledger remains the single source for ingredient balances, valuation, purchasing and production usage.
 
-## Inventory items
+## Inventory items and valuation
 
-Inventory items use the same core fields as Laravel:
+Inventory items retain SKU, name, base/purchase unit, conversion factor, reorder level and active status. Each branch/item pair has one on-hand balance and weighted-average valuation row.
 
-- SKU
-- name
-- base unit
-- purchase unit
-- purchase-to-base conversion factor
-- reorder level
-- active status
+Goods receipts increase quantity/value. Production consumption reduces both using the current average base-unit cost. Manual adjustments remain explicit append-only movements.
 
-Quantities are stored to four decimal places. Purchase conversion factors and weighted-average unit cost are stored to six decimal places.
+## Reservation vs consumption
 
-## Stock balances and movements
+KOT realignment separates **reservation** from **actual consumption**:
 
-Each branch/item pair has one local balance and one local valuation row.
+1. Sending a KOT reserves recipe quantities for each kitchen production item.
+2. Reservation changes `reserved` and therefore `available = on_hand - reserved`; it does not reduce on-hand valuation.
+3. When actual production starts, the reservation is committed into append-only stock consumption exactly once.
+4. If Preparing is disabled, commit happens at the configured production transition (READY or immediate active flow).
+5. Serving performs an idempotent catch-up only; it cannot double-consume already committed kitchen items.
 
-Movements are append-only and include:
+Consumption idempotency is keyed to the kitchen production item, not merely the customer order. Therefore later KOT rounds and re-fires consume their own recipe usage correctly.
 
-- receipt
-- consumption
-- adjustment
+## Void/cancel inventory rule
 
-Every movement has an idempotency key. Replaying the same adjustment, goods receipt or order consumption does not apply stock twice.
+If an item is voided/cancelled before production starts, its reservation is released.
 
-The local API can filter movement history by branch and inventory item.
+If production has already been committed, the Desktop does **not** silently add stock back. The audit event records that produced inventory was not returned. Any permitted correction must be an explicit stock adjustment, preserving operational and financial audit history.
 
-## Weighted-average valuation
+## Re-fire
 
-Goods receipts increase stock quantity and inventory value.
+A re-fire creates a new kitchen production item linked to the original item. It receives its own reservation and exactly-once consumption. The guest's original order/bill line is not duplicated.
 
-Average base-unit cost is recalculated as:
+## Stock visibility
 
-`new total inventory value / new total base quantity`
+Inventory responses expose:
 
-Recipe consumption reduces quantity and value using the current average base-unit cost.
+- `on_hand`
+- `reserved`
+- `available`
+- low-stock state based on available quantity
 
-Manual adjustments use the current average cost for the value delta, matching the cloud valuation behavior.
+This prevents a second order from treating already-reserved recipe stock as freely available while keeping valuation unchanged until production.
 
-## Recipe versions
+## Recipes
 
-Recipes are branch-specific and menu-item-specific.
-
-Creating a new version:
-
-1. deactivates the previous active version
-2. increments the version number
-3. validates that every ingredient is active
-4. prevents the same inventory item from appearing twice in one recipe
-5. stores ingredient usage in base units
-
-## Automatic recipe consumption
-
-Inventory is consumed when an order is served, matching Laravel.
-
-For each served order item:
-
-`recipe quantity per serving x sold quantity = ingredient consumption`
-
-Consumption is exactly once per order. It is committed inside the same SQLite transaction as the serve operation, so a failure cannot leave the order served without its stock movement or deduct stock without serving the order.
-
-Menu items without an active recipe do not create consumption movements.
-
-Negative stock is allowed, matching the existing Laravel inventory engine. This keeps service operational during emergency stock-count mismatches while still exposing the negative quantity for correction.
+Recipes remain branch/menu-item/version specific. Creating a new version deactivates the previous active version. Recipe components are stored in base units and validated against active inventory items.
 
 ## Suppliers and purchase orders
 
-Local procurement supports:
+Local procurement continues to support suppliers, POs, purchase-unit conversion, partial/full goods receipts and idempotent receipt IDs. Receiving stock updates the same inventory ledger used by KOT reservations and production consumption.
 
-- active suppliers
-- purchase orders
-- purchase quantities in purchase units
-- automatic purchase-to-base conversion
-- estimated PO total
-- partial receipts
-- full receipts
-- receipt notes
-- client receipt IDs for idempotent retry
+## LAN inventory endpoints
 
-A PO moves:
+Existing inventory, recipe, supplier, movement, PO and receipt endpoints remain unchanged. The KOT realignment extends their underlying stock semantics rather than introducing another inventory subsystem.
 
-`ordered -> partially_received -> received`
-
-Receiving more than the remaining PO quantity is rejected.
-
-## Low stock
-
-When a branch is selected, zero balance is treated as zero stock.
-
-An item is low stock when:
-
-`current quantity <= reorder level`
-
-The inventory list can be filtered to low-stock items only.
-
-## Audit
-
-Batch 10 appends audit events for:
-
-- inventory item creation
-- manual adjustment
-- recipe version creation
-- supplier creation
-- purchase order creation
-- goods receipt posting
-- automatic order consumption
-
-## LAN endpoints
-
-- `GET /api/v1/inventory/items?branch_id=...&low_stock=true`
-- `POST /api/v1/inventory/items`
-- `POST /api/v1/inventory/items/{itemId}/adjustments`
-- `GET /api/v1/inventory/movements`
-- `GET /api/v1/suppliers`
-- `POST /api/v1/suppliers`
-- `GET /api/v1/recipes`
-- `POST /api/v1/menu/items/{menuItemId}/recipes`
-- `GET /api/v1/purchasing/orders`
-- `POST /api/v1/purchasing/orders`
-- `POST /api/v1/purchasing/orders/{purchaseOrderId}/receive`
-
-These endpoints require owner, admin, manager or inventory role access.
+This PR changes Desktop only; it does not modify Laravel or Flutter.
