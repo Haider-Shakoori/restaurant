@@ -792,6 +792,175 @@ public sealed class LocalCashierService
         return await OrderSnapshotAsync(db, target, cancellationToken);
     }
 
+    public async Task<object> SplitUnsentItemsAsync(
+        string sourceOrderId,
+        string targetTableId,
+        IReadOnlyList<string> orderItemIds,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureManagerOrCashier(actor);
+
+        if (orderItemIds.Count == 0)
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                "Select at least one unsent order item to split.");
+        }
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var source = await db.Orders
+            .SingleOrDefaultAsync(value => value.Id == sourceOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Source order does not exist.");
+
+        if (source.Status is "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Closed, billed or cancelled orders cannot be split.");
+        }
+
+        if (string.IsNullOrWhiteSpace(source.DiningTableId))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Table split is only available for dine-in orders.");
+        }
+
+        var sourceTable = await db.DiningTables
+            .SingleAsync(value => value.Id == source.DiningTableId, cancellationToken);
+        var sourceArea = await db.DiningAreas
+            .SingleAsync(value => value.Id == sourceTable.DiningAreaId, cancellationToken);
+
+        var targetTable = await db.DiningTables
+            .SingleOrDefaultAsync(value => value.Id == targetTableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Target table does not exist.");
+
+        if (!targetTable.IsActive || targetTable.Status != "available")
+        {
+            throw new LocalSyncConflictException("table_busy", "The target table is not available.");
+        }
+
+        var targetArea = await db.DiningAreas
+            .SingleAsync(value => value.Id == targetTable.DiningAreaId, cancellationToken);
+
+        if (!string.Equals(sourceArea.BranchId, targetArea.BranchId, StringComparison.Ordinal))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "A table split cannot move production between branches.");
+        }
+
+        var distinctIds = orderItemIds.Distinct(StringComparer.Ordinal).ToArray();
+        var items = await db.OrderItems
+            .Where(value => value.OrderId == source.Id && distinctIds.Contains(value.Id))
+            .ToArrayAsync(cancellationToken);
+
+        if (items.Length != distinctIds.Length)
+        {
+            throw new LocalSyncConflictException(
+                "dependency_missing",
+                "One or more selected order items do not belong to the source order.");
+        }
+
+        if (items.Any(value =>
+                !string.IsNullOrWhiteSpace(value.KotRoundId) ||
+                value.Status is not ("pending" or "held")))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Only unsent pending/held items can be split. Sent KOT history remains attached to its original order.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var target = new LocalOrder
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            ClientOrderId = $"SPLIT-{Guid.CreateVersion7():N}",
+            DiningTableId = targetTable.Id,
+            BranchId = targetArea.BranchId,
+            ServiceType = "dine_in",
+            WaiterId = source.WaiterId,
+            WaiterPublicId = source.WaiterPublicId,
+            WaiterName = source.WaiterName,
+            Status = "draft",
+            GuestCount = 1,
+            Notes = $"Split from {source.ClientOrderId}",
+            Subtotal = 0m,
+            Total = 0m,
+            OpenedAt = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        db.Orders.Add(target);
+
+        foreach (var item in items)
+        {
+            item.OrderId = target.Id;
+            item.ClientLineId = $"{target.ClientOrderId}-{item.ClientLineId}";
+            item.UpdatedAtUtc = now;
+        }
+
+        target.Subtotal = Money(items.Sum(value => value.LineTotal));
+        target.Total = target.Subtotal;
+        source.Subtotal = Money(await db.OrderItems
+            .Where(value =>
+                value.OrderId == source.Id &&
+                !distinctIds.Contains(value.Id) &&
+                value.Status != "voided" &&
+                value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken));
+        source.Total = source.Subtotal;
+        source.UpdatedAtUtc = now;
+        targetTable.Status = "occupied";
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        var remainingSourceItems = await db.OrderItems
+            .AnyAsync(value =>
+                value.OrderId == source.Id &&
+                value.Status != "voided" &&
+                value.Status != "cancelled",
+                cancellationToken);
+        var sourceHasKitchen = await db.KitchenTickets
+            .AnyAsync(value => value.OrderId == source.Id, cancellationToken);
+
+        if (!remainingSourceItems && !sourceHasKitchen)
+        {
+            source.Status = "closed";
+            source.ClosedAt = now;
+            sourceTable.Status = "available";
+        }
+
+        AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
+        AddChange(db, "order", target.Id, target.WaiterId, await OrderSnapshotAsync(db, target, cancellationToken));
+        AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
+        AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "order",
+            "order.split",
+            sourceArea.BranchId,
+            "order",
+            target.Id,
+            new
+            {
+                source_order_id = source.Id,
+                target_order_id = target.Id,
+                target_table_id = targetTable.Id,
+                moved_order_item_ids = distinctIds,
+            });
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return await OrderSnapshotAsync(db, target, cancellationToken);
+    }
+
     public async Task ConfigureReceiptPrinterAsync(
         string printerName,
         int copies,
