@@ -19,6 +19,30 @@ public sealed class LicenseManager
         _identity = identity;
     }
 
+    public async Task<ActivationState> ActivateFromPlatformAsync(
+        Uri platformBaseUri,
+        string licenseKey,
+        string? appVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var resolved = await _client.ResolveDesktopLicenseAsync(
+            platformBaseUri,
+            licenseKey,
+            cancellationToken);
+
+        if (!Uri.TryCreate(resolved.TenantBaseUrl, UriKind.Absolute, out var tenantBaseUri) ||
+            tenantBaseUri.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new InvalidOperationException("The licensing server returned an invalid restaurant workspace URL.");
+        }
+
+        return await ActivateAsync(
+            tenantBaseUri,
+            licenseKey,
+            appVersion,
+            cancellationToken);
+    }
+
     public async Task<ActivationState> ActivateAsync(
         Uri tenantBaseUri,
         string licenseKey,
