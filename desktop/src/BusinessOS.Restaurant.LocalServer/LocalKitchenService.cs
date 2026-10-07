@@ -63,7 +63,9 @@ public sealed class LocalKitchenService
         CancellationToken cancellationToken)
     {
         var existing = await db.KotRounds
-            .SingleOrDefaultAsync(value => value.MutationId == mutationId, cancellationToken);
+            .SingleOrDefaultAsync(
+                value => value.OrderId == order.Id && value.MutationId == mutationId,
+                cancellationToken);
         if (existing is not null)
         {
             return existing;
@@ -81,13 +83,16 @@ public sealed class LocalKitchenService
             .Select(value => (int?)value.RoundNumber)
             .MaxAsync(cancellationToken) ?? 0) + 1;
 
-        var kotNumber = await NextKotNumberAsync(db, area.BranchId, cancellationToken);
+        var sequence = await NextKotNumberAsync(db, area.BranchId, cancellationToken);
         var round = new LocalKotRound
         {
             Id = Guid.CreateVersion7().ToString("N"),
             OrderId = order.Id,
+            BranchId = area.BranchId,
             RoundNumber = nextRound,
-            KotNumber = kotNumber,
+            DisplayNumber = sequence.DisplayNumber,
+            BusinessDate = sequence.BusinessDate,
+            KotNumber = sequence.KotNumber,
             MutationId = mutationId,
             SubmittedByUserId = actor.UserId,
             QueueEnabled = settings.KitchenQueueEnabled,
@@ -556,9 +561,14 @@ public sealed class LocalKitchenService
     {
         id = round.Id,
         order_id = round.OrderId,
+        branch_id = round.BranchId,
         round_number = round.RoundNumber,
+        display_number = round.DisplayNumber,
+        business_date = round.BusinessDate,
         kot_number = round.KotNumber,
+        client_dispatch_id = round.MutationId,
         submitted_by_user_id = round.SubmittedByUserId,
+        dispatched_at = round.SentAt,
         sent_at = round.SentAt,
         workflow = new
         {
@@ -831,7 +841,10 @@ public sealed class LocalKitchenService
         {
             Id = ticket.KotRoundId ?? $"legacy:{ticket.Id}",
             OrderId = ticket.OrderId,
+            BranchId = string.Empty,
             RoundNumber = ticket.RoundNumber <= 0 ? 1 : ticket.RoundNumber,
+            DisplayNumber = ParseDisplayNumber(ticket.KotNumber ?? ticket.TicketNumber),
+            BusinessDate = DateOnly.FromDateTime(ticket.QueuedAt.LocalDateTime),
             KotNumber = ticket.KotNumber ?? ticket.TicketNumber,
             MutationId = $"legacy:{ticket.Id}",
             SubmittedByUserId = ticket.SubmittedByUserId,
@@ -843,7 +856,7 @@ public sealed class LocalKitchenService
         };
     }
 
-    private static async Task<string> NextKotNumberAsync(
+    private static async Task<KotSequence> NextKotNumberAsync(
         RestaurantDbContext db,
         string branchId,
         CancellationToken cancellationToken)
@@ -869,8 +882,19 @@ public sealed class LocalKitchenService
         counter.LastNumber += 1;
         counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
-        return $"KOT-{counter.LastNumber:0000}";
+        return new KotSequence(
+            counter.LastNumber,
+            businessDate,
+            $"KOT-{counter.LastNumber:0000}");
     }
+
+    private static int ParseDisplayNumber(string value)
+    {
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        return int.TryParse(digits, out var number) ? number : 0;
+    }
+
+    private sealed record KotSequence(int DisplayNumber, DateOnly BusinessDate, string KotNumber);
 
     private static async Task<LocalKitchenStation> EnsureGeneralStationAsync(
         RestaurantDbContext db,
