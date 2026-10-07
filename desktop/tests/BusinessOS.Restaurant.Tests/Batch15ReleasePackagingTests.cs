@@ -33,6 +33,7 @@ public sealed class Batch15ReleasePackagingTests
         var root=RepositoryRoot();
         var installer=File.ReadAllText(Path.Combine(root,"desktop","installer","BusinessOS.Restaurant.iss"));
         var generator=File.ReadAllText(Path.Combine(root,"tools","generate_restaurant_icons.py"));
+        var workflow=File.ReadAllText(Path.Combine(root,".github","workflows","restaurant-desktop-ci.yml"));
         var background=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantGlassBackground.jpg");
 
         Assert.Contains("https://restaurant.businessos.af",installer,StringComparison.Ordinal);
@@ -46,6 +47,9 @@ public sealed class Batch15ReleasePackagingTests
         Assert.DoesNotContain("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
         Assert.Contains("RestaurantInstallerBackground.png",generator,StringComparison.Ordinal);
         Assert.Contains("format=\"PNG\"",generator,StringComparison.Ordinal);
+        Assert.Contains("Smoke-test branded installer startup",workflow,StringComparison.Ordinal);
+        Assert.Contains("Bitmap image is not valid",workflow,StringComparison.Ordinal);
+        Assert.Contains("Installer background must be PNG",workflow,StringComparison.Ordinal);
 
         Assert.True(File.Exists(background));
         Assert.True(new FileInfo(background).Length > 5_000);
