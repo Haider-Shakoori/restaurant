@@ -927,6 +927,46 @@ public static class LocalEndpointMappings
             }
         });
 
+        app.MapPost("/api/v1/orders/{sourceOrderId}/split", async (
+            string sourceOrderId,
+            LocalSplitOrderRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Cashier or manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await cashier.SplitUnsentItemsAsync(
+                        sourceOrderId,
+                        body.TargetTableId,
+                        body.OrderItemIds,
+                        principal,
+                        token),
+                });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
         app.MapPost("/api/v1/orders/{targetOrderId}/merge", async (
             string targetOrderId,
             LocalMergeOrdersRequest body,
