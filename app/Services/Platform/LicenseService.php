@@ -531,7 +531,7 @@ class LicenseService
      */
     private function resolveMobileDeviceLimit(array $features): ?int
     {
-        $value = data_get($features, 'max_mobile_devices');
+        $value = $this->featureValue($features, 'max_mobile_devices');
 
         if ($value === null || $value === '') {
             return $this->resolveDeviceLimit($features);
@@ -557,7 +557,7 @@ class LicenseService
 
     private function resolveDeviceLimit(array $features): ?int
     {
-        $value = data_get($features, 'max_devices');
+        $value = $this->featureValue($features, 'max_devices');
 
         if (is_string($value) && strtolower(trim($value)) === 'unlimited') {
             return null;
@@ -572,6 +572,25 @@ class LicenseService
         $default = (int) config('license.default_max_devices', 5);
 
         return $default > 0 ? $default : null;
+    }
+
+    private function featureValue(array $features, string $key, mixed $default = null): mixed
+    {
+        if (array_key_exists($key, $features)) {
+            return $features[$key];
+        }
+
+        $legacyKey = match ($key) {
+            'max_devices' => 'Max devices',
+            'max_mobile_devices' => 'Max mobile devices',
+            default => null,
+        };
+
+        if ($legacyKey !== null && array_key_exists($legacyKey, $features)) {
+            return $features[$legacyKey];
+        }
+
+        return $default;
     }
 
     private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void

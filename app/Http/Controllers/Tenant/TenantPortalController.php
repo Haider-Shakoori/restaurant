@@ -181,10 +181,9 @@ class TenantPortalController extends Controller
 
         if ($business) {
             $access = $subscriptions->access($business);
-            $rawMobileLimit = data_get(
-                $access->features,
+            $rawMobileLimit = $access->feature(
                 'max_mobile_devices',
-                data_get($access->features, 'max_devices', config('license.default_max_devices', 5)),
+                $access->feature('max_devices', config('license.default_max_devices', 5)),
             );
             $mobileDeviceLimit = is_string($rawMobileLimit) && strtolower(trim($rawMobileLimit)) === 'unlimited'
                 ? null
