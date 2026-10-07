@@ -116,6 +116,22 @@ jobs:
       - name: Build unsigned iOS app
         run: flutter build ios --release --no-codesign
 
+      - name: Validate built iOS permissions
+        shell: bash
+        run: |
+          PLIST="build/ios/iphoneos/Runner.app/Info.plist"
+          test -f "$PLIST"
+
+          CAMERA=$(/usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$PLIST")
+          LOCAL=$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$PLIST")
+          LAN=$(/usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "$PLIST")
+
+          test "$CAMERA" = "Scan the BusinessOS Restaurant Desktop pairing QR code."
+          test "$LOCAL" = "Connect directly to BusinessOS Restaurant Desktop over the restaurant Wi-Fi or LAN."
+          test "$LAN" = "true"
+
+          echo "Verified final Runner.app camera and local-network permissions."
+
       - name: Package unsigned IPA
         shell: bash
         run: |
