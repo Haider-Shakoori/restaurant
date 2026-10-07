@@ -24,6 +24,7 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private LocalTerminalSnapshot? _selectedTerminal;
     private AuthSession? _session;
     private bool _isBusy;
+    private string _pairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
 
     public LanDiagnosticsViewModel()
     {
@@ -88,6 +89,12 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     {
         get => _pendingCloudMutations;
         private set => SetProperty(ref _pendingCloudMutations, value);
+    }
+
+    public string PairingDetails
+    {
+        get => _pairingDetails;
+        private set => SetProperty(ref _pairingDetails, value);
     }
 
     public int OpenCloudConflicts
