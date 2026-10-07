@@ -403,6 +403,156 @@ public sealed class KotRealignmentTests
     }
 
     [Fact]
+    public async Task Shared_restaurant_settings_use_canonical_manager_void_key_and_negative_stock_policy()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+
+            await using (var db = factory.Create())
+            {
+                db.RestaurantSettings.Add(new LocalRestaurantSetting
+                {
+                    Key = LocalRestaurantSettingsService.LegacyRequireManagerVoidApprovalKey,
+                    Value = "true",
+                    Source = "legacy",
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var service = new LocalRestaurantSettingsService(factory);
+            var migratedRead = await service.GetAsync();
+            Assert.True(migratedRead.RequireManagerApprovalForPostKotVoid);
+
+            var updated = await service.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: true,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: false,
+                    CoursesEnabled: false,
+                    KotSoundEnabled: true,
+                    KitchenWarningMinutes: 10,
+                    KitchenLateMinutes: 20,
+                    RequireManagerApprovalForPostKotVoid: false,
+                    NegativeStockPolicy: "warn"),
+                Manager(),
+                CancellationToken.None);
+
+            Assert.False(updated.RequireManagerApprovalForPostKotVoid);
+            Assert.Equal("warn", updated.NegativeStockPolicy);
+
+            await using var finalDb = factory.Create();
+            Assert.Equal(
+                "false",
+                (await finalDb.RestaurantSettings.SingleAsync(
+                    x => x.Key == LocalRestaurantSettingsService.RequireManagerVoidApprovalKey)).Value);
+            Assert.Equal(
+                "warn",
+                (await finalDb.RestaurantSettings.SingleAsync(
+                    x => x.Key == LocalRestaurantSettingsService.NegativeStockPolicyKey)).Value);
+            Assert.False(await finalDb.RestaurantSettings.AnyAsync(
+                x => x.Key == LocalRestaurantSettingsService.LegacyRequireManagerVoidApprovalKey));
+
+            var outbox = await finalDb.CloudOutbox
+                .OrderByDescending(x => x.OccurredAtUtc)
+                .FirstAsync(x => x.EntityType == "restaurant_settings");
+            Assert.Contains("require_manager_approval_post_kot_void", outbox.PayloadJson, StringComparison.Ordinal);
+            Assert.Contains("\"negative_stock_policy\":\"warn\"", outbox.PayloadJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("require_manager_approval_for_post_kot_void", outbox.PayloadJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("block", "conflict")]
+    [InlineData("warn", "accepted")]
+    [InlineData("allow", "accepted")]
+    public async Task Negative_stock_policy_controls_kot_reservation(string policy, string expectedStatus)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+
+            var settings = new LocalRestaurantSettingsService(factory);
+            await settings.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: true,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: false,
+                    CoursesEnabled: false,
+                    KotSoundEnabled: false,
+                    KitchenWarningMinutes: 10,
+                    KitchenLateMinutes: 20,
+                    RequireManagerApprovalForPostKotVoid: false,
+                    NegativeStockPolicy: policy),
+                Manager(),
+                CancellationToken.None);
+
+            var inventory = new LocalInventoryService(factory);
+            var itemJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    $"ZERO-{policy.ToUpperInvariant()}",
+                    $"Zero Stock {policy}",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = itemJson.GetProperty("id").GetString()!;
+
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, $"ADD-{policy}", $"LINE-{policy}", "item-grill", 1);
+
+            var result = await PushOneAsync(sync, Waiter(), $"SEND-{policy}", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+            Assert.Equal(expectedStatus, result.GetProperty("status").GetString());
+
+            await using var db = factory.Create();
+            if (policy == "block")
+            {
+                Assert.Equal("negative_stock_blocked", result.GetProperty("code").GetString());
+                Assert.Empty(await db.InventoryReservations.ToArrayAsync());
+                Assert.Empty(await db.KitchenTickets.ToArrayAsync());
+            }
+            else
+            {
+                Assert.Single(await db.InventoryReservations.ToArrayAsync());
+                if (policy == "warn")
+                {
+                    Assert.True(await db.AuditEvents.AnyAsync(
+                        x => x.EventType == "inventory.negative_stock_warning"));
+                }
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Workflow_settings_persist_across_service_restart_and_enqueue_cloud_sync()
     {
         var root = CreateTemporaryDirectory();

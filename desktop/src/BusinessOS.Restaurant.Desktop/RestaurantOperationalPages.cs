@@ -471,6 +471,14 @@ internal static class RestaurantOperationalPages
             IsChecked = workflowSettings.RequireManagerApprovalForPostKotVoid,
             Margin = new Thickness(0, 5, 0, 10),
         };
+        var negativeStockPolicy = new ComboBox
+        {
+            ItemsSource = new[] { "block", "warn", "allow" },
+            SelectedItem = workflowSettings.NegativeStockPolicy,
+            Width = 160,
+            Height = 34,
+            Margin = new Thickness(0, 4, 0, 10),
+        };
 
         workflowPanel.Children.Add(queue);
         workflowPanel.Children.Add(preparing);
@@ -478,6 +486,13 @@ internal static class RestaurantOperationalPages
         workflowPanel.Children.Add(courses);
         workflowPanel.Children.Add(sound);
         workflowPanel.Children.Add(managerVoid);
+        workflowPanel.Children.Add(new TextBlock
+        {
+            Text = "Negative stock policy",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+        workflowPanel.Children.Add(negativeStockPolicy);
 
         var thresholds = new WrapPanel();
         var warning = new TextBox
@@ -545,12 +560,14 @@ internal static class RestaurantOperationalPages
                         sound.IsChecked == true,
                         warningMinutes,
                         lateMinutes,
-                        managerVoid.IsChecked == true));
+                        managerVoid.IsChecked == true,
+                        negativeStockPolicy.SelectedItem?.ToString() ?? "block"));
 
                 workflowStatus.Text =
                     $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
                     $"Preparing {(updated.PreparingStageEnabled ? "ON" : "OFF")} · " +
-                    $"Expo {(updated.ExpoEnabled ? "ON" : "OFF")}.";
+                    $"Expo {(updated.ExpoEnabled ? "ON" : "OFF")} · " +
+                    $"Negative stock {updated.NegativeStockPolicy.ToUpperInvariant()}.";
             }
             catch (Exception ex)
             {

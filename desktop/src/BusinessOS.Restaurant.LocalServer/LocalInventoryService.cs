@@ -611,6 +611,17 @@ public sealed class LocalInventoryService
             return null;
         }
 
+        await EnforceNegativeStockPolicyAsync(
+            db,
+            branchId,
+            components.Select(component => new StockRequirement(
+                component.InventoryItemId,
+                Quantity(component.QuantityBase * kitchenItem.Quantity))),
+            actor,
+            "reservation",
+            kitchenItem.Id,
+            cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var reservation = new LocalInventoryReservation
         {
@@ -694,6 +705,18 @@ public sealed class LocalInventoryService
         {
             return null;
         }
+
+        await EnforceNegativeStockPolicyAsync(
+            db,
+            reservation.BranchId,
+            lines.Select(line => new StockRequirement(
+                line.InventoryItemId,
+                Quantity(line.QuantityBase))),
+            actor,
+            "consumption",
+            kitchenItem.Id,
+            cancellationToken,
+            includeCurrentReservation: false);
 
         var consumption = new LocalInventoryConsumption
         {
@@ -1258,6 +1281,93 @@ public sealed class LocalInventoryService
         balance.Quantity = Quantity(balance.Quantity + delta);
         return movement;
     }
+
+    private static async Task EnforceNegativeStockPolicyAsync(
+        RestaurantDbContext db,
+        string branchId,
+        IEnumerable<StockRequirement> requirements,
+        LocalTerminalPrincipal actor,
+        string stage,
+        string kitchenTicketItemId,
+        CancellationToken cancellationToken,
+        bool includeCurrentReservation = true)
+    {
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var policy = settings.NegativeStockPolicy;
+        var grouped = requirements
+            .GroupBy(value => value.InventoryItemId, StringComparer.Ordinal)
+            .Select(group => new StockRequirement(
+                group.Key,
+                Quantity(group.Sum(value => value.Quantity))))
+            .ToArray();
+
+        foreach (var requirement in grouped)
+        {
+            var item = await RequireInventoryItemAsync(db, requirement.InventoryItemId, cancellationToken);
+            var balance = db.InventoryBalances.Local.FirstOrDefault(
+                value => value.BranchId == branchId && value.InventoryItemId == item.Id)
+                ?? await db.InventoryBalances.AsNoTracking().SingleOrDefaultAsync(
+                    value => value.BranchId == branchId && value.InventoryItemId == item.Id,
+                    cancellationToken);
+
+            var onHand = Quantity(balance?.Quantity ?? 0m);
+            decimal alreadyReserved = 0m;
+
+            if (includeCurrentReservation)
+            {
+                var reservationRows = await (
+                    from line in db.InventoryReservationLines.AsNoTracking()
+                    join reservation in db.InventoryReservations.AsNoTracking()
+                        on line.InventoryReservationId equals reservation.Id
+                    where reservation.BranchId == branchId &&
+                          reservation.Status == "reserved" &&
+                          line.InventoryItemId == item.Id
+                    select line.QuantityBase)
+                    .ToArrayAsync(cancellationToken);
+
+                alreadyReserved = Quantity(reservationRows.Sum());
+            }
+
+            var projected = Quantity(onHand - alreadyReserved - requirement.Quantity);
+            if (projected >= 0m || policy == "allow")
+            {
+                continue;
+            }
+
+            var details = new
+            {
+                branch_id = branchId,
+                inventory_item_id = item.Id,
+                inventory_item_name = item.Name,
+                kitchen_ticket_item_id = kitchenTicketItemId,
+                stage,
+                negative_stock_policy = policy,
+                on_hand = onHand,
+                reserved = alreadyReserved,
+                required = requirement.Quantity,
+                projected_available = projected,
+            };
+
+            if (policy == "block")
+            {
+                throw new LocalSyncConflictException(
+                    "negative_stock_blocked",
+                    $"{item.Name} does not have enough available stock for kitchen {stage}.");
+            }
+
+            LocalOperationsControlService.AddAudit(
+                db,
+                actor,
+                "inventory",
+                "inventory.negative_stock_warning",
+                branchId,
+                "inventory_item",
+                item.Id,
+                details);
+        }
+    }
+
+    private sealed record StockRequirement(string InventoryItemId, decimal Quantity);
 
     private static async Task<LocalInventoryValuation> GetOrCreateValuationAsync(
         RestaurantDbContext db,

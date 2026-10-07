@@ -3,8 +3,8 @@
 This file was created from the current repository state after checking both realignment branches.
 
 - Desktop branch: `feat/kot-realignment-desktop`
-- Web/Flutter branch inspected: `feat/kot-kds-realignment`
-- Web/Flutter reference commit at inspection: `5a71962dec28027a979e8fdb10506d26fb15e3a7`
+- Web/Flutter branch inspected: `feat/kot-realignment-web`
+- Web/Flutter reference commit at inspection: `83d9813dcc00ac0a4443d74214d02b0ba8a9e1c8`
 - Scope of this branch: **Desktop only**. Do not modify Laravel or Flutter here.
 
 ## Compatibility rule
@@ -169,6 +169,10 @@ Across Desktop/Web/Flutter:
 - Internet failure cannot erase accepted local orders;
 - reconnect must reconcile rather than create a second logical order/KOT;
 - historical IDs/timestamps/events are not destructively rewritten.
+
+## Current Web contract delta requiring a later Desktop phase
+
+The newer Web branch has also moved the KOT dispatch-round contract to `sequence`, `client_mutation_id`, `kot_number`, `workflow_snapshot`, `service_context`, `course_context`, and `sent_at`, and now treats `active` as canonical kitchen state. Desktop still carries its earlier round aliases internally. That round-contract migration is deliberately **not** part of the Restaurant Settings / negative-stock phase in this commit and should be handled as the next isolated compatibility phase.
 
 ## Handoff note
 

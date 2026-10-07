@@ -13,7 +13,8 @@ public sealed record RestaurantWorkflowSettings(
     bool KotSoundEnabled,
     int KitchenWarningMinutes,
     int KitchenLateMinutes,
-    bool RequireManagerApprovalForPostKotVoid)
+    bool RequireManagerApprovalForPostKotVoid,
+    string NegativeStockPolicy)
 {
     public static RestaurantWorkflowSettings Defaults { get; } = new(
         KitchenQueueEnabled: true,
@@ -23,7 +24,8 @@ public sealed record RestaurantWorkflowSettings(
         KotSoundEnabled: true,
         KitchenWarningMinutes: 10,
         KitchenLateMinutes: 20,
-        RequireManagerApprovalForPostKotVoid: true);
+        RequireManagerApprovalForPostKotVoid: false,
+        NegativeStockPolicy: "block");
 }
 
 public sealed record RestaurantWorkflowSettingsUpdate(
@@ -34,7 +36,8 @@ public sealed record RestaurantWorkflowSettingsUpdate(
     bool KotSoundEnabled,
     int KitchenWarningMinutes,
     int KitchenLateMinutes,
-    bool RequireManagerApprovalForPostKotVoid);
+    bool RequireManagerApprovalForPostKotVoid,
+    string NegativeStockPolicy = "block");
 
 public sealed class LocalRestaurantSettingsService
 {
@@ -45,7 +48,9 @@ public sealed class LocalRestaurantSettingsService
     public const string KotSoundEnabledKey = "kot_sound_enabled";
     public const string KitchenWarningMinutesKey = "kitchen_warning_minutes";
     public const string KitchenLateMinutesKey = "kitchen_late_minutes";
-    public const string RequireManagerVoidApprovalKey = "require_manager_approval_for_post_kot_void";
+    public const string RequireManagerVoidApprovalKey = "require_manager_approval_post_kot_void";
+    public const string LegacyRequireManagerVoidApprovalKey = "require_manager_approval_for_post_kot_void";
+    public const string NegativeStockPolicyKey = "negative_stock_policy";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
@@ -79,7 +84,12 @@ public sealed class LocalRestaurantSettingsService
             Bool(values, KotSoundEnabledKey, defaults.KotSoundEnabled),
             Int(values, KitchenWarningMinutesKey, defaults.KitchenWarningMinutes, 1, 240),
             Int(values, KitchenLateMinutesKey, defaults.KitchenLateMinutes, 1, 480),
-            Bool(values, RequireManagerVoidApprovalKey, defaults.RequireManagerApprovalForPostKotVoid));
+            BoolWithLegacy(
+                values,
+                RequireManagerVoidApprovalKey,
+                LegacyRequireManagerVoidApprovalKey,
+                defaults.RequireManagerApprovalForPostKotVoid),
+            StockPolicy(values, NegativeStockPolicyKey, defaults.NegativeStockPolicy));
     }
 
     public async Task<RestaurantWorkflowSettings> UpdateAsync(
@@ -102,6 +112,8 @@ public sealed class LocalRestaurantSettingsService
                 "Kitchen late minutes must be at least the warning threshold and no more than 480.");
         }
 
+        var negativeStockPolicy = NormalizeStockPolicy(update.NegativeStockPolicy);
+
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -115,6 +127,15 @@ public sealed class LocalRestaurantSettingsService
         await UpsertAsync(db, KitchenWarningMinutesKey, update.KitchenWarningMinutes.ToString(CultureInfo.InvariantCulture), now, cancellationToken);
         await UpsertAsync(db, KitchenLateMinutesKey, update.KitchenLateMinutes.ToString(CultureInfo.InvariantCulture), now, cancellationToken);
         await UpsertAsync(db, RequireManagerVoidApprovalKey, update.RequireManagerApprovalForPostKotVoid ? "true" : "false", now, cancellationToken);
+        await UpsertAsync(db, NegativeStockPolicyKey, negativeStockPolicy, now, cancellationToken);
+
+        var legacy = await db.RestaurantSettings.SingleOrDefaultAsync(
+            value => value.Key == LegacyRequireManagerVoidApprovalKey,
+            cancellationToken);
+        if (legacy is not null)
+        {
+            db.RestaurantSettings.Remove(legacy);
+        }
 
         var snapshot = await GetAsync(db, cancellationToken);
         db.Changes.Add(new LocalChange
@@ -160,7 +181,8 @@ public sealed class LocalRestaurantSettingsService
         kot_sound_enabled = settings.KotSoundEnabled,
         kitchen_warning_minutes = settings.KitchenWarningMinutes,
         kitchen_late_minutes = settings.KitchenLateMinutes,
-        require_manager_approval_for_post_kot_void = settings.RequireManagerApprovalForPostKotVoid,
+        require_manager_approval_post_kot_void = settings.RequireManagerApprovalForPostKotVoid,
+        negative_stock_policy = settings.NegativeStockPolicy,
     };
 
     private static async Task UpsertAsync(
@@ -191,6 +213,44 @@ public sealed class LocalRestaurantSettingsService
 
     private static bool Bool(IReadOnlyDictionary<string, string> values, string key, bool fallback) =>
         values.TryGetValue(key, out var raw) && bool.TryParse(raw, out var value) ? value : fallback;
+
+    private static bool BoolWithLegacy(
+        IReadOnlyDictionary<string, string> values,
+        string key,
+        string legacyKey,
+        bool fallback)
+    {
+        if (values.TryGetValue(key, out var raw) && bool.TryParse(raw, out var value))
+        {
+            return value;
+        }
+
+        return values.TryGetValue(legacyKey, out var legacyRaw) &&
+               bool.TryParse(legacyRaw, out var legacyValue)
+            ? legacyValue
+            : fallback;
+    }
+
+    private static string StockPolicy(
+        IReadOnlyDictionary<string, string> values,
+        string key,
+        string fallback) =>
+        values.TryGetValue(key, out var raw)
+            ? NormalizeStockPolicy(raw)
+            : fallback;
+
+    public static string NormalizeStockPolicy(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        if (normalized is "block" or "warn" or "allow")
+        {
+            return normalized;
+        }
+
+        throw new LocalSyncConflictException(
+            "invalid_payload",
+            "negative_stock_policy must be block, warn or allow.");
+    }
 
     private static int Int(
         IReadOnlyDictionary<string, string> values,

@@ -1254,8 +1254,15 @@ public sealed class CloudReconciliationService
             ["kot_sound_enabled"] = Bool(payload, "kot_sound_enabled", true) ? "true" : "false",
             ["kitchen_warning_minutes"] = Math.Clamp(Int(payload, "kitchen_warning_minutes", 10), 1, 240).ToString(),
             ["kitchen_late_minutes"] = Math.Clamp(Int(payload, "kitchen_late_minutes", 20), 1, 480).ToString(),
-            ["require_manager_approval_for_post_kot_void"] =
-                Bool(payload, "require_manager_approval_for_post_kot_void", true) ? "true" : "false",
+            ["require_manager_approval_post_kot_void"] =
+                Bool(
+                    payload,
+                    "require_manager_approval_post_kot_void",
+                    Bool(payload, "require_manager_approval_for_post_kot_void", false))
+                    ? "true"
+                    : "false",
+            ["negative_stock_policy"] = NormalizeNegativeStockPolicy(
+                String(payload, "negative_stock_policy") ?? "block"),
         };
 
         var warning = int.Parse(defaults["kitchen_warning_minutes"]);
@@ -1298,8 +1305,9 @@ public sealed class CloudReconciliationService
             kot_sound_enabled = defaults["kot_sound_enabled"] == "true",
             kitchen_warning_minutes = int.Parse(defaults["kitchen_warning_minutes"]),
             kitchen_late_minutes = int.Parse(defaults["kitchen_late_minutes"]),
-            require_manager_approval_for_post_kot_void =
-                defaults["require_manager_approval_for_post_kot_void"] == "true",
+            require_manager_approval_post_kot_void =
+                defaults["require_manager_approval_post_kot_void"] == "true",
+            negative_stock_policy = defaults["negative_stock_policy"],
         });
     }
 
@@ -1401,6 +1409,14 @@ public sealed class CloudReconciliationService
             Status = "open",
             CreatedAtUtc = DateTimeOffset.UtcNow,
         });
+    }
+
+    private static string NormalizeNegativeStockPolicy(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "block" or "warn" or "allow"
+            ? normalized
+            : "block";
     }
 
     private static string? String(JsonElement element, string name)
