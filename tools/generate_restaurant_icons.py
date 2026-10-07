@@ -146,18 +146,22 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--desktop", action="store_true")
-    parser.add_argument("--mobile", action="store_true")
+    parser.add_argument("--mobile", action="store_true", help="Generate both Android and iOS icons.")
+    parser.add_argument("--android", action="store_true")
+    parser.add_argument("--ios", action="store_true")
     args = parser.parse_args()
 
     root = Path(args.repo_root).resolve()
-    if not args.desktop and not args.mobile:
+    if not any((args.desktop, args.mobile, args.android, args.ios)):
         args.desktop = args.mobile = True
 
     if args.desktop:
         save_desktop(root)
-    if args.mobile:
-        mobile = root / "mobile"
+
+    mobile = root / "mobile"
+    if args.mobile or args.android:
         save_android(mobile)
+    if args.mobile or args.ios:
         save_ios(mobile)
 
 
