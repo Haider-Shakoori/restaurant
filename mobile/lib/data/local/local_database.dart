@@ -64,7 +64,7 @@ class LocalDatabase implements SyncStore {
             local_order_id TEXT PRIMARY KEY,
             client_order_id TEXT,
             server_id TEXT,
-            table_id TEXT NOT NULL,
+            table_id TEXT,
             branch_id TEXT,
             service_type TEXT NOT NULL DEFAULT 'dine_in',
             service_reference TEXT,
@@ -437,6 +437,14 @@ class LocalDatabase implements SyncStore {
     );
   }
 
+  Future<bool> hasUnsentItems(String localOrderId) async {
+    final rows = await _db.rawQuery(
+      'SELECT COUNT(*) AS total FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity',
+      <Object?>[localOrderId],
+    );
+    return ((rows.first['total'] as num?)?.toInt() ?? 0) > 0;
+  }
+
   Future<int> pendingCount() async {
     final rows = await _db.rawQuery(
       "SELECT COUNT(*) AS total FROM outbox WHERE status = 'pending'",
@@ -514,8 +522,20 @@ class LocalDatabase implements SyncStore {
         limit: 1,
       );
 
-      if (orderRows.isEmpty || orderRows.first['status'] != 'draft') {
-        throw StateError('Only local draft orders can be edited.');
+      const editableStatuses = <String>{
+        'draft',
+        'submitted',
+        'submitted_pending_sync',
+        'preparing',
+        'ready',
+        'served',
+      };
+      final status = orderRows.isEmpty
+          ? null
+          : orderRows.first['status']?.toString();
+
+      if (status == null || !editableStatuses.contains(status)) {
+        throw StateError('This order can no longer receive new items.');
       }
 
       final unitPrice = menuItem['price']!.toString();
@@ -531,6 +551,7 @@ class LocalDatabase implements SyncStore {
           'item_name': menuItem['name']!.toString(),
           'unit_price': unitPrice,
           'quantity': quantity,
+          'dispatched_quantity': 0,
           'line_total': lineTotal,
           'notes': notes,
           'status': 'pending',
@@ -579,27 +600,32 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
-      final count = Sqflite.firstIntValue(
+      final unsentCount = Sqflite.firstIntValue(
             await txn.rawQuery(
-              'SELECT COUNT(*) FROM order_items WHERE local_order_id = ?',
+              'SELECT COUNT(*) FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity',
               <Object?>[localOrderId],
             ),
           ) ??
           0;
 
-      if (count < 1) {
-        throw StateError('Add at least one item before submitting.');
+      if (unsentCount < 1) {
+        throw StateError('There are no new items to send to Kitchen.');
       }
 
+      final now = DateTime.now().toUtc().toIso8601String();
       await txn.update(
         'orders',
         <String, Object?>{
           'status': 'submitted_pending_sync',
-          'submitted_at': DateTime.now().toUtc().toIso8601String(),
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
+          'submitted_at': now,
+          'updated_at': now,
         },
-        where: 'local_order_id = ? AND status = ?',
-        whereArgs: <Object?>[localOrderId, 'draft'],
+        where: "local_order_id = ? AND status NOT IN ('closed', 'cancelled')",
+        whereArgs: <Object?>[localOrderId],
+      );
+      await txn.rawUpdate(
+        "UPDATE order_items SET dispatched_quantity = quantity, status = 'submitted_pending_sync' WHERE local_order_id = ? AND dispatched_quantity < quantity",
+        <Object?>[localOrderId],
       );
 
       await _enqueue(
@@ -780,9 +806,10 @@ class LocalDatabase implements SyncStore {
     final localId = clientId == null || clientId.isEmpty
         ? 'server:$serverId'
         : clientId;
-    final table = Map<String, Object?>.from(
-      order['table']! as Map<Object?, Object?>,
-    );
+    final rawTable = order['table'];
+    final table = rawTable is Map<Object?, Object?>
+        ? Map<String, Object?>.from(rawTable)
+        : null;
 
     await txn.insert(
       'orders',
@@ -790,7 +817,7 @@ class LocalDatabase implements SyncStore {
         'local_order_id': localId,
         'client_order_id': clientId,
         'server_id': serverId,
-        'table_id': table['id']!.toString(),
+        'table_id': table?['id']?.toString(),
         'branch_id': order['branch_id']?.toString(),
         'service_type': order['service_type']?.toString() ?? 'dine_in',
         'service_reference': order['service_reference']?.toString(),
