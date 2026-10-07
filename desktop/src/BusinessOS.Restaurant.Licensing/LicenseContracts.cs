@@ -10,18 +10,6 @@ public sealed record LicenseActivationRequest(
     [property: JsonPropertyName("app_version")] string? AppVersion,
     [property: JsonPropertyName("platform")] string Platform = "windows");
 
-
-public sealed record DesktopLicenseResolveRequest(
-    [property: JsonPropertyName("license_key")] string LicenseKey);
-
-public sealed record ResolvedDesktopLicense(
-    [property: JsonPropertyName("version")] int Version,
-    [property: JsonPropertyName("last4")] string Last4);
-
-public sealed record DesktopLicenseResolveResponse(
-    [property: JsonPropertyName("tenant_base_url")] string TenantBaseUrl,
-    [property: JsonPropertyName("license")] ResolvedDesktopLicense License);
-
 public sealed record LeaseRefreshRequest(
     [property: JsonPropertyName("app_version")] string? AppVersion);
 
