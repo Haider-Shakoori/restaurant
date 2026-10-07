@@ -182,6 +182,27 @@ class TenantWebPortalTest extends TestCase
             $this->assertSame(DiningTable::STATUS_OCCUPIED, $table->fresh()->status);
             $this->assertSame(1, KitchenTicket::query()->count());
             $this->assertSame('Kabuli Pulao', $order->kitchenTickets->first()->items->first()->item_name);
+            $productionItemId = $order->kitchenTickets->first()->items->first()->id;
+        } finally {
+            tenancy()->end();
+        }
+
+        $this->post("http://{$domain}/kitchen/items/{$productionItemId}/start")
+            ->assertRedirect('/kitchen')
+            ->assertSessionHas('status', 'Kitchen item started.');
+
+        $this->post("http://{$domain}/kitchen/items/{$productionItemId}/ready")
+            ->assertRedirect('/kitchen')
+            ->assertSessionHas('status', 'Kitchen item marked ready.');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $this->assertSame(
+                KitchenTicket::STATUS_READY,
+                KitchenTicket::query()->sole()->status,
+            );
+            $this->assertSame(Order::STATUS_READY, Order::query()->sole()->status);
         } finally {
             tenancy()->end();
         }
