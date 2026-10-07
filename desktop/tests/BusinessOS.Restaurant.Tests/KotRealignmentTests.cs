@@ -1162,6 +1162,226 @@ public sealed class KotRealignmentTests
         }
     }
 
+    [Fact]
+    public async Task Desktop_golden_path_handles_two_kot_rounds_inventory_serve_bill_and_payment()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN-GOLDEN",
+                    "Chicken Golden",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-GOLDEN",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            var cashier = new LocalCashierService(factory, inventory);
+
+            await PushOneAsync(sync, Waiter(), "OPEN-GOLDEN", "order.open", new
+            {
+                client_order_id = "ORDER-GOLDEN",
+                dining_table_id = "table-1",
+                guest_count = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-GOLDEN-1", "order.item.add", new
+            {
+                client_order_id = "ORDER-GOLDEN",
+                client_line_id = "GOLDEN-LINE-1",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-GOLDEN-1", "order.kot.send", new
+            {
+                client_order_id = "ORDER-GOLDEN",
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-GOLDEN-2", "order.item.add", new
+            {
+                client_order_id = "ORDER-GOLDEN",
+                client_line_id = "GOLDEN-LINE-2",
+                menu_item_id = "item-general",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-GOLDEN-2", "order.kot.send", new
+            {
+                client_order_id = "ORDER-GOLDEN",
+            });
+
+            string orderId;
+            string[] ticketIds;
+            await using (var db = factory.Create())
+            {
+                orderId = (await db.Orders.SingleAsync(x => x.ClientOrderId == "ORDER-GOLDEN")).Id;
+                ticketIds = await db.KitchenTickets
+                    .OrderBy(x => x.RoundNumber)
+                    .Select(x => x.Id)
+                    .ToArrayAsync();
+                Assert.Equal(2, await db.KotRounds.CountAsync());
+                Assert.Equal(2, ticketIds.Length);
+            }
+
+            foreach (var ticketId in ticketIds)
+            {
+                await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+                await kitchen.ReadyAsync(ticketId, Kitchen(), CancellationToken.None);
+            }
+
+            string sessionId;
+            await cashier.OpenSessionAsync(
+                "branch-1",
+                100m,
+                Manager(),
+                CancellationToken.None);
+            await using (var db = factory.Create())
+            {
+                sessionId = (await db.CashierSessions.SingleAsync()).Id;
+                Assert.Equal("ready", (await db.Orders.SingleAsync(x => x.Id == orderId)).Status);
+            }
+
+            await cashier.ServeOrderAsync(orderId, Manager(), CancellationToken.None);
+            await cashier.CreateBillAsync(orderId, Manager(), CancellationToken.None);
+
+            string billId;
+            decimal billTotal;
+            await using (var db = factory.Create())
+            {
+                var bill = await db.Bills.SingleAsync(x => x.OrderId == orderId);
+                billId = bill.Id;
+                billTotal = bill.Total;
+                Assert.Equal(470m, billTotal);
+                Assert.Equal(2, await db.BillLines.CountAsync());
+            }
+
+            await cashier.AddPaymentAsync(
+                billId,
+                new LocalPaymentRequest(
+                    sessionId,
+                    billTotal,
+                    "cash",
+                    "PAY-GOLDEN"),
+                Manager(),
+                CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            Assert.Equal("closed", (await finalDb.Orders.SingleAsync(x => x.Id == orderId)).Status);
+            Assert.Equal("available", (await finalDb.DiningTables.SingleAsync(x => x.Id == "table-1")).Status);
+            Assert.Equal("paid", (await finalDb.Bills.SingleAsync()).Status);
+            Assert.Single(await finalDb.Payments.ToArrayAsync());
+            Assert.Equal(750m, (await finalDb.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Single(await finalDb.InventoryConsumptions.ToArrayAsync());
+            Assert.Equal(2, await finalDb.KotRounds.CountAsync());
+            Assert.Equal(2, await finalDb.KitchenTickets.CountAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Takeaway_golden_path_settles_without_creating_or_releasing_a_fake_table()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            var cashier = new LocalCashierService(factory);
+
+            await PushOneAsync(sync, Waiter(), "OPEN-TAKE-GOLDEN", "order.open", new
+            {
+                client_order_id = "TAKE-GOLDEN",
+                branch_id = "branch-1",
+                service_type = "takeaway",
+                service_reference = "Pickup 42",
+                guest_count = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-TAKE-GOLDEN", "order.item.add", new
+            {
+                client_order_id = "TAKE-GOLDEN",
+                client_line_id = "TAKE-LINE",
+                menu_item_id = "item-general",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-TAKE-GOLDEN", "order.kot.send", new
+            {
+                client_order_id = "TAKE-GOLDEN",
+            });
+
+            string orderId;
+            string ticketId;
+            await using (var db = factory.Create())
+            {
+                orderId = (await db.Orders.SingleAsync()).Id;
+                ticketId = (await db.KitchenTickets.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyAsync(ticketId, Kitchen(), CancellationToken.None);
+            await cashier.ServeOrderAsync(orderId, Manager(), CancellationToken.None);
+            await cashier.OpenSessionAsync("branch-1", 0m, Manager(), CancellationToken.None);
+            await cashier.CreateBillAsync(orderId, Manager(), CancellationToken.None);
+
+            string billId;
+            string sessionId;
+            decimal total;
+            await using (var db = factory.Create())
+            {
+                var bill = await db.Bills.SingleAsync();
+                billId = bill.Id;
+                total = bill.Total;
+                sessionId = (await db.CashierSessions.SingleAsync()).Id;
+            }
+
+            await cashier.AddPaymentAsync(
+                billId,
+                new LocalPaymentRequest(sessionId, total, "cash", "PAY-TAKE-GOLDEN"),
+                Manager(),
+                CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            var order = await finalDb.Orders.SingleAsync();
+            Assert.Equal("takeaway", order.ServiceType);
+            Assert.Equal(string.Empty, order.DiningTableId);
+            Assert.Equal("closed", order.Status);
+            Assert.All(await finalDb.DiningTables.ToArrayAsync(), table => Assert.Equal("available", table.Status));
+            Assert.Equal("paid", (await finalDb.Bills.SingleAsync()).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
