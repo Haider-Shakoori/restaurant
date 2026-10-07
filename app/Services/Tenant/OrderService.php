@@ -40,6 +40,7 @@ class OrderService
                     'seat_number' => $line['seat_number'] ?? null,
                     'course_number' => $line['course_number'] ?? null,
                     'course_name' => $line['course_name'] ?? null,
+                    'hold_for_course' => $line['hold_for_course'] ?? false,
                     'modifiers' => $line['modifiers'] ?? [],
                     'allergy_instructions' => $line['allergy_instructions'] ?? null,
                     'kitchen_instructions' => $line['kitchen_instructions'] ?? null,
