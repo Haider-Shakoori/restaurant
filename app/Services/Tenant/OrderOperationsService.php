@@ -84,6 +84,7 @@ class OrderOperationsService
             $target,
             $actor,
             $quantity,
+            $targetClientLineId,
         ): array {
             $source = Order::query()->lockForUpdate()->findOrFail($source->getKey());
             $target = Order::query()->lockForUpdate()->findOrFail($target->getKey());
