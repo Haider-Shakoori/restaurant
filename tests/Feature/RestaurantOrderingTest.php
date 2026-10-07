@@ -6,6 +6,8 @@ use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
+use App\Models\MenuModifierGroup;
+use App\Models\MenuModifierOption;
 use App\Models\Order;
 use App\Models\RestaurantBranch;
 use App\Models\Tenant;
@@ -161,6 +163,64 @@ class RestaurantOrderingTest extends TestCase
         $this->assertSame(Order::STATUS_SUBMITTED, $retry->status);
         $this->assertNotNull($retry->submitted_at);
         $this->assertSame(3, $retry->events()->count());
+    }
+
+    public function test_takeaway_order_and_structured_modifiers_preserve_shared_kitchen_context(): void
+    {
+        $tenant = $this->createTenant('restaurant-context', 'context.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $menuItem] = $this->seedFloor('100.00');
+        $branch = $table->diningArea->branch;
+
+        $group = MenuModifierGroup::query()->create([
+            'name' => 'Size',
+            'min_selections' => 1,
+            'max_selections' => 1,
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        $option = MenuModifierOption::query()->create([
+            'menu_modifier_group_id' => $group->id,
+            'name' => 'Large',
+            'price_delta' => '25.00',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        $menuItem->modifierGroups()->attach($group->id, ['sort_order' => 1]);
+
+        $service = app(OrderService::class);
+        $order = $service->open($waiter, [
+            'client_order_id' => '01TAKEAWAYCONTEXT000000000001',
+            'branch_id' => $branch->id,
+            'service_type' => Order::SERVICE_TAKEAWAY,
+            'service_reference' => 'TA-42',
+            'guest_count' => 1,
+        ]);
+
+        $line = $service->addItem($order, $waiter, [
+            'client_line_id' => '01CONTEXTLINE0000000000000001',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 2,
+            'seat_number' => 3,
+            'course_number' => 2,
+            'course_name' => 'Main',
+            'modifiers' => [['option_id' => $option->id]],
+            'allergy_instructions' => 'Peanut allergy',
+            'kitchen_instructions' => 'Sauce on side',
+        ]);
+
+        $this->assertNull($order->dining_table_id);
+        $this->assertSame($branch->id, $order->branch_id);
+        $this->assertSame(Order::SERVICE_TAKEAWAY, $order->service_type);
+        $this->assertSame('TA-42', $order->service_reference);
+        $this->assertSame('125.00', $line->unit_price);
+        $this->assertSame('250.00', $line->line_total);
+        $this->assertSame(3, $line->seat_number);
+        $this->assertSame(2, $line->course_number);
+        $this->assertSame('Large', $line->modifiers_snapshot[0]['options'][0]['option_name']);
+        $this->assertSame('Peanut allergy', $line->allergy_instructions);
+        $this->assertSame('Sauce on side', $line->kitchen_instructions);
     }
 
     /**
