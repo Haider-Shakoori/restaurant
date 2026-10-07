@@ -681,13 +681,14 @@ public sealed class LocalSyncService
                 "Courses cannot be fired after the order is financially closed or cancelled.");
         }
 
-        var heldItems = await db.OrderItems
-            .Where(value =>
-                value.OrderId == order.Id &&
-                value.Status == "held" &&
-                value.CourseNumber == courseNumber)
+        var heldItems = (await db.OrderItems
+                .Where(value =>
+                    value.OrderId == order.Id &&
+                    value.Status == "held" &&
+                    value.CourseNumber == courseNumber)
+                .ToArrayAsync(cancellationToken))
             .OrderBy(value => value.CreatedAtUtc)
-            .ToArrayAsync(cancellationToken);
+            .ToArray();
 
         if (heldItems.Length == 0)
         {

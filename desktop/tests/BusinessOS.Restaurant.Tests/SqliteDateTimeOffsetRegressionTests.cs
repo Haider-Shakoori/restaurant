@@ -14,6 +14,10 @@ public sealed class SqliteDateTimeOffsetRegressionTests
             root, "desktop", "src", "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
         var expenses = File.ReadAllText(Path.Combine(
             root, "desktop", "src", "BusinessOS.Restaurant.LocalServer", "LocalExpenseService.cs"));
+        var kitchen = File.ReadAllText(Path.Combine(
+            root, "desktop", "src", "BusinessOS.Restaurant.LocalServer", "LocalKitchenService.cs"));
+        var sync = File.ReadAllText(Path.Combine(
+            root, "desktop", "src", "BusinessOS.Restaurant.LocalServer", "LocalSyncService.cs"));
 
         Assert.DoesNotContain("orderby ticket.QueuedAt", pages, StringComparison.Ordinal);
         Assert.DoesNotContain("orderby ticket.QueuedAt", actions, StringComparison.Ordinal);
@@ -55,6 +59,19 @@ public sealed class SqliteDateTimeOffsetRegressionTests
         Assert.DoesNotContain(
             "q.OrderByDescending(x => x.ExpenseDate).ThenByDescending(x => x.RecordedAtUtc)",
             expenses,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain(
+            ".Where(value => value.KotRoundId == existingRound.Id)\n                .OrderBy(value => value.QueuedAt)",
+            kitchen,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            ".OrderBy(value => value.RoundNumber)\n            .ThenBy(value => value.QueuedAt)\n            .AsNoTracking()",
+            kitchen,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            ".Where(value =>\n                value.OrderId == order.Id &&\n                value.Status == \"held\" &&\n                value.CourseNumber == courseNumber)\n            .OrderBy(value => value.CreatedAtUtc)",
+            sync,
             StringComparison.Ordinal);
     }
 

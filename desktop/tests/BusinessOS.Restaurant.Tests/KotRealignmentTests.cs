@@ -46,7 +46,9 @@ public sealed class KotRealignmentTests
 
             await using var db = factory.Create();
             var rounds = await db.KotRounds.OrderBy(x => x.RoundNumber).ToArrayAsync();
-            var orderItems = await db.OrderItems.OrderBy(x => x.CreatedAtUtc).ToArrayAsync();
+            var orderItems = (await db.OrderItems.ToArrayAsync())
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToArray();
             var kitchenItems = await db.KitchenTicketItems.ToArrayAsync();
 
             Assert.Equal(2, rounds.Length);
@@ -703,6 +705,21 @@ public sealed class KotRealignmentTests
                 Manager(),
                 CancellationToken.None);
 
+            var settings = new LocalRestaurantSettingsService(factory);
+            await settings.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: true,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: false,
+                    CoursesEnabled: false,
+                    KotSoundEnabled: false,
+                    KitchenWarningMinutes: 10,
+                    KitchenLateMinutes: 20,
+                    RequireManagerApprovalForPostKotVoid: true,
+                    NegativeStockPolicy: "block"),
+                Manager(),
+                CancellationToken.None);
+
             var kitchen = new LocalKitchenService(factory, inventory);
             var sync = new LocalSyncService(factory, catalog, kitchen);
             await OpenAsync(sync);
@@ -970,7 +987,9 @@ public sealed class KotRealignmentTests
                 CancellationToken.None);
 
             await using var finalDb = factory.Create();
-            var orders = await finalDb.Orders.OrderBy(x => x.CreatedAtUtc).ToArrayAsync();
+            var orders = (await finalDb.Orders.ToArrayAsync())
+                .OrderBy(x => x.CreatedAtUtc)
+                .ToArray();
             Assert.Equal(2, orders.Length);
             Assert.Equal(sourceOrderId, (await finalDb.OrderItems.SingleAsync(x => x.ClientLineId == "LINE-1")).OrderId);
             Assert.NotEqual(sourceOrderId, (await finalDb.OrderItems.SingleAsync(x => x.ItemName == "Salad")).OrderId);

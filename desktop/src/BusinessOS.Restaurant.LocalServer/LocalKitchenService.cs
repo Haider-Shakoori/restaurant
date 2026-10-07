@@ -833,10 +833,11 @@ public sealed class LocalKitchenService
 
         if (existingRound is not null)
         {
-            var existingTicket = await db.KitchenTickets
-                .Where(value => value.KotRoundId == existingRound.Id)
+            var existingTicket = (await db.KitchenTickets
+                    .Where(value => value.KotRoundId == existingRound.Id)
+                    .ToArrayAsync(cancellationToken))
                 .OrderBy(value => value.QueuedAt)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FirstOrDefault();
             if (existingTicket is not null)
             {
                 return await TicketSnapshotAsync(db, existingTicket, cancellationToken);
@@ -1266,13 +1267,16 @@ public sealed class LocalKitchenService
         CancellationToken cancellationToken)
     {
         var order = await db.Orders.SingleAsync(value => value.Id == orderId, cancellationToken);
-        var itemStatuses = await db.KitchenTicketItems
-            .Where(value => db.KitchenTickets
-                .Where(ticket => ticket.OrderId == orderId)
-                .Select(ticket => ticket.Id)
-                .Contains(value.KitchenTicketId))
-            .Select(value => value.Status)
+        var ticketIds = await db.KitchenTickets
+            .Where(ticket => ticket.OrderId == orderId)
+            .Select(ticket => ticket.Id)
             .ToArrayAsync(cancellationToken);
+        var trackedItems = await db.KitchenTicketItems
+            .Where(value => ticketIds.Contains(value.KitchenTicketId))
+            .ToArrayAsync(cancellationToken);
+        var itemStatuses = trackedItems
+            .Select(value => value.Status)
+            .ToArray();
 
         if (itemStatuses.Length == 0)
         {
@@ -1309,12 +1313,13 @@ public sealed class LocalKitchenService
         LocalOrder order,
         CancellationToken cancellationToken)
     {
-        var tickets = await db.KitchenTickets
-            .Where(value => value.OrderId == order.Id)
+        var tickets = (await db.KitchenTickets
+                .Where(value => value.OrderId == order.Id)
+                .AsNoTracking()
+                .ToArrayAsync(cancellationToken))
             .OrderBy(value => value.RoundNumber)
             .ThenBy(value => value.QueuedAt)
-            .AsNoTracking()
-            .ToArrayAsync(cancellationToken);
+            .ToArray();
 
         var ticketSnapshots = new List<object>(tickets.Length);
         foreach (var ticket in tickets)
@@ -1505,14 +1510,25 @@ public sealed class LocalKitchenService
         builder.AppendLine($"KOT: {ticket.KotNumber ?? ticket.TicketNumber}");
         builder.AppendLine($"ROUND: {ticket.RoundNumber}");
         builder.AppendLine($"STATION: {station.Name}");
-        builder.AppendLine(order.ServiceType switch
+        if (string.Equals(order.ServiceType, "takeaway", StringComparison.Ordinal))
         {
-            "takeaway" => $"TAKEAWAY: {order.ServiceReference ?? order.ClientOrderId}",
-            "delivery" => $"DELIVERY: {order.ServiceReference ?? order.ClientOrderId}",
-            "counter" => $"COUNTER: {order.ServiceReference ?? order.ClientOrderId}",
-            _ when table is not null => $"DINE-IN: {table.Name} ({table.Code})",
-            _ => "DINE-IN",
-        });
+            builder.AppendLine($"TAKEAWAY: {order.ServiceReference ?? order.ClientOrderId}");
+        }
+        else if (string.Equals(order.ServiceType, "delivery", StringComparison.Ordinal))
+        {
+            builder.AppendLine($"DELIVERY: {order.ServiceReference ?? order.ClientOrderId}");
+        }
+        else if (string.Equals(order.ServiceType, "counter", StringComparison.Ordinal))
+        {
+            builder.AppendLine($"COUNTER: {order.ServiceReference ?? order.ClientOrderId}");
+        }
+        else
+        {
+            builder.AppendLine("SERVICE: DINE-IN");
+            builder.AppendLine(table is not null
+                ? $"TABLE: {table.Name} ({table.Code})"
+                : "TABLE: Unassigned");
+        }
         builder.AppendLine($"WAITER: {order.WaiterName}");
         builder.AppendLine($"PRIORITY: {ticket.Priority.ToUpperInvariant()}");
         builder.AppendLine($"TIME: {ticket.QueuedAt:yyyy-MM-dd HH:mm:ss}");
