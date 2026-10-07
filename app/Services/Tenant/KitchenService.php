@@ -5,6 +5,8 @@ namespace App\Services\Tenant;
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
 use App\Models\KitchenTicketItem;
+use App\Models\InventoryReservation;
+use App\Models\ProductionWasteEvent;
 use App\Models\KotDispatchRound;
 use App\Models\MenuItemKitchenRoute;
 use App\Models\Order;
@@ -375,6 +377,310 @@ class KitchenService
             KitchenTicketItem::STATUS_READY,
             'kot.item.ready',
         );
+    }
+
+
+    public function voidItem(
+        KitchenTicketItem $item,
+        TenantUser $actor,
+        string $reason,
+    ): KitchenTicketItem {
+        return DB::connection('tenant')->transaction(function () use ($item, $actor, $reason): KitchenTicketItem {
+            $item = KitchenTicketItem::query()
+                ->with(['ticket.order.branch', 'ticket.order.table.diningArea.branch', 'ticket.round'])
+                ->lockForUpdate()
+                ->findOrFail($item->getKey());
+
+            if ($item->status === KitchenTicketItem::STATUS_VOIDED) {
+                return $item;
+            }
+
+            $settings = $this->workflowForTicket($item->ticket);
+
+            if (
+                ($settings['require_manager_approval_post_kot_void'] ?? false)
+                && ! in_array($actor->role, ['owner', 'admin', 'manager'], true)
+            ) {
+                throw ValidationException::withMessages([
+                    'approval' => 'Manager approval is required to void dispatched kitchen production.',
+                ]);
+            }
+
+            $reservation = InventoryReservation::query()
+                ->where('kitchen_ticket_item_id', $item->id)
+                ->first();
+
+            if ($reservation?->status === InventoryReservation::STATUS_RESERVED) {
+                $this->inventory->releaseProduction($item, $actor);
+            }
+
+            $from = $item->status;
+            $item->update([
+                'status' => KitchenTicketItem::STATUS_VOIDED,
+                'void_reason' => $reason,
+                'voided_by_user_id' => $actor->getKey(),
+                'voided_at' => now(),
+            ]);
+
+            $this->event(
+                $item->ticket,
+                $actor,
+                'kot.item.voided',
+                $from,
+                KitchenTicketItem::STATUS_VOIDED,
+                [
+                    'kitchen_ticket_item_id' => $item->id,
+                    'reason' => $reason,
+                    'inventory_committed' => $reservation?->status === InventoryReservation::STATUS_COMMITTED,
+                ],
+            );
+
+            $this->synchronizeTicketFromItems($item->ticket, $actor);
+            $this->synchronizeOrderStatus($item->ticket->order, $actor);
+
+            return $item->fresh(['ticket.station', 'ticket.round']);
+        });
+    }
+
+    public function refireItem(
+        KitchenTicketItem $item,
+        TenantUser $actor,
+        string $reason,
+        string $operationId,
+    ): KitchenTicketItem {
+        return DB::connection('tenant')->transaction(function () use ($item, $actor, $reason, $operationId): KitchenTicketItem {
+            $existing = KitchenTicketItem::query()
+                ->where('client_operation_id', $operationId)
+                ->first();
+
+            if ($existing) {
+                return $existing->load(['ticket.station', 'ticket.round']);
+            }
+
+            $item = KitchenTicketItem::query()
+                ->with([
+                    'ticket.order.branch',
+                    'ticket.order.table.diningArea.branch',
+                    'ticket.round',
+                    'ticket.station',
+                ])
+                ->lockForUpdate()
+                ->findOrFail($item->getKey());
+
+            if (! in_array($item->status, [
+                KitchenTicketItem::STATUS_READY,
+                KitchenTicketItem::STATUS_COMPLETED,
+                KitchenTicketItem::STATUS_VOIDED,
+            ], true)) {
+                throw ValidationException::withMessages([
+                    'item' => 'Only ready, completed or voided production can be re-fired.',
+                ]);
+            }
+
+            $order = $item->ticket->order;
+
+            if (! in_array($order->status, Order::EDITABLE_STATUSES, true)) {
+                throw ValidationException::withMessages([
+                    'order' => 'This order can no longer receive a re-fire.',
+                ]);
+            }
+
+            $branchId = $order->branch_id ?? $order->table?->diningArea?->branch_id;
+            $workflow = $this->settings->all($branchId);
+            $initialState = $workflow['kitchen_queue_enabled']
+                ? KitchenTicketItem::STATUS_QUEUED
+                : KitchenTicketItem::STATUS_ACTIVE;
+
+            $round = KotDispatchRound::query()->create([
+                'order_id' => $order->id,
+                'sequence' => ((int) $order->kotRounds()->max('sequence')) + 1,
+                'submitted_by_user_id' => $actor->getKey(),
+                'client_mutation_id' => $operationId,
+                'kot_number' => $this->kotNumbers->next($branchId),
+                'priority' => $item->ticket->round?->priority ?? 'normal',
+                'workflow_snapshot' => [
+                    'kitchen_queue_enabled' => (bool) $workflow['kitchen_queue_enabled'],
+                    'preparing_stage_enabled' => (bool) $workflow['preparing_stage_enabled'],
+                    'expo_enabled' => (bool) $workflow['expo_enabled'],
+                    'courses_enabled' => (bool) $workflow['courses_enabled'],
+                    'kitchen_warning_minutes' => (int) $workflow['kitchen_warning_minutes'],
+                    'kitchen_late_minutes' => (int) $workflow['kitchen_late_minutes'],
+                ],
+                'sent_at' => now(),
+            ]);
+
+            $ticket = $order->kitchenTickets()->create([
+                'kot_dispatch_round_id' => $round->id,
+                'kitchen_station_id' => $item->ticket->kitchen_station_id,
+                'submitted_by_user_id' => $actor->getKey(),
+                'ticket_number' => 'KOT-'.strtoupper((string) Str::ulid()),
+                'human_kot_number' => $round->kot_number,
+                'status' => $initialState,
+                'queued_at' => now(),
+            ]);
+
+            $refire = $ticket->items()->create([
+                'order_item_id' => $item->order_item_id,
+                'item_name' => $item->item_name,
+                'quantity' => $item->quantity,
+                'notes' => $item->notes,
+                'seat_number' => $item->seat_number,
+                'course_number' => $item->course_number,
+                'course_name' => $item->course_name,
+                'modifiers_snapshot' => $item->modifiers_snapshot,
+                'allergy_instructions' => $item->allergy_instructions,
+                'kitchen_instructions' => $item->kitchen_instructions,
+                'status' => $initialState,
+                'refire_of_kitchen_ticket_item_id' => $item->id,
+                'production_reason' => $reason,
+                'client_operation_id' => $operationId,
+            ]);
+
+            $this->inventory->reserveProduction($refire, $actor);
+
+            if (! $workflow['kitchen_queue_enabled'] && ! $workflow['preparing_stage_enabled']) {
+                $this->inventory->commitProduction($refire, $actor);
+            }
+
+            if (in_array($order->status, [
+                Order::STATUS_READY,
+                Order::STATUS_SERVED,
+            ], true)) {
+                $fromOrder = $order->status;
+                $order->update(['status' => Order::STATUS_SUBMITTED]);
+                $order->events()->create([
+                    'actor_user_id' => $actor->getKey(),
+                    'event_type' => 'order.reopened_for_refire',
+                    'from_status' => $fromOrder,
+                    'to_status' => Order::STATUS_SUBMITTED,
+                    'payload' => [
+                        'original_kitchen_ticket_item_id' => $item->id,
+                        'refire_kitchen_ticket_item_id' => $refire->id,
+                        'round_id' => $round->id,
+                    ],
+                    'occurred_at' => now(),
+                ]);
+            }
+
+            $this->event(
+                $ticket,
+                $actor,
+                'kot.item.refired',
+                null,
+                $initialState,
+                [
+                    'original_kitchen_ticket_item_id' => $item->id,
+                    'refire_kitchen_ticket_item_id' => $refire->id,
+                    'reason' => $reason,
+                ],
+            );
+
+            return $refire->load(['ticket.station', 'ticket.round']);
+        });
+    }
+
+    public function recallItem(
+        KitchenTicketItem $item,
+        TenantUser $actor,
+        string $reason,
+    ): KitchenTicketItem {
+        return DB::connection('tenant')->transaction(function () use ($item, $actor, $reason): KitchenTicketItem {
+            $item = KitchenTicketItem::query()
+                ->with(['ticket.order', 'ticket.round'])
+                ->lockForUpdate()
+                ->findOrFail($item->getKey());
+
+            if ($item->status !== KitchenTicketItem::STATUS_READY) {
+                throw ValidationException::withMessages([
+                    'item' => 'Only ready production can be recalled.',
+                ]);
+            }
+
+            $workflow = $this->workflowForTicket($item->ticket);
+            $to = $workflow['preparing_stage_enabled']
+                ? KitchenTicketItem::STATUS_PREPARING
+                : ($workflow['kitchen_queue_enabled']
+                    ? KitchenTicketItem::STATUS_QUEUED
+                    : KitchenTicketItem::STATUS_ACTIVE);
+
+            $item->update([
+                'status' => $to,
+                'ready_at' => null,
+                'recalled_at' => now(),
+                'recall_reason' => $reason,
+            ]);
+
+            $this->event(
+                $item->ticket,
+                $actor,
+                'kot.item.recalled',
+                KitchenTicketItem::STATUS_READY,
+                $to,
+                [
+                    'kitchen_ticket_item_id' => $item->id,
+                    'reason' => $reason,
+                ],
+            );
+
+            $this->synchronizeTicketFromItems($item->ticket, $actor);
+            $this->synchronizeOrderStatus($item->ticket->order, $actor);
+
+            return $item->fresh(['ticket.station', 'ticket.round']);
+        });
+    }
+
+    public function recordWaste(
+        KitchenTicketItem $item,
+        TenantUser $actor,
+        int $quantity,
+        string $reason,
+    ): ProductionWasteEvent {
+        return DB::connection('tenant')->transaction(function () use ($item, $actor, $quantity, $reason): ProductionWasteEvent {
+            $item = KitchenTicketItem::query()
+                ->with('ticket.order')
+                ->lockForUpdate()
+                ->findOrFail($item->getKey());
+
+            if ($quantity < 1 || $quantity > $item->quantity) {
+                throw ValidationException::withMessages([
+                    'quantity' => 'Waste quantity must be between 1 and the production quantity.',
+                ]);
+            }
+
+            $reservation = InventoryReservation::query()
+                ->where('kitchen_ticket_item_id', $item->id)
+                ->first();
+
+            if ($reservation?->status !== InventoryReservation::STATUS_COMMITTED) {
+                throw ValidationException::withMessages([
+                    'inventory' => 'Waste can only be recorded after production inventory was committed.',
+                ]);
+            }
+
+            $waste = ProductionWasteEvent::query()->create([
+                'kitchen_ticket_item_id' => $item->id,
+                'actor_user_id' => $actor->getKey(),
+                'quantity' => $quantity,
+                'reason' => $reason,
+                'occurred_at' => now(),
+            ]);
+
+            $this->event(
+                $item->ticket,
+                $actor,
+                'kot.item.waste_recorded',
+                $item->status,
+                $item->status,
+                [
+                    'kitchen_ticket_item_id' => $item->id,
+                    'waste_event_id' => $waste->id,
+                    'quantity' => $quantity,
+                    'reason' => $reason,
+                ],
+            );
+
+            return $waste->load(['productionItem', 'actor']);
+        });
     }
 
     private function transitionItem(
