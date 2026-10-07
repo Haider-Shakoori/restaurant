@@ -232,6 +232,56 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonValidationErrors('pairing_token');
     }
 
+    public function test_refreshing_desktop_qr_invalidates_the_previous_pairing_token(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $desktop = $this->activateDevice(
+            $business,
+            $domain,
+            'restaurant-desktop-pairing-refresh',
+            'windows',
+        );
+
+        tenancy()->initialize($tenant);
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Manager',
+            'email' => 'manager-refresh@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        tenancy()->end();
+
+        $managerToken = $this->login($domain, 'manager-refresh@restaurant.test');
+        $headers = $this->syncHeaders($managerToken, $desktop);
+
+        $first = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/pairing-tokens")
+            ->assertCreated()
+            ->json('data.pairing_token');
+
+        $second = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/pairing-tokens")
+            ->assertCreated()
+            ->json('data.pairing_token');
+
+        $this->assertNotSame($first, $second);
+
+        $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $first,
+            'device_uid' => 'stale-qr-mobile',
+            'platform' => 'android',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('pairing_token');
+
+        $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $second,
+            'device_uid' => 'fresh-qr-mobile',
+            'platform' => 'android',
+        ])->assertCreated();
+    }
+
     public function test_second_waiter_receives_deterministic_table_busy_conflict(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();
