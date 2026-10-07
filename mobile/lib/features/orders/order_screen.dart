@@ -937,7 +937,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     shrinkWrap: true,
                     padding: const EdgeInsets.all(14),
                     itemCount: _items.length,
-                    separatorBuilder: (_, __) => const Divider(height: 18),
+                    separatorBuilder: (_, _) => const Divider(height: 18),
                     itemBuilder: (context, index) {
                       final item = _items[index];
                       final allergy = item['allergy_instructions']?.toString();
