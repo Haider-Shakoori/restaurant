@@ -211,6 +211,7 @@
                             <th class="px-5 py-3">Status</th>
                             <th class="px-5 py-3 text-right">Lines</th>
                             <th class="px-5 py-3 text-right">Estimated</th>
+                            <th class="px-5 py-3 text-right">Actions</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-100">
@@ -227,9 +228,91 @@
                                 </td>
                                 <td class="px-5 py-4 text-right">{{ $order->lines_count }}</td>
                                 <td class="px-5 py-4 text-right font-black">{{ number_format((float) $order->estimated_total, 2) }} AFN</td>
+                                <td class="px-5 py-4 text-right">
+                                    @php
+                                        $receivableLines = $order->lines->filter(function ($line) {
+                                            $factor = max((float) $line->conversion_factor, 0.000001);
+                                            $remainingBase = max(0, (float) $line->ordered_base_quantity - (float) $line->received_base_quantity);
+
+                                            return ($remainingBase / $factor) > 0.0000001;
+                                        });
+                                    @endphp
+
+                                    @if (in_array($order->status, ['ordered', 'partially_received'], true) && $receivableLines->isNotEmpty())
+                                        <details class="relative inline-block text-left">
+                                            <summary class="cursor-pointer list-none rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-500">
+                                                Receive PO
+                                            </summary>
+                                            <div class="absolute right-0 z-30 mt-2 w-[min(34rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-2xl">
+                                                <div>
+                                                    <p class="text-xs font-black uppercase tracking-[0.14em] text-emerald-700">Goods Receipt</p>
+                                                    <h3 class="mt-1 text-lg font-black text-slate-950">{{ $order->po_number }}</h3>
+                                                    <p class="mt-1 text-sm text-slate-500">Enter what physically arrived. Only received quantities are added to Inventory.</p>
+                                                </div>
+
+                                                <form method="POST" action="/purchasing/orders/{{ $order->id }}/receive" class="mt-4 space-y-4">
+                                                    @csrf
+
+                                                    <div class="space-y-3">
+                                                        @foreach ($receivableLines as $line)
+                                                            @php
+                                                                $factor = max((float) $line->conversion_factor, 0.000001);
+                                                                $remainingBase = max(0, (float) $line->ordered_base_quantity - (float) $line->received_base_quantity);
+                                                                $remainingPurchase = $remainingBase / $factor;
+                                                            @endphp
+                                                            <div class="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_10rem] sm:items-end">
+                                                                <div>
+                                                                    <p class="font-bold text-slate-900">{{ $line->item_name }}</p>
+                                                                    <p class="mt-1 text-xs text-slate-500">
+                                                                        Ordered {{ number_format((float) $line->ordered_purchase_quantity, 4) }} {{ $line->purchase_unit }}
+                                                                        · Remaining {{ number_format($remainingPurchase, 4) }} {{ $line->purchase_unit }}
+                                                                    </p>
+                                                                </div>
+                                                                <label>
+                                                                    <span class="text-xs font-bold uppercase tracking-wide text-slate-500">Receive now</span>
+                                                                    <input type="hidden" name="lines[{{ $loop->index }}][purchase_order_line_id]" value="{{ $line->id }}">
+                                                                    <div class="mt-1.5 flex overflow-hidden rounded-lg border border-slate-300 bg-white">
+                                                                        <input
+                                                                            name="lines[{{ $loop->index }}][purchase_quantity]"
+                                                                            type="number"
+                                                                            min="0.0001"
+                                                                            max="{{ number_format($remainingPurchase, 4, '.', '') }}"
+                                                                            step="0.0001"
+                                                                            value="{{ number_format($remainingPurchase, 4, '.', '') }}"
+                                                                            required
+                                                                            class="min-w-0 flex-1 border-0 px-3 py-2.5 text-sm outline-none"
+                                                                        >
+                                                                        <span class="flex items-center border-l border-slate-200 bg-slate-50 px-2 text-xs font-bold text-slate-500">{{ $line->purchase_unit }}</span>
+                                                                    </div>
+                                                                </label>
+                                                            </div>
+                                                        @endforeach
+                                                    </div>
+
+                                                    <label class="block">
+                                                        <span class="text-sm font-bold text-slate-700">Receipt notes <span class="font-normal text-slate-400">(optional)</span></span>
+                                                        <textarea name="notes" rows="2" maxlength="2000" placeholder="Delivery note, shortages, damaged items..." class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"></textarea>
+                                                    </label>
+
+                                                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
+                                                        Posting this receipt increases Inventory stock using the configured purchase-to-base conversion and records the goods receipt against this PO.
+                                                    </div>
+
+                                                    <button class="w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-500">
+                                                        Receive & Add to Inventory
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </details>
+                                    @elseif ($order->status === 'received')
+                                        <span class="text-xs font-bold text-emerald-700">Received</span>
+                                    @else
+                                        <span class="text-xs text-slate-400">—</span>
+                                    @endif
+                                </td>
                             </tr>
                         @empty
-                            <tr><td colspan="6" class="px-5 py-12 text-center text-slate-500">No purchase orders yet. Use <span class="font-bold text-slate-700">New Purchase Order</span> to create the first one.</td></tr>
+                            <tr><td colspan="7" class="px-5 py-12 text-center text-slate-500">No purchase orders yet. Use <span class="font-bold text-slate-700">New Purchase Order</span> to create the first one.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
