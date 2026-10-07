@@ -175,6 +175,9 @@ class _OrderScreenState extends State<OrderScreen> {
               title: Text(category['name']!.toString()),
               children: items.map((item) {
                 return ListTile(
+                  leading: _MenuItemImage(
+                    imageUrl: item['image_url']?.toString(),
+                  ),
                   title: Text(item['name']!.toString()),
                   subtitle: item['description'] == null
                       ? null
@@ -210,6 +213,49 @@ class _OrderScreenState extends State<OrderScreen> {
               ),
             )
           : null,
+    );
+  }
+}
+
+
+class _MenuItemImage extends StatelessWidget {
+  const _MenuItemImage({required this.imageUrl});
+
+  final String? imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = imageUrl?.trim() ?? '';
+
+    if (url.isEmpty) {
+      return _placeholder(context);
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        url,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => _placeholder(context),
+      ),
+    );
+  }
+
+  Widget _placeholder(BuildContext context) {
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.restaurant_menu,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
   }
 }
