@@ -143,11 +143,7 @@
                                             @foreach ($category->items as $item)
                                                 <button
                                                     type="button"
-                                                    @click='addItem(@js([
-                                                        "id" => $item->id,
-                                                        "name" => $item->name,
-                                                        "price" => (float) $item->price,
-                                                    ]))'
+                                                    @click="addItem(items.find(item => item.id === '{{ $item->id }}'))"
                                                     class="group rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50"
                                                 >
                                                     <div class="flex items-start justify-between gap-3">
