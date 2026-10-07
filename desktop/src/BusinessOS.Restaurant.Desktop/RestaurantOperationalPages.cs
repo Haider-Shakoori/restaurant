@@ -314,10 +314,23 @@ internal static class RestaurantOperationalPages
             Padding = new Thickness(12)
         };
         pairing.SetBinding(TextBox.TextProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingDetails)));
+        var pairingPanel = new StackPanel();
+        var qr = new Image
+        {
+            Width = 220,
+            Height = 220,
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        qr.SetBinding(Image.SourceProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingQrImage)));
+        pairingPanel.Children.Add(qr);
+        pairingPanel.Children.Add(pairing);
+
         panel.Children.Add(Section(
             "Waiter app connection",
-            "Automatic mode prefers the restaurant LAN. If LAN is unavailable, mobile and Desktop reconcile through the cloud when both have internet. Offline changes remain queued until a route returns.",
-            pairing));
+            "Scan this QR from the waiter app to configure both LAN and cloud routes. Automatic mode prefers LAN, falls back to cloud when LAN is unavailable, queues offline changes when neither route is reachable, and returns to LAN automatically.",
+            pairingPanel));
 
         var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
 
