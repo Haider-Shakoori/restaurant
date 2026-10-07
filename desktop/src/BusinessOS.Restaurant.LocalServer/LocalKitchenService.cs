@@ -9,10 +9,14 @@ public sealed class LocalKitchenService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly LocalDatabaseFactory _databaseFactory;
+    private readonly LocalInventoryService _inventory;
 
-    public LocalKitchenService(LocalDatabaseFactory databaseFactory)
+    public LocalKitchenService(
+        LocalDatabaseFactory databaseFactory,
+        LocalInventoryService? inventory = null)
     {
         _databaseFactory = databaseFactory;
+        _inventory = inventory ?? new LocalInventoryService(databaseFactory);
     }
 
     // Backward-compatible one-shot entry point. New ordering code should use
@@ -190,10 +194,11 @@ public sealed class LocalKitchenService
             };
 
             db.KitchenTickets.Add(ticket);
+            var createdKitchenItems = new List<LocalKitchenTicketItem>();
 
             foreach (var orderItem in pair.Value)
             {
-                db.KitchenTicketItems.Add(new LocalKitchenTicketItem
+                var kitchenItem = new LocalKitchenTicketItem
                 {
                     Id = Guid.CreateVersion7().ToString("N"),
                     KitchenTicketId = ticket.Id,
@@ -209,7 +214,9 @@ public sealed class LocalKitchenService
                     ModifiersJson = orderItem.ModifiersJson,
                     AllergyInstructions = orderItem.AllergyInstructions,
                     KitchenInstructions = orderItem.KitchenInstructions,
-                });
+                };
+                db.KitchenTicketItems.Add(kitchenItem);
+                createdKitchenItems.Add(kitchenItem);
 
                 orderItem.KotRoundId = round.Id;
                 orderItem.RoundNumber = round.RoundNumber;
@@ -218,6 +225,16 @@ public sealed class LocalKitchenService
             }
 
             await db.SaveChangesAsync(cancellationToken);
+
+            foreach (var kitchenItem in createdKitchenItems)
+            {
+                await _inventory.ReserveKitchenItemAsync(db, kitchenItem, actor, cancellationToken);
+
+                if (!round.QueueEnabled && !round.PreparingEnabled)
+                {
+                    await _inventory.CommitKitchenItemAsync(db, kitchenItem, actor, cancellationToken);
+                }
+            }
 
             var ticketSnapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
             AddChange(db, "kitchen_ticket", ticket.Id, null, ticketSnapshot);
@@ -552,7 +569,7 @@ public sealed class LocalKitchenService
         },
     };
 
-    private static async Task StartItemCoreAsync(
+    private async Task StartItemCoreAsync(
         RestaurantDbContext db,
         LocalKitchenTicket ticket,
         LocalKotRound round,
@@ -591,6 +608,8 @@ public sealed class LocalKitchenService
         orderItem.Status = "preparing";
         orderItem.UpdatedAtUtc = now;
 
+        await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
+
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -602,7 +621,7 @@ public sealed class LocalKitchenService
             new { ticket_id = ticket.Id, order_item_id = item.OrderItemId, round_number = ticket.RoundNumber });
     }
 
-    private static async Task ReadyItemCoreAsync(
+    private async Task ReadyItemCoreAsync(
         RestaurantDbContext db,
         LocalKitchenTicket ticket,
         LocalKotRound round,
@@ -647,6 +666,11 @@ public sealed class LocalKitchenService
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
         orderItem.Status = "ready";
         orderItem.UpdatedAtUtc = now;
+
+        if (!round.PreparingEnabled)
+        {
+            await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
+        }
 
         LocalOperationsControlService.AddAudit(
             db,
