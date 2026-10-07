@@ -8,6 +8,7 @@ use App\Models\GoodsReceipt;
 use App\Models\InventoryBalance;
 use App\Models\InventoryConsumption;
 use App\Models\InventoryItem;
+use App\Models\InventoryReservation;
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
 use App\Models\MenuCategory;
@@ -24,6 +25,7 @@ use App\Services\Tenant\InventoryService;
 use App\Services\Tenant\KitchenService;
 use App\Services\Tenant\ProcurementService;
 use App\Services\Tenant\RecipeService;
+use App\Services\Tenant\RestaurantSettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
@@ -176,6 +178,9 @@ class InventoryProcurementRecipeTest extends TestCase
         $procurement = app(ProcurementService::class);
         $recipes = app(RecipeService::class);
         $kitchen = app(KitchenService::class);
+        app(RestaurantSettingsService::class)->put([
+            'negative_stock_policy' => 'allow',
+        ]);
 
         $po = $procurement->createPurchaseOrder($branch, $supplier, $user, [
             'lines' => [[
@@ -260,6 +265,69 @@ class InventoryProcurementRecipeTest extends TestCase
 
         $this->assertSame('-100.0000', InventoryBalance::query()->value('quantity'));
         $this->assertSame(1, InventoryConsumption::query()->count());
+        $this->assertSame(1, StockMovement::query()->where('movement_type', StockMovement::TYPE_CONSUMPTION)->count());
+    }
+
+    public function test_kot_send_reserves_and_start_commits_recipe_inventory_once(): void
+    {
+        $tenant = $this->createTenant('restaurant-production', 'production.test');
+        tenancy()->initialize($tenant);
+
+        [$user, $branch, $supplier, $rice, $menuItem, $table] = $this->seedProcurement(true, true);
+
+        $procurement = app(ProcurementService::class);
+        $recipes = app(RecipeService::class);
+        $orders = app(\App\Services\Tenant\OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $po = $procurement->createPurchaseOrder($branch, $supplier, $user, [
+            'lines' => [[
+                'inventory_item_id' => $rice->id,
+                'purchase_quantity' => '1.0000',
+                'unit_cost' => '100.00',
+            ]],
+        ]);
+        $procurement->receive($po, $user, [
+            'client_receipt_id' => 'GRN-PRODUCTION-001',
+            'lines' => [[
+                'purchase_order_line_id' => $po->lines->first()->id,
+                'purchase_quantity' => '1.0000',
+            ]],
+        ]);
+
+        $recipes->createVersion($branch, $menuItem, [
+            'items' => [[
+                'inventory_item_id' => $rice->id,
+                'quantity_base' => '250.0000',
+            ]],
+        ]);
+
+        $order = $orders->open($user, [
+            'client_order_id' => '01PRODUCTIONORDER000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($order, $user, [
+            'client_line_id' => '01PRODUCTIONLINE0000000000001',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 2,
+        ]);
+
+        $submitted = $orders->submit($order, $user, 'production-round-1');
+
+        $this->assertSame('1000.0000', InventoryBalance::query()->value('quantity'));
+        $this->assertSame(1, InventoryReservation::query()->where('status', 'reserved')->count());
+        $this->assertSame(0, StockMovement::query()->where('movement_type', StockMovement::TYPE_CONSUMPTION)->count());
+
+        $ticket = $submitted->kitchenTickets->first();
+        $kitchen->start($ticket, $user);
+
+        $this->assertSame('500.0000', InventoryBalance::query()->value('quantity'));
+        $this->assertSame(1, InventoryReservation::query()->where('status', 'committed')->count());
+        $this->assertSame(1, StockMovement::query()->where('movement_type', StockMovement::TYPE_CONSUMPTION)->count());
+
+        $kitchen->start($ticket->fresh(), $user);
+        $this->assertSame('500.0000', InventoryBalance::query()->value('quantity'));
         $this->assertSame(1, StockMovement::query()->where('movement_type', StockMovement::TYPE_CONSUMPTION)->count());
     }
 
