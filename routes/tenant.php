@@ -23,6 +23,8 @@ use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
 use App\Http\Controllers\Tenant\MenuItemImageController;
+use App\Http\Controllers\Tenant\MergeOrdersController;
+use App\Http\Controllers\Tenant\MoveOrderItemController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OperatingExpenseController;
 use App\Http\Controllers\Tenant\OrderController;
@@ -52,6 +54,7 @@ use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
 use App\Http\Controllers\Tenant\TenantWebOrderController;
+use App\Http\Controllers\Tenant\TransferOrderTableController;
 use App\Http\Controllers\Tenant\VoidKitchenTicketItemController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
@@ -285,6 +288,15 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/orders/{order}/courses/{courseNumber}/fire', FireOrderCourseController::class)
                     ->name('tenant.api.orders.courses.fire');
+
+                Route::post('/orders/{order}/transfer-table', TransferOrderTableController::class)
+                    ->name('tenant.api.orders.transfer-table');
+
+                Route::post('/orders/{order}/items/{orderItem}/move', MoveOrderItemController::class)
+                    ->name('tenant.api.orders.items.move');
+
+                Route::post('/orders/{order}/merge', MergeOrdersController::class)
+                    ->name('tenant.api.orders.merge');
 
                 Route::post('/orders/{order}/serve', ServeOrderController::class)
                     ->name('tenant.api.orders.serve');
