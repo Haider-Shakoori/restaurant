@@ -34,6 +34,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install Inno Setup." }
+
       - name: Generate Restaurant brand icon
         working-directory: .
         shell: pwsh
@@ -103,9 +109,39 @@ jobs:
 
           Stop-Process -Id $process.Id -Force
 
+      - name: Build branded Windows installer
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles(x86)\Inno Setup 7\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $iscc) {
+            $iscc = (Get-Command ISCC.exe -ErrorAction Stop).Source
+          }
+
+          Remove-Item "installer/output" -Recurse -Force -ErrorAction SilentlyContinue
+          & $iscc "/DMyAppVersion=1.0.0" "installer/BusinessOS.Restaurant.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+
+          $setup = Get-ChildItem "installer/output" -Filter "BusinessOS-Restaurant-Setup-*-win-x64.exe" |
+            Select-Object -First 1
+          if (-not $setup) { throw "Branded Restaurant installer was not produced." }
+          if ($setup.Length -lt 1MB) { throw "Restaurant installer is unexpectedly small." }
+
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4
         with:
           name: BusinessOS-Restaurant-win-x64-ci
           path: desktop/artifacts/publish/
+          if-no-files-found: error
+
+      - name: Upload branded installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: BusinessOS-Restaurant-Setup-win-x64-ci
+          path: desktop/installer/output/BusinessOS-Restaurant-Setup-*-win-x64.exe
           if-no-files-found: error
