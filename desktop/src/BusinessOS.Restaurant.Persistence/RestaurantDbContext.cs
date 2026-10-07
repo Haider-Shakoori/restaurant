@@ -211,7 +211,8 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.ToTable("kot_rounds");
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => new { value.OrderId, value.RoundNumber }).IsUnique();
-            entity.HasIndex(value => value.MutationId).IsUnique();
+            entity.HasIndex(value => new { value.OrderId, value.MutationId }).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.BusinessDate, value.DisplayNumber }).IsUnique();
             entity.HasIndex(value => value.KotNumber);
             entity.HasIndex(value => value.SentAt);
         });
