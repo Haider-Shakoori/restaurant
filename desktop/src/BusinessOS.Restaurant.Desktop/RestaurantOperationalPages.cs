@@ -38,7 +38,11 @@ internal static class RestaurantOperationalPages
         var openOrders = await db.Orders.CountAsync(x => x.Status != "closed");
         var activeTables = await db.DiningTables.CountAsync(x => x.IsActive && x.Status != "available");
         var activeKot = await db.KitchenTickets.CountAsync(x => x.Status == "queued" || x.Status == "preparing" || x.Status == "ready");
-        var sales = await db.Bills.Where(x => x.IssuedAt >= from && x.IssuedAt < to).SumAsync(x => (decimal?)x.Total) ?? 0m;
+        var sales = (await db.Bills.AsNoTracking()
+                .Select(x => new { x.IssuedAt, x.Total })
+                .ToListAsync())
+            .Where(x => x.IssuedAt >= from && x.IssuedAt < to)
+            .Sum(x => x.Total);
 
         var panel = Stack();
         panel.Children.Add(Cards(
@@ -76,12 +80,13 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var rows = await (from ticket in db.KitchenTickets.AsNoTracking()
-                          join station in db.KitchenStations.AsNoTracking() on ticket.KitchenStationId equals station.Id
-                          where ticket.Status == "queued" || ticket.Status == "preparing" || ticket.Status == "ready"
-                          orderby ticket.QueuedAt
-                          select new KitchenRow(ticket.Id, ticket.TicketNumber, station.Name, ticket.Status, ticket.QueuedAt))
-                         .ToListAsync();
+        var rows = (await (from ticket in db.KitchenTickets.AsNoTracking()
+                           join station in db.KitchenStations.AsNoTracking() on ticket.KitchenStationId equals station.Id
+                           where ticket.Status == "queued" || ticket.Status == "preparing" || ticket.Status == "ready"
+                           select new KitchenRow(ticket.Id, ticket.TicketNumber, station.Name, ticket.Status, ticket.QueuedAt))
+                          .ToListAsync())
+            .OrderBy(x => x.QueuedAt)
+            .ToList();
 
         var grid = GridFor(rows);
         grid.Columns.Add(Column("KOT", nameof(KitchenRow.TicketNumber), 220));
@@ -96,8 +101,12 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var orders = await db.Orders.AsNoTracking().Where(x => x.Status != "closed").OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => new OrderRow(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total, x.UpdatedAtUtc)).Take(100).ToListAsync();
+        var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
+                .Select(x => new OrderRow(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total, x.UpdatedAtUtc))
+                .ToListAsync())
+            .OrderByDescending(x => x.UpdatedAt)
+            .Take(100)
+            .ToList();
 
         var grid = GridFor(orders);
         grid.Columns.Add(Column("Order", nameof(OrderRow.ClientOrderId), 220));
@@ -161,14 +170,21 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var orders = await (from po in db.PurchaseOrders.AsNoTracking()
-                            join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
-                            orderby po.OrderedAt descending
-                            select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt, po.CompletedAt)).Take(100).ToListAsync();
+        var orders = (await (from po in db.PurchaseOrders.AsNoTracking()
+                             join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
+                             select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt, po.CompletedAt))
+                            .ToListAsync())
+            .OrderByDescending(x => x.OrderedAt)
+            .Take(100)
+            .ToList();
         var suppliers = await db.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
             .Select(x => new SupplierRow(x.Code, x.Name, x.Phone, x.Email)).ToListAsync();
-        var receipts = await db.GoodsReceipts.AsNoTracking().OrderByDescending(x => x.ReceivedAt).Take(100)
-            .Select(x => new ReceiptRow(x.ReceiptNumber, x.Status, x.ReceivedAt, x.PurchaseOrderId)).ToListAsync();
+        var receipts = (await db.GoodsReceipts.AsNoTracking()
+                .Select(x => new ReceiptRow(x.ReceiptNumber, x.Status, x.ReceivedAt, x.PurchaseOrderId))
+                .ToListAsync())
+            .OrderByDescending(x => x.ReceivedAt)
+            .Take(100)
+            .ToList();
 
         var panel = Stack();
         panel.Children.Add(Card("Restaurant procurement", "Supplier → purchase order → goods receipt → stock movement. Receiving stock updates the local restaurant inventory."));
@@ -198,8 +214,12 @@ internal static class RestaurantOperationalPages
         await using var db = factory.Create();
         var staff = await db.StaffUsers.AsNoTracking().OrderBy(x => x.Name)
             .Select(x => new StaffRow(x.Name, x.Email, x.Role, x.IsActive)).ToListAsync();
-        var shifts = await db.WaiterShifts.AsNoTracking().OrderByDescending(x => x.StartedAt).Take(100)
-            .Select(x => new ShiftRow(x.UserName, x.Role, x.Status, x.StartedAt, x.EndedAt, x.BreakMinutes)).ToListAsync();
+        var shifts = (await db.WaiterShifts.AsNoTracking()
+                .Select(x => new ShiftRow(x.UserName, x.Role, x.Status, x.StartedAt, x.EndedAt, x.BreakMinutes))
+                .ToListAsync())
+            .OrderByDescending(x => x.StartedAt)
+            .Take(100)
+            .ToList();
 
         var panel = Stack();
         panel.Children.Add(Card("Restaurant staff", "Restaurant roles and access are shown from the local operational store. Pharmacy roles are not reused."));
@@ -231,11 +251,20 @@ internal static class RestaurantOperationalPages
         await using var db = factory.Create();
         var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
             .Select(x => new ExpenseBranchChoice(x.Id, x.Name)).ToListAsync();
-        var rows = await (from expense in db.Expenses.AsNoTracking()
-                          join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
-                          orderby expense.ExpenseDate descending, expense.RecordedAtUtc descending
-                          select new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
-                              expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference)).Take(500).ToListAsync();
+        var rows = (await (from expense in db.Expenses.AsNoTracking()
+                           join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
+                           select new
+                           {
+                               Row = new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
+                                   expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference),
+                               expense.ExpenseDate,
+                               expense.RecordedAtUtc,
+                           }).ToListAsync())
+            .OrderByDescending(x => x.ExpenseDate)
+            .ThenByDescending(x => x.RecordedAtUtc)
+            .Take(500)
+            .Select(x => x.Row)
+            .ToList();
 
         var panel = Stack();
         panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));

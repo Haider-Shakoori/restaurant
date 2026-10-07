@@ -19,14 +19,26 @@ internal static class OperationalActionViews
                             select new Choice(table.Id, $"{table.Name} ({table.Code})")).ToListAsync();
         var menu = await db.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
             .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
-        var orders = await db.Orders.AsNoTracking().Where(x => x.Status != "closed").OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => new OrderChoice(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total)).Take(100).ToListAsync();
+        var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
+                .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
+                .ToListAsync())
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Take(100)
+            .Select(x => x.Row)
+            .ToList();
         var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
             .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
-        var sessions = await db.CashierSessions.AsNoTracking().Where(x => x.Status == "open").OrderByDescending(x => x.OpenedAt)
-            .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt)).ToListAsync();
-        var bills = await db.Bills.AsNoTracking().Where(x => x.Status == "open").OrderByDescending(x => x.IssuedAt)
-            .Select(x => new BillChoice(x.Id, x.OrderId, x.BillNumber, x.Total, x.PaidAmount, x.BalanceDue)).ToListAsync();
+        var sessions = (await db.CashierSessions.AsNoTracking().Where(x => x.Status == "open")
+                .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
+                .ToListAsync())
+            .OrderByDescending(x => x.OpenedAt)
+            .ToList();
+        var bills = (await db.Bills.AsNoTracking().Where(x => x.Status == "open")
+                .Select(x => new { Row = new BillChoice(x.Id, x.OrderId, x.BillNumber, x.Total, x.PaidAmount, x.BalanceDue), x.IssuedAt })
+                .ToListAsync())
+            .OrderByDescending(x => x.IssuedAt)
+            .Select(x => x.Row)
+            .ToList();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -162,11 +174,12 @@ internal static class OperationalActionViews
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var rows = await (from ticket in db.KitchenTickets.AsNoTracking()
-                          join station in db.KitchenStations.AsNoTracking() on ticket.KitchenStationId equals station.Id
-                          where ticket.Status == "queued" || ticket.Status == "preparing" || ticket.Status == "ready"
-                          orderby ticket.QueuedAt
-                          select new KitchenChoice(ticket.Id, ticket.TicketNumber, station.Name, ticket.Status, ticket.QueuedAt)).ToListAsync();
+        var rows = (await (from ticket in db.KitchenTickets.AsNoTracking()
+                           join station in db.KitchenStations.AsNoTracking() on ticket.KitchenStationId equals station.Id
+                           where ticket.Status == "queued" || ticket.Status == "preparing" || ticket.Status == "ready"
+                           select new KitchenChoice(ticket.Id, ticket.TicketNumber, station.Name, ticket.Status, ticket.QueuedAt)).ToListAsync())
+            .OrderBy(x => x.QueuedAt)
+            .ToList();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new StackPanel();
@@ -215,8 +228,12 @@ internal static class OperationalActionViews
 
         var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
             .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
-        var sessions = await db.CashierSessions.AsNoTracking().OrderByDescending(x => x.OpenedAt).Take(50)
-            .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt)).ToListAsync();
+        var sessions = (await db.CashierSessions.AsNoTracking()
+                .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
+                .ToListAsync())
+            .OrderByDescending(x => x.OpenedAt)
+            .Take(50)
+            .ToList();
         var closings = await db.DailyClosings.AsNoTracking().OrderByDescending(x => x.BusinessDate).Take(30)
             .Select(x => new ClosingChoice(x.Id, x.BusinessDate, x.Status, x.FinalizedAt)).ToListAsync();
 

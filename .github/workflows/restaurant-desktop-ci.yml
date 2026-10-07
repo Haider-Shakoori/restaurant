@@ -68,11 +68,18 @@ jobs:
         shell: pwsh
         run: |
           $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $logRoot = Join-Path $env:LOCALAPPDATA "BusinessOS\Restaurant\logs"
+
+          if (Test-Path $logRoot) {
+            Get-ChildItem $logRoot -Filter "desktop-*.log" -ErrorAction SilentlyContinue |
+              Remove-Item -Force -ErrorAction SilentlyContinue
+          }
+
           $process = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 8
           $process.Refresh()
+
           if ($process.HasExited) {
-            $logRoot = Join-Path $env:LOCALAPPDATA "BusinessOS\Restaurant\logs"
             if (Test-Path $logRoot) {
               Get-ChildItem $logRoot -Filter "desktop-*.log" |
                 Sort-Object LastWriteTime -Descending |
@@ -81,6 +88,19 @@ jobs:
             }
             throw "Packaged Restaurant Desktop exited during startup smoke test."
           }
+
+          if (Test-Path $logRoot) {
+            $startupErrors = Get-ChildItem $logRoot -Filter "desktop-*.log" |
+              ForEach-Object { Get-Content $_.FullName -Raw } |
+              Where-Object { $_ -match "Main window initialization" -or $_ -match "(?m)^\[[^\]]+\] ui$" }
+
+            if ($startupErrors) {
+              $startupErrors | ForEach-Object { Write-Host $_ }
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "Packaged Restaurant Desktop logged a UI/startup failure."
+            }
+          }
+
           Stop-Process -Id $process.Id -Force
 
       - name: Upload unsigned CI release
