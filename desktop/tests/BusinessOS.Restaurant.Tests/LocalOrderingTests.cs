@@ -96,6 +96,41 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalogStore = new OperationalSnapshotStore(factory);
+            await catalogStore.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalogStore);
+            var waiter = new LocalTerminalPrincipal(
+                "device-1",
+                1,
+                "waiter-1",
+                "Waiter One",
+                "waiter",
+                "tenant-1");
+
+            var bootstrap = JsonSerializer.SerializeToElement(
+                await sync.BootstrapAsync(waiter, CancellationToken.None));
+
+            Assert.Equal(
+                "https://restaurant.example.test/media/menu-items/item-1",
+                bootstrap.GetProperty("menu")[0]
+                    .GetProperty("items")[0]
+                    .GetProperty("image_url")
+                    .GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Mutation_replay_is_safe_and_reuse_with_different_content_is_rejected()
     {
         var root = CreateTemporaryDirectory();
@@ -375,7 +410,8 @@ public sealed class LocalOrderingTests
                             250m,
                             "AFN",
                             1,
-                            []),
+                            [],
+                            "https://restaurant.example.test/media/menu-items/item-1"),
                     ]),
             ],
             [
