@@ -3,6 +3,7 @@
 namespace App\Services\Tenant;
 
 use App\Models\KotNumberSequence;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class KotNumberService
 {
@@ -10,21 +11,29 @@ class KotNumberService
     {
         $businessDate = now()->toDateString();
 
-        KotNumberSequence::query()->firstOrCreate(
-            [
-                'branch_id' => $branchId,
-                'business_date' => $businessDate,
-            ],
-            [
-                'next_number' => 1,
-            ],
-        );
-
         $sequence = KotNumberSequence::query()
             ->where('branch_id', $branchId)
             ->whereDate('business_date', $businessDate)
             ->lockForUpdate()
-            ->firstOrFail();
+            ->first();
+
+        if (! $sequence) {
+            try {
+                KotNumberSequence::query()->create([
+                    'branch_id' => $branchId,
+                    'business_date' => $businessDate,
+                    'next_number' => 1,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // A concurrent dispatcher created today's sequence first.
+            }
+
+            $sequence = KotNumberSequence::query()
+                ->where('branch_id', $branchId)
+                ->whereDate('business_date', $businessDate)
+                ->lockForUpdate()
+                ->firstOrFail();
+        }
 
         $number = $sequence->next_number;
         $sequence->update([
