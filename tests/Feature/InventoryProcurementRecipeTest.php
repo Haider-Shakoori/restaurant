@@ -23,6 +23,7 @@ use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Services\Tenant\InventoryService;
 use App\Services\Tenant\KitchenService;
+use App\Services\Tenant\OrderService;
 use App\Services\Tenant\ProcurementService;
 use App\Services\Tenant\RecipeService;
 use App\Services\Tenant\RestaurantSettingsService;
@@ -277,7 +278,7 @@ class InventoryProcurementRecipeTest extends TestCase
 
         $procurement = app(ProcurementService::class);
         $recipes = app(RecipeService::class);
-        $orders = app(\App\Services\Tenant\OrderService::class);
+        $orders = app(OrderService::class);
         $kitchen = app(KitchenService::class);
 
         $po = $procurement->createPurchaseOrder($branch, $supplier, $user, [

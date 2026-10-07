@@ -60,8 +60,9 @@ class _OrderScreenState extends State<OrderScreen> {
       _categories = categories;
       _menu = menu;
       _hasUnsent = hasUnsent;
-      _selectedCategoryId ??=
-          categories.isEmpty ? null : categories.first['id']!.toString();
+      _selectedCategoryId ??= categories.isEmpty
+          ? null
+          : categories.first['id']!.toString();
     });
   }
 
@@ -132,19 +133,19 @@ class _OrderScreenState extends State<OrderScreen> {
 
   void _showError(Object error) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error.toString())),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(error.toString())));
   }
 
   bool get _editable => const <String>{
-        'draft',
-        'submitted',
-        'submitted_pending_sync',
-        'preparing',
-        'ready',
-        'served',
-      }.contains(_order?['status']?.toString());
+    'draft',
+    'submitted',
+    'submitted_pending_sync',
+    'preparing',
+    'ready',
+    'served',
+  }.contains(_order?['status']?.toString());
 
   List<Map<String, Object?>> get _visibleItems {
     Iterable<Map<String, Object?>> result = _selectedCategoryId == null
@@ -229,10 +230,7 @@ class _OrderScreenState extends State<OrderScreen> {
               ),
               Text(
                 'Restaurant',
-                style: TextStyle(
-                  color: Color(0xFFFFD96B),
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: Color(0xFFFFD96B), fontSize: 11),
               ),
             ],
           ),
@@ -481,8 +479,9 @@ class _OrderScreenState extends State<OrderScreen> {
                         ),
                       ),
                       IconButton.filled(
-                        onPressed:
-                            _editable && !_working ? () => _addItem(item) : null,
+                        onPressed: _editable && !_working
+                            ? () => _addItem(item)
+                            : null,
                         style: IconButton.styleFrom(
                           backgroundColor: const Color(0xFFFFD96B),
                           foregroundColor: const Color(0xFF171B20),
@@ -535,8 +534,10 @@ class _OrderScreenState extends State<OrderScreen> {
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFE73737),
                     borderRadius: BorderRadius.circular(9),
@@ -598,7 +599,11 @@ class _OrderScreenState extends State<OrderScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'x' + item['quantity'].toString() + ' · ' + item['line_total'].toString() + ' AFN',
+                                  'x' +
+                                      item['quantity'].toString() +
+                                      ' · ' +
+                                      item['line_total'].toString() +
+                                      ' AFN',
                                   style: const TextStyle(
                                     color: Colors.black54,
                                     fontSize: 12,
@@ -641,8 +646,9 @@ class _OrderScreenState extends State<OrderScreen> {
                   width: double.infinity,
                   height: 50,
                   child: FilledButton.icon(
-                    onPressed:
-                        _editable && _hasUnsent && !_working ? _submit : null,
+                    onPressed: _editable && _hasUnsent && !_working
+                        ? _submit
+                        : null,
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFFFFD96B),
                       foregroundColor: const Color(0xFF171B20),
@@ -715,9 +721,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   Icon(
                     entry.$1,
                     size: 20,
-                    color: selected
-                        ? const Color(0xFFFFD96B)
-                        : Colors.white54,
+                    color: selected ? const Color(0xFFFFD96B) : Colors.white54,
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -783,7 +787,6 @@ class _MenuItemImage extends StatelessWidget {
   }
 }
 
-
 class _OrderItemOptions {
   const _OrderItemOptions({
     this.modifiers = const [],
@@ -799,10 +802,7 @@ class _OrderItemOptions {
 }
 
 class _ItemOptionsDialog extends StatefulWidget {
-  const _ItemOptionsDialog({
-    required this.itemName,
-    required this.groups,
-  });
+  const _ItemOptionsDialog({required this.itemName, required this.groups});
 
   final String itemName;
   final List<Object?> groups;
@@ -838,7 +838,8 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
 
       if (selected.length < min || selected.length > max) {
         setState(() {
-          _error = 'Select between ' +
+          _error =
+              'Select between ' +
               min.toString() +
               ' and ' +
               max.toString() +
@@ -880,8 +881,9 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ...widget.groups.map((raw) {
-                final group =
-                    Map<String, Object?>.from(raw! as Map<Object?, Object?>);
+                final group = Map<String, Object?>.from(
+                  raw! as Map<Object?, Object?>,
+                );
                 final id = group['id']!.toString();
                 final options =
                     group['options'] as List<Object?>? ?? const <Object?>[];
@@ -906,7 +908,8 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
                           final optionId = option['id']!.toString();
                           final selected =
                               _selected[id]?.contains(optionId) ?? false;
-                          final label = option['name']!.toString() +
+                          final label =
+                              option['name']!.toString() +
                               ' (+' +
                               option['price_delta']!.toString() +
                               ' AFN)';
@@ -923,8 +926,8 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
                                 if (value) {
                                   final max =
                                       (group['max_selections'] as num?)
-                                              ?.toInt() ??
-                                          1;
+                                          ?.toInt() ??
+                                      1;
                                   if (set.length < max) set.add(optionId);
                                 } else {
                                   set.remove(optionId);
@@ -980,10 +983,7 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _submit,
-          child: const Text('Add to order'),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Add to order')),
       ],
     );
   }

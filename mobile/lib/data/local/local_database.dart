@@ -138,9 +138,7 @@ class LocalDatabase implements SyncStore {
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          await db.execute(
-            'ALTER TABLE menu_items ADD COLUMN image_url TEXT',
-          );
+          await db.execute('ALTER TABLE menu_items ADD COLUMN image_url TEXT');
         }
         if (oldVersion < 3) {
           await db.execute(
@@ -198,18 +196,21 @@ class LocalDatabase implements SyncStore {
       limit: limit,
     );
 
-    return rows.map((row) {
-      return OutboxMutation(
-        id: row['id']! as int,
-        mutationId: row['mutation_id']! as String,
-        operation: row['operation']! as String,
-        payload: Map<String, Object?>.from(
-          jsonDecode(row['payload_json']! as String) as Map<String, dynamic>,
-        ),
-        occurredAt: DateTime.parse(row['occurred_at']! as String),
-        attempts: row['attempts']! as int,
-      );
-    }).toList(growable: false);
+    return rows
+        .map((row) {
+          return OutboxMutation(
+            id: row['id']! as int,
+            mutationId: row['mutation_id']! as String,
+            operation: row['operation']! as String,
+            payload: Map<String, Object?>.from(
+              jsonDecode(row['payload_json']! as String)
+                  as Map<String, dynamic>,
+            ),
+            occurredAt: DateTime.parse(row['occurred_at']! as String),
+            attempts: row['attempts']! as int,
+          );
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -301,10 +302,7 @@ class LocalDatabase implements SyncStore {
             : typed;
 
         if (order is Map<Object?, Object?>) {
-          await _upsertOrderSnapshot(
-            txn,
-            Map<String, Object?>.from(order),
-          );
+          await _upsertOrderSnapshot(txn, Map<String, Object?>.from(order));
         }
       }
 
@@ -337,18 +335,14 @@ class LocalDatabase implements SyncStore {
         where: 'mutation_id = ?',
         whereArgs: <Object?>[mutation.mutationId],
       );
-      await txn.insert(
-        'conflicts',
-        <String, Object?>{
-          'mutation_id': mutation.mutationId,
-          'operation': mutation.operation,
-          'code': result['code']?.toString() ?? 'conflict',
-          'message': result['message']?.toString() ?? 'Sync conflict',
-          'payload_json': jsonEncode(mutation.payload),
-          'created_at': DateTime.now().toUtc().toIso8601String(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await txn.insert('conflicts', <String, Object?>{
+        'mutation_id': mutation.mutationId,
+        'operation': mutation.operation,
+        'code': result['code']?.toString() ?? 'conflict',
+        'message': result['message']?.toString() ?? 'Sync conflict',
+        'payload_json': jsonEncode(mutation.payload),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
   }
 
@@ -372,11 +366,10 @@ class LocalDatabase implements SyncStore {
 
   @override
   Future<void> setSystemState(String key, String value) async {
-    await _db.insert(
-      'settings',
-      <String, Object?>{'key': key, 'value': value},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await _db.insert('settings', <String, Object?>{
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<String?> systemState(String key) async {
@@ -453,7 +446,8 @@ class LocalDatabase implements SyncStore {
       await txn.update(
         'order_items',
         <String, Object?>{'course_state': 'fired'},
-        where: "local_order_id = ? AND course_number = ? AND course_state = 'held'",
+        where:
+            "local_order_id = ? AND course_number = ? AND course_state = 'held'",
         whereArgs: <Object?>[localOrderId, courseNumber],
       );
 
@@ -504,21 +498,18 @@ class LocalDatabase implements SyncStore {
     final now = DateTime.now().toUtc().toIso8601String();
 
     await _db.transaction((txn) async {
-      await txn.insert(
-        'orders',
-        <String, Object?>{
-          'local_order_id': clientOrderId,
-          'client_order_id': clientOrderId,
-          'table_id': tableId,
-          'status': 'draft',
-          'guest_count': guestCount,
-          'notes': notes,
-          'subtotal': '0.00',
-          'total': '0.00',
-          'opened_at': now,
-          'updated_at': now,
-        },
-      );
+      await txn.insert('orders', <String, Object?>{
+        'local_order_id': clientOrderId,
+        'client_order_id': clientOrderId,
+        'table_id': tableId,
+        'status': 'draft',
+        'guest_count': guestCount,
+        'notes': notes,
+        'subtotal': '0.00',
+        'total': '0.00',
+        'opened_at': now,
+        'updated_at': now,
+      });
       await txn.update(
         'dining_tables',
         <String, Object?>{'status': 'occupied'},
@@ -581,29 +572,26 @@ class LocalDatabase implements SyncStore {
       final unitPrice = menuItem['price']!.toString();
       final lineTotal = _multiplyMoney(unitPrice, quantity);
 
-      await txn.insert(
-        'order_items',
-        <String, Object?>{
-          'local_line_id': clientLineId,
-          'client_line_id': clientLineId,
-          'local_order_id': localOrderId,
-          'menu_item_id': menuItem['id']!.toString(),
-          'item_name': menuItem['name']!.toString(),
-          'unit_price': unitPrice,
-          'quantity': quantity,
-          'dispatched_quantity': 0,
-          'line_total': lineTotal,
-          'notes': notes,
-          'seat_number': seatNumber,
-          'course_number': courseNumber,
-          'course_name': courseName,
-          'course_state': holdForCourse ? 'held' : 'open',
-          'modifiers_snapshot_json': jsonEncode(modifiers),
-          'allergy_instructions': allergyInstructions,
-          'kitchen_instructions': kitchenInstructions,
-          'status': 'pending',
-        },
-      );
+      await txn.insert('order_items', <String, Object?>{
+        'local_line_id': clientLineId,
+        'client_line_id': clientLineId,
+        'local_order_id': localOrderId,
+        'menu_item_id': menuItem['id']!.toString(),
+        'item_name': menuItem['name']!.toString(),
+        'unit_price': unitPrice,
+        'quantity': quantity,
+        'dispatched_quantity': 0,
+        'line_total': lineTotal,
+        'notes': notes,
+        'seat_number': seatNumber,
+        'course_number': courseNumber,
+        'course_name': courseName,
+        'course_state': holdForCourse ? 'held' : 'open',
+        'modifiers_snapshot_json': jsonEncode(modifiers),
+        'allergy_instructions': allergyInstructions,
+        'kitchen_instructions': kitchenInstructions,
+        'status': 'pending',
+      });
 
       final totals = await txn.rawQuery(
         'SELECT line_total FROM order_items WHERE local_order_id = ?',
@@ -654,7 +642,8 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
-      final unsentCount = Sqflite.firstIntValue(
+      final unsentCount =
+          Sqflite.firstIntValue(
             await txn.rawQuery(
               "SELECT COUNT(*) FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
               <Object?>[localOrderId],
@@ -715,10 +704,7 @@ class LocalDatabase implements SyncStore {
       }
 
       if (rawData is Map<Object?, Object?>) {
-        await _upsertOrderSnapshot(
-          txn,
-          Map<String, Object?>.from(rawData),
-        );
+        await _upsertOrderSnapshot(txn, Map<String, Object?>.from(rawData));
       }
       return;
     }
@@ -758,11 +744,7 @@ class LocalDatabase implements SyncStore {
         );
       } else if (rawData is Map<Object?, Object?>) {
         final item = Map<String, Object?>.from(rawData);
-        await _upsertMenuItem(
-          txn,
-          item,
-          item['menu_category_id']?.toString(),
-        );
+        await _upsertMenuItem(txn, item, item['menu_category_id']?.toString());
       }
       return;
     }
@@ -782,16 +764,12 @@ class LocalDatabase implements SyncStore {
     DatabaseExecutor txn,
     Map<String, Object?> category,
   ) async {
-    await txn.insert(
-      'menu_categories',
-      <String, Object?>{
-        'id': category['id']!.toString(),
-        'name': category['name']!.toString(),
-        'sort_order': (category['sort_order'] as num?)?.toInt() ?? 0,
-        'is_active': _boolInt(category['is_active'], defaultValue: true),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await txn.insert('menu_categories', <String, Object?>{
+      'id': category['id']!.toString(),
+      'name': category['name']!.toString(),
+      'sort_order': (category['sort_order'] as num?)?.toInt() ?? 0,
+      'is_active': _boolInt(category['is_active'], defaultValue: true),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _upsertMenuItem(
@@ -799,27 +777,20 @@ class LocalDatabase implements SyncStore {
     Map<String, Object?> item,
     String? categoryId,
   ) async {
-    await txn.insert(
-      'menu_items',
-      <String, Object?>{
-        'id': item['id']!.toString(),
-        'category_id': categoryId ?? item['menu_category_id']?.toString(),
-        'sku': item['sku']?.toString(),
-        'name': item['name']!.toString(),
-        'description': item['description']?.toString(),
-        'image_url': item['image_url']?.toString(),
-        'modifier_groups_json': jsonEncode(
-          item['modifier_groups'] as List<Object?>? ?? const <Object?>[],
-        ),
-        'price': item['price']!.toString(),
-        'sort_order': (item['sort_order'] as num?)?.toInt() ?? 0,
-        'is_available': _boolInt(
-          item['is_available'],
-          defaultValue: true,
-        ),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await txn.insert('menu_items', <String, Object?>{
+      'id': item['id']!.toString(),
+      'category_id': categoryId ?? item['menu_category_id']?.toString(),
+      'sku': item['sku']?.toString(),
+      'name': item['name']!.toString(),
+      'description': item['description']?.toString(),
+      'image_url': item['image_url']?.toString(),
+      'modifier_groups_json': jsonEncode(
+        item['modifier_groups'] as List<Object?>? ?? const <Object?>[],
+      ),
+      'price': item['price']!.toString(),
+      'sort_order': (item['sort_order'] as num?)?.toInt() ?? 0,
+      'is_available': _boolInt(item['is_available'], defaultValue: true),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _upsertTable(
@@ -833,22 +804,18 @@ class LocalDatabase implements SyncStore {
         ? Map<String, Object?>.from(table['branch']! as Map<Object?, Object?>)
         : <String, Object?>{};
 
-    await txn.insert(
-      'dining_tables',
-      <String, Object?>{
-        'id': table['id']!.toString(),
-        'code': table['code']!.toString(),
-        'name': table['name']!.toString(),
-        'capacity': (table['capacity'] as num?)?.toInt() ?? 1,
-        'status': table['status']!.toString(),
-        'is_active': _boolInt(table['is_active'], defaultValue: true),
-        'area_id': area['id']?.toString(),
-        'area_name': area['name']?.toString(),
-        'branch_id': branch['id']?.toString(),
-        'branch_name': branch['name']?.toString(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await txn.insert('dining_tables', <String, Object?>{
+      'id': table['id']!.toString(),
+      'code': table['code']!.toString(),
+      'name': table['name']!.toString(),
+      'capacity': (table['capacity'] as num?)?.toInt() ?? 1,
+      'status': table['status']!.toString(),
+      'is_active': _boolInt(table['is_active'], defaultValue: true),
+      'area_id': area['id']?.toString(),
+      'area_name': area['name']?.toString(),
+      'branch_id': branch['id']?.toString(),
+      'branch_name': branch['name']?.toString(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _upsertOrderSnapshot(
@@ -865,68 +832,58 @@ class LocalDatabase implements SyncStore {
         ? Map<String, Object?>.from(rawTable)
         : null;
 
-    await txn.insert(
-      'orders',
-      <String, Object?>{
-        'local_order_id': localId,
-        'client_order_id': clientId,
-        'server_id': serverId,
-        'table_id': table?['id']?.toString(),
-        'branch_id': order['branch_id']?.toString(),
-        'service_type': order['service_type']?.toString() ?? 'dine_in',
-        'service_reference': order['service_reference']?.toString(),
-        'status': order['status']!.toString(),
-        'guest_count': (order['guest_count'] as num?)?.toInt() ?? 1,
-        'notes': order['notes']?.toString(),
-        'subtotal': order['subtotal']?.toString() ?? '0.00',
-        'total': order['total']?.toString() ?? '0.00',
-        'opened_at': order['opened_at']?.toString(),
-        'submitted_at': order['submitted_at']?.toString(),
-        'served_at': order['served_at']?.toString(),
-        'closed_at': order['closed_at']?.toString(),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await txn.insert('orders', <String, Object?>{
+      'local_order_id': localId,
+      'client_order_id': clientId,
+      'server_id': serverId,
+      'table_id': table?['id']?.toString(),
+      'branch_id': order['branch_id']?.toString(),
+      'service_type': order['service_type']?.toString() ?? 'dine_in',
+      'service_reference': order['service_reference']?.toString(),
+      'status': order['status']!.toString(),
+      'guest_count': (order['guest_count'] as num?)?.toInt() ?? 1,
+      'notes': order['notes']?.toString(),
+      'subtotal': order['subtotal']?.toString() ?? '0.00',
+      'total': order['total']?.toString() ?? '0.00',
+      'opened_at': order['opened_at']?.toString(),
+      'submitted_at': order['submitted_at']?.toString(),
+      'served_at': order['served_at']?.toString(),
+      'closed_at': order['closed_at']?.toString(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
 
     for (final rawItem in order['items'] as List<Object?>? ?? const []) {
-      final item = Map<String, Object?>.from(
-        rawItem! as Map<Object?, Object?>,
-      );
+      final item = Map<String, Object?>.from(rawItem! as Map<Object?, Object?>);
       final serverLineId = item['id']!.toString();
       final clientLineId = item['client_line_id']?.toString();
       final localLineId = clientLineId == null || clientLineId.isEmpty
           ? 'server:$serverLineId'
           : clientLineId;
 
-      await txn.insert(
-        'order_items',
-        <String, Object?>{
-          'local_line_id': localLineId,
-          'client_line_id': clientLineId,
-          'server_id': serverLineId,
-          'local_order_id': localId,
-          'menu_item_id': item['menu_item_id']?.toString(),
-          'item_name': item['item_name']!.toString(),
-          'unit_price': item['unit_price']!.toString(),
-          'quantity': (item['quantity'] as num?)?.toInt() ?? 1,
-          'dispatched_quantity':
-              (item['dispatched_quantity'] as num?)?.toInt() ?? 0,
-          'line_total': item['line_total']!.toString(),
-          'notes': item['notes']?.toString(),
-          'seat_number': (item['seat_number'] as num?)?.toInt(),
-          'course_number': (item['course_number'] as num?)?.toInt(),
-          'course_name': item['course_name']?.toString(),
-          'course_state': item['course_state']?.toString() ?? 'open',
-          'modifiers_snapshot_json': jsonEncode(
-            item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
-          ),
-          'allergy_instructions': item['allergy_instructions']?.toString(),
-          'kitchen_instructions': item['kitchen_instructions']?.toString(),
-          'status': item['status']!.toString(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await txn.insert('order_items', <String, Object?>{
+        'local_line_id': localLineId,
+        'client_line_id': clientLineId,
+        'server_id': serverLineId,
+        'local_order_id': localId,
+        'menu_item_id': item['menu_item_id']?.toString(),
+        'item_name': item['item_name']!.toString(),
+        'unit_price': item['unit_price']!.toString(),
+        'quantity': (item['quantity'] as num?)?.toInt() ?? 1,
+        'dispatched_quantity':
+            (item['dispatched_quantity'] as num?)?.toInt() ?? 0,
+        'line_total': item['line_total']!.toString(),
+        'notes': item['notes']?.toString(),
+        'seat_number': (item['seat_number'] as num?)?.toInt(),
+        'course_number': (item['course_number'] as num?)?.toInt(),
+        'course_name': item['course_name']?.toString(),
+        'course_state': item['course_state']?.toString() ?? 'open',
+        'modifiers_snapshot_json': jsonEncode(
+          item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
+        ),
+        'allergy_instructions': item['allergy_instructions']?.toString(),
+        'kitchen_instructions': item['kitchen_instructions']?.toString(),
+        'status': item['status']!.toString(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
 
@@ -951,17 +908,14 @@ class LocalDatabase implements SyncStore {
     required String operation,
     required Map<String, Object?> payload,
   }) async {
-    await txn.insert(
-      'outbox',
-      <String, Object?>{
-        'mutation_id': mutationId,
-        'operation': operation,
-        'payload_json': jsonEncode(payload),
-        'occurred_at': DateTime.now().toUtc().toIso8601String(),
-        'status': 'pending',
-        'attempts': 0,
-      },
-    );
+    await txn.insert('outbox', <String, Object?>{
+      'mutation_id': mutationId,
+      'operation': operation,
+      'payload_json': jsonEncode(payload),
+      'occurred_at': DateTime.now().toUtc().toIso8601String(),
+      'status': 'pending',
+      'attempts': 0,
+    });
   }
 
   Future<void> _setSettingTxn(
@@ -969,11 +923,10 @@ class LocalDatabase implements SyncStore {
     String key,
     String value,
   ) async {
-    await txn.insert(
-      'settings',
-      <String, Object?>{'key': key, 'value': value},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await txn.insert('settings', <String, Object?>{
+      'key': key,
+      'value': value,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   int _boolInt(Object? value, {required bool defaultValue}) {

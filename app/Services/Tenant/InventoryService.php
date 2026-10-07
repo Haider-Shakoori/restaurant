@@ -471,5 +471,4 @@ class InventoryService
             return $consumption->fresh()->load(['lines.stockMovement.item']);
         });
     }
-
 }

@@ -2,14 +2,14 @@
 
 namespace App\Services\Tenant;
 
+use App\Models\InventoryReservation;
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
 use App\Models\KitchenTicketItem;
-use App\Models\InventoryReservation;
-use App\Models\ProductionWasteEvent;
 use App\Models\KotDispatchRound;
 use App\Models\MenuItemKitchenRoute;
 use App\Models\Order;
+use App\Models\ProductionWasteEvent;
 use App\Models\TenantUser;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -333,7 +333,6 @@ class KitchenService
         });
     }
 
-
     public function startItem(KitchenTicketItem $item, TenantUser $actor): KitchenTicketItem
     {
         $item->loadMissing('ticket.round');
@@ -381,7 +380,6 @@ class KitchenService
             'kot.item.ready',
         );
     }
-
 
     public function voidItem(
         KitchenTicketItem $item,
