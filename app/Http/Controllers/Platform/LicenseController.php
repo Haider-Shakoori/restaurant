@@ -2,25 +2,48 @@
 
 namespace App\Http\Controllers\Platform;
 
+use App\Enums\DeviceStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\DeviceActivation;
 use App\Models\LicenseKey;
 use App\Services\Platform\LicenseService;
+use App\Services\Platform\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 class LicenseController extends Controller
 {
-    public function show(Business $business): View
-    {
+    public function show(
+        Business $business,
+        SubscriptionService $subscriptions,
+    ): View {
+
         $business->load([
             'licenseKeys' => fn ($query) => $query->withCount(['devices', 'leases'])->limit(20),
             'devices.licenseKey',
             'licenseEvents' => fn ($query) => $query->limit(50),
         ]);
 
-        return view('platform.licenses.show', compact('business'));
+        $access = $subscriptions->access($business);
+        $rawMobileLimit = data_get(
+            $access->features,
+            'max_mobile_devices',
+            data_get($access->features, 'max_devices', config('license.default_max_devices', 5)),
+        );
+        $mobileDeviceLimit = is_string($rawMobileLimit) && strtolower(trim($rawMobileLimit)) === 'unlimited'
+            ? null
+            : (is_numeric($rawMobileLimit) && (int) $rawMobileLimit > 0 ? (int) $rawMobileLimit : null);
+        $activeMobileDevices = $business->devices()
+            ->where('status', DeviceStatus::Active)
+            ->whereIn('platform', ['android', 'ios'])
+            ->count();
+
+        return view('platform.licenses.show', compact(
+            'business',
+            'mobileDeviceLimit',
+            'activeMobileDevices',
+        ));
     }
 
     public function generate(
