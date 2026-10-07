@@ -47,6 +47,12 @@ jobs:
           python -m pip install --disable-pip-version-check pillow
           python tools/generate_restaurant_icons.py --repo-root . --desktop
 
+      - name: Validate Restaurant visual assets
+        working-directory: .
+        shell: pwsh
+        run: |
+          python -c "from PIL import Image; p=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; im=Image.open(p); im.verify(); print(f'Validated {p}')"
+
       - name: Restore
         run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
 
