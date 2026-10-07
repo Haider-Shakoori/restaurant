@@ -52,15 +52,15 @@ internal static class RestaurantOperationalPages
             "A polished local-first overview for cashier, floor and kitchen operations.",
             diagnostics.NetworkMode,
             diagnostics.LeaseStatus));
-        panel.Children.Add(Cards(
-            ("TODAY'S SALES", $"AFN {sales:N2}"),
-            ("OPEN ORDERS", openOrders.ToString()),
-            ("ACTIVE TABLES", activeTables.ToString()),
-            ("KITCHEN TICKETS", activeKot.ToString())));
-        panel.Children.Add(Cards(
-            ("NETWORK MODE", diagnostics.NetworkMode),
-            ("WAITER DEVICES", diagnostics.TerminalSummary),
-            ("LICENSE / OFFLINE", diagnostics.LeaseStatus)));
+        panel.Children.Add(DashboardCards(
+            ("₳", "TODAY'S SALES", $"AFN {sales:N2}", "Revenue posted today"),
+            ("▣", "OPEN ORDERS", openOrders.ToString(), "Orders still in progress"),
+            ("▦", "ACTIVE TABLES", activeTables.ToString(), "Occupied dining tables"),
+            ("☷", "KITCHEN TICKETS", activeKot.ToString(), "Queued, preparing or ready")));
+        panel.Children.Add(DashboardCards(
+            ("◉", "NETWORK MODE", diagnostics.NetworkMode, "Current connectivity path"),
+            ("♙", "WAITER DEVICES", diagnostics.TerminalSummary, "Paired floor devices"),
+            ("✓", "LICENSE / OFFLINE", diagnostics.LeaseStatus, "Local-first availability")));
         panel.Children.Add(Card(
             "Live operations",
             diagnostics.StatusMessage,
@@ -750,6 +750,118 @@ internal static class RestaurantOperationalPages
             BlurRadius = 24,
             ShadowDepth = 5,
             Opacity = 0.12,
+            Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
+        };
+        return border;
+    }
+
+    private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail)[] values)
+    {
+        var wrap = new WrapPanel();
+        foreach (var value in values)
+            wrap.Children.Add(DashboardCard(value.Icon, value.Label, value.Value, value.Detail));
+        return new Border { Child = wrap, Margin = new Thickness(0, 0, 0, 8) };
+    }
+
+    private static Border DashboardCard(string icon, string title, string value, string detail)
+    {
+        var iconText = new TextBlock
+        {
+            Text = icon,
+            FontSize = 20,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        iconText.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+
+        var iconSurface = new Border
+        {
+            Width = 46,
+            Height = 46,
+            CornerRadius = new CornerRadius(15),
+            Margin = new Thickness(0, 0, 14, 0),
+            Child = iconText,
+        };
+        iconSurface.SetResourceReference(Border.BackgroundProperty, "BrandPrimarySoftBrush");
+        iconSurface.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        iconSurface.BorderThickness = new Thickness(1);
+
+        var titleText = new TextBlock
+        {
+            Text = title,
+            FontSize = 10.5,
+            FontWeight = FontWeights.Bold,
+            CharacterSpacing = 40,
+        };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+        var valueText = new TextBlock
+        {
+            Text = value,
+            FontSize = 24,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        valueText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var detailText = new TextBlock
+        {
+            Text = detail,
+            FontSize = 10.5,
+            Margin = new Thickness(0, 6, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        detailText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var copy = new StackPanel();
+        copy.Children.Add(titleText);
+        copy.Children.Add(valueText);
+        copy.Children.Add(detailText);
+
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.Children.Add(iconSurface);
+        Grid.SetColumn(copy, 1);
+        content.Children.Add(copy);
+
+        var accent = new Border
+        {
+            Height = 3,
+            CornerRadius = new CornerRadius(3),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        accent.SetResourceReference(Border.BackgroundProperty, "BrandPrimaryBrush");
+
+        var layout = new Grid();
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(content);
+        Grid.SetRow(accent, 1);
+        layout.Children.Add(accent);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(18, 17, 18, 14),
+            Margin = new Thickness(0, 0, 14, 14),
+            Width = 258,
+            MinHeight = 122,
+            BorderThickness = new Thickness(1),
+            Child = layout,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 24,
+            ShadowDepth = 5,
+            Opacity = 0.14,
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
         return border;
