@@ -57,7 +57,7 @@ class PurchaseOrderController extends Controller
             $request->validated(),
         );
 
-        if (! $request->expectsJson()) {
+        if ($request->routeIs('tenant.web.purchasing.orders.store')) {
             return redirect('/purchasing')
                 ->with('status', 'Purchase order '.$purchaseOrder->po_number.' created successfully.');
         }
