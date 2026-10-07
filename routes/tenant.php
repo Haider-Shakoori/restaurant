@@ -20,6 +20,7 @@ use App\Http\Controllers\Tenant\KitchenTicketController;
 use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
+use App\Http\Controllers\Tenant\MenuItemImageController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OperatingExpenseController;
 use App\Http\Controllers\Tenant\OrderController;
@@ -52,6 +53,10 @@ use Illuminate\Support\Facades\Route;
 $tenantMiddleware = [
     InitializeRestaurantTenancy::class,
 ];
+
+Route::middleware($tenantMiddleware)
+    ->get('/media/menu-items/{menuItem}', MenuItemImageController::class)
+    ->name('tenant.media.menu-item');
 
 Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(function (): void {
     Route::get('/login', [TenantWebAuthController::class, 'create'])->name('tenant.web.login');
