@@ -1,6 +1,6 @@
 # BusinessOS Restaurant — KOT/KDS shared contract
 
-Status: initial Laravel + Flutter contract baseline after repository audit.
+Status: implemented Laravel/Web + Flutter contract for the KOT/KDS realignment.
 
 This document is the shared contract for Laravel cloud/Web and Flutter mobile. Desktop must mirror the same semantics. It is intentionally additive to the existing API and synchronization model.
 
@@ -24,7 +24,7 @@ This document is the shared contract for Laravel cloud/Web and Flutter mobile. D
 - Reusing a mutation ID with different content is rejected.
 - A dispatch round stores the client mutation identity so non-mobile/web retries can use the same guarantee.
 
-## Proposed additive entities
+## Implemented additive entities
 
 ### kot_dispatch_rounds
 
@@ -270,13 +270,17 @@ Existing operations remain:
 - order.item.add
 - order.submit
 
-The realignment will add shared operations such as:
-- order.kot.send
+Implemented shared operations include:
+- order.kot.send (additive alias; order.submit remains backward compatible)
 - order.item.void
 - order.item.refire
+- order.item.recall
 - order.course.fire
 - order.table.transfer
-- kitchen/item readiness changes only where the mobile role is authorized
+- order.item.move
+- order.merge
+
+Kitchen item readiness changes are exposed through authorized KDS/API surfaces.
 
 Existing `sync_mutations` replay semantics remain authoritative.
 
@@ -298,3 +302,26 @@ Do not include large historical KOT datasets in bootstrap.
 - Existing API fields remain where practical; new fields are additive.
 - Existing Flutter local data is upgraded in place.
 - Existing Desktop clients may continue consuming old fields until the Desktop branch mirrors this contract.
+
+
+## Final Web/Flutter adoption note
+
+The Web/Flutter branch now explicitly adopts the Desktop handoff fields and operations that were previously marked additive/Desktop-only:
+
+- service_type / service_reference
+- seat_number
+- course_number / course_name / held-fire semantics
+- structured modifier snapshots and price deltas
+- allergy_instructions / kitchen_instructions
+- item-level production lifecycle and timestamps
+- Queue/Preparing workflow snapshots, including active
+- Expo derived readiness
+- void / recall / refire / waste audit flows
+- production inventory reservation and exactly-once consumption
+- negative_stock_policy
+- active-order table transfer, unsent-item move/split and draft/unsent merge
+- kitchen performance reporting and warning/late aging
+- Flutter offline mutations for course, recovery, transfer, move and merge
+- premium responsive waiter POS layout for phone/tablet
+
+Desktop-specific persisted expo state remains a Desktop-local execution detail; Web/Flutter treats Expo as a projection and does not add a second canonical persisted production state.
