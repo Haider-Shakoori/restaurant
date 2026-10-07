@@ -22,6 +22,7 @@ use App\Models\Supplier;
 use App\Models\TenantPayment;
 use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
+use App\Services\Tenant\RestaurantSettingsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
@@ -186,7 +187,7 @@ class TenantPortalController extends Controller
         ]);
     }
 
-    public function settings(SubscriptionService $subscriptions): View
+    public function settings(SubscriptionService $subscriptions, RestaurantSettingsService $settings): View
     {
         $business = Business::query()->where('tenant_id', tenant('id'))->first();
         $mobileDeviceLimit = null;
@@ -217,6 +218,7 @@ class TenantPortalController extends Controller
             'mobileDeviceLimit' => $mobileDeviceLimit,
             'activeMobileDevices' => $activeMobileDevices,
             'activatedDevices' => $activatedDevices,
+            'restaurantSettings' => $settings->all(),
         ]);
     }
 
