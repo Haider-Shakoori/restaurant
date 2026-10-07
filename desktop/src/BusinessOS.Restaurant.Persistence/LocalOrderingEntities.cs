@@ -405,6 +405,10 @@ public sealed class LocalInventoryConsumption
     public required string Id { get; set; }
     public required string OrderId { get; set; }
     public required string BranchId { get; set; }
+    public string? ProductionKey { get; set; }
+    public string? OrderItemId { get; set; }
+    public string? KitchenTicketItemId { get; set; }
+    public string? InventoryReservationId { get; set; }
     public long ConsumedByUserId { get; set; }
     public DateTimeOffset ConsumedAt { get; set; }
 }
@@ -417,6 +421,30 @@ public sealed class LocalInventoryConsumptionLine
     public required string RecipeId { get; set; }
     public required string InventoryItemId { get; set; }
     public required string StockMovementId { get; set; }
+    public decimal QuantityBase { get; set; }
+}
+
+public sealed class LocalInventoryReservation
+{
+    public required string Id { get; set; }
+    public required string OrderId { get; set; }
+    public required string OrderItemId { get; set; }
+    public required string KitchenTicketItemId { get; set; }
+    public required string BranchId { get; set; }
+    public long CreatedByUserId { get; set; }
+    public required string Status { get; set; }
+    public DateTimeOffset ReservedAt { get; set; }
+    public DateTimeOffset? CommittedAt { get; set; }
+    public DateTimeOffset? ReleasedAt { get; set; }
+    public string? ReleaseReason { get; set; }
+}
+
+public sealed class LocalInventoryReservationLine
+{
+    public required string Id { get; set; }
+    public required string InventoryReservationId { get; set; }
+    public required string RecipeId { get; set; }
+    public required string InventoryItemId { get; set; }
     public decimal QuantityBase { get; set; }
 }
 
