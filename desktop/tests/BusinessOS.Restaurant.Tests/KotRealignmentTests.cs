@@ -831,6 +831,337 @@ public sealed class KotRealignmentTests
         }
     }
 
+    [Fact]
+    public async Task Recall_reopens_recent_ready_item_without_double_consuming_inventory()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN-RECALL",
+                    "Chicken Recall",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-RECALL",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD-RECALL", "LINE-RECALL", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND-RECALL", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            string ticketId;
+            string itemId;
+            await using (var db = factory.Create())
+            {
+                ticketId = (await db.KitchenTickets.SingleAsync()).Id;
+                itemId = (await db.KitchenTicketItems.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyItemAsync(itemId, Kitchen(), CancellationToken.None);
+            await kitchen.RecallItemAsync(
+                itemId,
+                "Plate returned before service",
+                Kitchen(),
+                CancellationToken.None);
+
+            await using (var db = factory.Create())
+            {
+                var item = await db.KitchenTicketItems.SingleAsync();
+                Assert.Equal("preparing", item.Status);
+                Assert.NotNull(item.RecalledAt);
+                Assert.Equal("Plate returned before service", item.RecallReason);
+                Assert.Null(item.ReadyAt);
+                Assert.Equal(750m, (await db.InventoryBalances.SingleAsync()).Quantity);
+                Assert.Single(await db.InventoryConsumptions.ToArrayAsync());
+            }
+
+            await kitchen.ReadyItemAsync(itemId, Kitchen(), CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            Assert.Equal("ready", (await finalDb.KitchenTicketItems.SingleAsync()).Status);
+            Assert.Equal(750m, (await finalDb.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Single(await finalDb.InventoryConsumptions.ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Waste_records_produced_loss_without_returning_stock()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN-WASTE",
+                    "Chicken Waste",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-WASTE",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD-WASTE", "LINE-WASTE", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND-WASTE", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            string ticketId;
+            string itemId;
+            await using (var db = factory.Create())
+            {
+                ticketId = (await db.KitchenTickets.SingleAsync()).Id;
+                itemId = (await db.KitchenTicketItems.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+            await kitchen.RecordWasteAsync(
+                itemId,
+                "Burned during preparation",
+                Kitchen(),
+                CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            var item = await finalDb.KitchenTicketItems.SingleAsync();
+            Assert.NotNull(item.WastedAt);
+            Assert.Equal("Burned during preparation", item.WasteReason);
+            Assert.Equal(750m, (await finalDb.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Single(await finalDb.InventoryConsumptions.ToArrayAsync());
+            Assert.Single(await finalDb.StockMovements
+                .Where(x => x.MovementType == "consumption")
+                .ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Unsent_source_can_merge_into_active_target_without_rewriting_existing_kot()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog);
+            var cashier = new LocalCashierService(factory);
+
+            await PushOneAsync(sync, Waiter(), "OPEN-TARGET", "order.open", new
+            {
+                client_order_id = "ORDER-TARGET",
+                dining_table_id = "table-1",
+                guest_count = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-TARGET", "order.item.add", new
+            {
+                client_order_id = "ORDER-TARGET",
+                client_line_id = "TARGET-LINE",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-TARGET", "order.kot.send", new
+            {
+                client_order_id = "ORDER-TARGET",
+            });
+
+            await PushOneAsync(sync, Waiter(), "OPEN-SOURCE", "order.open", new
+            {
+                client_order_id = "ORDER-SOURCE",
+                dining_table_id = "table-2",
+                guest_count = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-SOURCE", "order.item.add", new
+            {
+                client_order_id = "ORDER-SOURCE",
+                client_line_id = "SOURCE-LINE",
+                menu_item_id = "item-general",
+                quantity = 1,
+            });
+
+            string targetId;
+            string sourceId;
+            string originalRoundId;
+            string originalTicketId;
+            await using (var db = factory.Create())
+            {
+                targetId = (await db.Orders.SingleAsync(x => x.ClientOrderId == "ORDER-TARGET")).Id;
+                sourceId = (await db.Orders.SingleAsync(x => x.ClientOrderId == "ORDER-SOURCE")).Id;
+                originalRoundId = (await db.KotRounds.SingleAsync()).Id;
+                originalTicketId = (await db.KitchenTickets.SingleAsync()).Id;
+            }
+
+            await cashier.MergeDraftOrdersAsync(
+                targetId,
+                sourceId,
+                Manager(),
+                CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            var target = await finalDb.Orders.SingleAsync(x => x.Id == targetId);
+            var source = await finalDb.Orders.SingleAsync(x => x.Id == sourceId);
+            var moved = await finalDb.OrderItems.SingleAsync(x => x.ItemName == "Salad");
+
+            Assert.Equal("submitted", target.Status);
+            Assert.Equal("closed", source.Status);
+            Assert.Equal(targetId, moved.OrderId);
+            Assert.Null(moved.KotRoundId);
+            Assert.Equal(originalRoundId, (await finalDb.KotRounds.SingleAsync()).Id);
+            Assert.Equal(targetId, (await finalDb.KotRounds.SingleAsync()).OrderId);
+            Assert.Equal(originalTicketId, (await finalDb.KitchenTickets.SingleAsync()).Id);
+            Assert.Equal(targetId, (await finalDb.KitchenTickets.SingleAsync()).OrderId);
+            Assert.Equal("available", (await finalDb.DiningTables.SingleAsync(x => x.Id == "table-2")).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Move_between_active_orders_allows_only_unsent_items()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog);
+            var cashier = new LocalCashierService(factory);
+
+            await PushOneAsync(sync, Waiter(), "OPEN-MOVE-T", "order.open", new
+            {
+                client_order_id = "MOVE-TARGET",
+                dining_table_id = "table-1",
+                guest_count = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-MOVE-T", "order.item.add", new
+            {
+                client_order_id = "MOVE-TARGET",
+                client_line_id = "MOVE-TARGET-LINE",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-MOVE-T", "order.kot.send", new
+            {
+                client_order_id = "MOVE-TARGET",
+            });
+
+            await PushOneAsync(sync, Waiter(), "OPEN-MOVE-S", "order.open", new
+            {
+                client_order_id = "MOVE-SOURCE",
+                dining_table_id = "table-2",
+                guest_count = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "ADD-MOVE-S1", "order.item.add", new
+            {
+                client_order_id = "MOVE-SOURCE",
+                client_line_id = "MOVE-SOURCE-UNSENT",
+                menu_item_id = "item-general",
+                quantity = 1,
+            });
+
+            string targetId;
+            string sourceId;
+            string unsentId;
+            string sentId;
+            await using (var db = factory.Create())
+            {
+                targetId = (await db.Orders.SingleAsync(x => x.ClientOrderId == "MOVE-TARGET")).Id;
+                sourceId = (await db.Orders.SingleAsync(x => x.ClientOrderId == "MOVE-SOURCE")).Id;
+                unsentId = (await db.OrderItems.SingleAsync(x => x.ClientLineId == "MOVE-SOURCE-UNSENT")).Id;
+                sentId = (await db.OrderItems.SingleAsync(x => x.ClientLineId == "MOVE-TARGET-LINE")).Id;
+            }
+
+            await cashier.MoveUnsentItemsAsync(
+                sourceId,
+                targetId,
+                [unsentId],
+                Manager(),
+                CancellationToken.None);
+
+            await Assert.ThrowsAsync<LocalSyncConflictException>(
+                () => cashier.MoveUnsentItemsAsync(
+                    targetId,
+                    sourceId,
+                    [sentId],
+                    Manager(),
+                    CancellationToken.None));
+
+            await using var finalDb = factory.Create();
+            Assert.Equal(targetId, (await finalDb.OrderItems.SingleAsync(x => x.Id == unsentId)).OrderId);
+            Assert.Null((await finalDb.OrderItems.SingleAsync(x => x.Id == unsentId)).KotRoundId);
+            Assert.Equal(targetId, (await finalDb.KitchenTickets.SingleAsync()).OrderId);
+            Assert.Equal("available", (await finalDb.DiningTables.SingleAsync(x => x.Id == "table-2")).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
