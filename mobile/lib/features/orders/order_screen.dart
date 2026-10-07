@@ -357,6 +357,285 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
+  Future<void> _transferTable() async {
+    if (_working || _order?['service_type']?.toString() != 'dine_in') return;
+
+    final tables = await widget.dependencies.database.tables();
+    final currentTableId = _order?['table_id']?.toString();
+    final available = tables
+        .where(
+          (table) =>
+              table['id']?.toString() != currentTableId &&
+              table['status']?.toString() == 'available' &&
+              table['branch_id']?.toString() == _order?['branch_id']?.toString(),
+        )
+        .toList(growable: false);
+
+    if (!mounted) return;
+
+    if (available.isEmpty) {
+      _showError('No available table is available in this branch.');
+      return;
+    }
+
+    final targetId = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        var selected = available.first['id']!.toString();
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Transfer table'),
+            content: DropdownButtonFormField<String>(
+              initialValue: selected,
+              decoration: const InputDecoration(labelText: 'Target table'),
+              items: available
+                  .map(
+                    (table) => DropdownMenuItem<String>(
+                      value: table['id']!.toString(),
+                      child: Text(
+                        (table['area_name']?.toString() ?? '') +
+                            ' · ' +
+                            (table['name']?.toString() ??
+                                table['code']!.toString()),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setDialogState(() => selected = value);
+                }
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(selected),
+                child: const Text('Transfer'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (targetId == null) return;
+
+    setState(() => _working = true);
+    try {
+      await widget.dependencies.orders.transferTable(
+        localOrderId: widget.localOrderId,
+        targetTableId: targetId,
+      );
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _moveItem() async {
+    if (_working) return;
+
+    final unsent = _items
+        .where((item) {
+          final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
+          final dispatched =
+              (item['dispatched_quantity'] as num?)?.toInt() ?? 0;
+          return quantity > dispatched;
+        })
+        .toList(growable: false);
+
+    final orders = await widget.dependencies.database.activeOrders();
+    final targets = orders
+        .where(
+          (order) =>
+              order['local_order_id']?.toString() != widget.localOrderId &&
+              order['branch_id']?.toString() == _order?['branch_id']?.toString(),
+        )
+        .toList(growable: false);
+
+    if (!mounted) return;
+
+    if (unsent.isEmpty || targets.isEmpty) {
+      _showError('An unsent item and another open order are required.');
+      return;
+    }
+
+    final result = await showDialog<_MoveItemChoice>(
+      context: context,
+      builder: (context) => _MoveItemDialog(
+        items: unsent,
+        targets: targets,
+      ),
+    );
+
+    if (result == null) return;
+
+    setState(() => _working = true);
+    try {
+      await widget.dependencies.orders.moveUnsentItem(
+        sourceLocalOrderId: widget.localOrderId,
+        targetLocalOrderId: result.targetOrderId,
+        localLineId: result.localLineId,
+        quantity: result.quantity,
+      );
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _mergeOrder() async {
+    if (_working) return;
+
+    final hasDispatched = _items.any(
+      (item) => ((item['dispatched_quantity'] as num?)?.toInt() ?? 0) > 0,
+    );
+
+    if (hasDispatched) {
+      _showError(
+        'This order already has kitchen production. Move only unsent items instead.',
+      );
+      return;
+    }
+
+    final orders = await widget.dependencies.database.activeOrders();
+    final targets = orders
+        .where(
+          (order) =>
+              order['local_order_id']?.toString() != widget.localOrderId &&
+              order['branch_id']?.toString() == _order?['branch_id']?.toString(),
+        )
+        .toList(growable: false);
+
+    if (!mounted) return;
+
+    if (targets.isEmpty) {
+      _showError('No compatible open target order is available.');
+      return;
+    }
+
+    final targetId = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        var selected = targets.first['local_order_id']!.toString();
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Merge order'),
+            content: DropdownButtonFormField<String>(
+              initialValue: selected,
+              decoration: const InputDecoration(labelText: 'Target order'),
+              items: targets
+                  .map(
+                    (order) => DropdownMenuItem<String>(
+                      value: order['local_order_id']!.toString(),
+                      child: Text(
+                        order['service_reference']?.toString().isNotEmpty == true
+                            ? order['service_reference']!.toString()
+                            : 'Order ' +
+                                order['local_order_id']!
+                                    .toString()
+                                    .substring(0, 8),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setDialogState(() => selected = value);
+                }
+              },
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(selected),
+                child: const Text('Merge'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (targetId == null) return;
+
+    setState(() => _working = true);
+    try {
+      await widget.dependencies.orders.mergeOrders(
+        sourceLocalOrderId: widget.localOrderId,
+        targetLocalOrderId: targetId,
+      );
+      await widget.dependencies.syncCoordinator.syncNow();
+
+      if (mounted) {
+        Navigator.of(context).maybePop();
+      }
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _showOrderOperations() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            if (_order?['service_type']?.toString() == 'dine_in')
+              ListTile(
+                leading: const Icon(Icons.swap_horiz_rounded),
+                title: const Text('Transfer table'),
+                onTap: () => Navigator.of(context).pop('transfer'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.call_split_rounded),
+              title: const Text('Move / split unsent item'),
+              subtitle: const Text(
+                'Move only unsent quantity to another open order.',
+              ),
+              onTap: () => Navigator.of(context).pop('move'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.merge_type_rounded),
+              title: const Text('Merge draft / unsent order'),
+              subtitle: const Text(
+                'Full merge is blocked after kitchen production starts.',
+              ),
+              onTap: () => Navigator.of(context).pop('merge'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    switch (action) {
+      case 'transfer':
+        await _transferTable();
+      case 'move':
+        await _moveItem();
+      case 'merge':
+        await _mergeOrder();
+    }
+  }
+
   Future<void> _submit() async {
     if (_working) return;
     setState(() => _working = true);
@@ -598,6 +877,13 @@ class _OrderScreenState extends State<OrderScreen> {
                 fontWeight: FontWeight.w700,
               ),
             ),
+          ),
+          const SizedBox(width: 6),
+          IconButton(
+            tooltip: 'Order operations',
+            onPressed: _working ? null : _showOrderOperations,
+            color: Colors.white70,
+            icon: const Icon(Icons.more_vert_rounded),
           ),
         ],
       ),
@@ -1458,6 +1744,157 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(onPressed: _submit, child: const Text('Add to order')),
+      ],
+    );
+  }
+}
+
+
+class _MoveItemChoice {
+  const _MoveItemChoice({
+    required this.localLineId,
+    required this.targetOrderId,
+    required this.quantity,
+  });
+
+  final String localLineId;
+  final String targetOrderId;
+  final int quantity;
+}
+
+class _MoveItemDialog extends StatefulWidget {
+  const _MoveItemDialog({
+    required this.items,
+    required this.targets,
+  });
+
+  final List<Map<String, Object?>> items;
+  final List<Map<String, Object?>> targets;
+
+  @override
+  State<_MoveItemDialog> createState() => _MoveItemDialogState();
+}
+
+class _MoveItemDialogState extends State<_MoveItemDialog> {
+  late String lineId;
+  late String targetOrderId;
+  int quantity = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    lineId = widget.items.first['local_line_id']!.toString();
+    targetOrderId = widget.targets.first['local_order_id']!.toString();
+  }
+
+  int get maxQuantity {
+    final item = widget.items.firstWhere(
+      (item) => item['local_line_id']!.toString() == lineId,
+    );
+    final total = (item['quantity'] as num?)?.toInt() ?? 0;
+    final dispatched = (item['dispatched_quantity'] as num?)?.toInt() ?? 0;
+    return total - dispatched;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Move unsent item'),
+      content: SizedBox(
+        width: 440,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: lineId,
+              decoration: const InputDecoration(labelText: 'Item'),
+              items: widget.items
+                  .map(
+                    (item) => DropdownMenuItem<String>(
+                      value: item['local_line_id']!.toString(),
+                      child: Text(
+                        item['item_name']!.toString() +
+                            ' · unsent ' +
+                            (((item['quantity'] as num?)?.toInt() ?? 0) -
+                                    ((item['dispatched_quantity'] as num?)
+                                            ?.toInt() ??
+                                        0))
+                                .toString(),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() {
+                    lineId = value;
+                    quantity = 1;
+                  });
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: targetOrderId,
+              decoration: const InputDecoration(labelText: 'Target order'),
+              items: widget.targets
+                  .map(
+                    (order) => DropdownMenuItem<String>(
+                      value: order['local_order_id']!.toString(),
+                      child: Text(
+                        order['service_reference']?.toString().isNotEmpty == true
+                            ? order['service_reference']!.toString()
+                            : 'Order ' +
+                                order['local_order_id']!
+                                    .toString()
+                                    .substring(0, 8),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => targetOrderId = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Text('Quantity'),
+                const Spacer(),
+                IconButton(
+                  onPressed:
+                      quantity > 1 ? () => setState(() => quantity--) : null,
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+                Text(quantity.toString()),
+                IconButton(
+                  onPressed: quantity < maxQuantity
+                      ? () => setState(() => quantity++)
+                      : null,
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(
+            _MoveItemChoice(
+              localLineId: lineId,
+              targetOrderId: targetOrderId,
+              quantity: quantity,
+            ),
+          ),
+          child: const Text('Move'),
+        ),
       ],
     );
   }
