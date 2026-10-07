@@ -290,6 +290,7 @@ public sealed class LocalKitchenService
             .Where(value => value.Status == "queued" ||
                             value.Status == "active" ||
                             value.Status == "preparing" ||
+                            value.Status == "expo" ||
                             value.Status == "ready")
             .AsNoTracking();
 
@@ -443,6 +444,329 @@ public sealed class LocalKitchenService
         return snapshot;
     }
 
+    public async Task<object> PassExpoItemAsync(
+        string ticketItemId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureExpoRole(actor);
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var item = await db.KitchenTicketItems
+            .SingleOrDefaultAsync(value => value.Id == ticketItemId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Kitchen item does not exist.");
+        var ticket = await RequireTicketAsync(db, item.KitchenTicketId, cancellationToken);
+        var round = await RequireRoundAsync(db, ticket, cancellationToken);
+
+        if (!round.ExpoEnabled)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Expo is disabled for this KOT round.");
+        }
+
+        if (item.Status == "ready")
+        {
+            return await TicketSnapshotAsync(db, ticket, cancellationToken);
+        }
+
+        if (item.Status != "expo")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                $"Kitchen item cannot be passed from {item.Status}.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        item.Status = "ready";
+        var orderItem = await db.OrderItems
+            .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
+        orderItem.Status = "ready";
+        orderItem.UpdatedAtUtc = now;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "kitchen",
+            "expo.item_passed",
+            null,
+            "kitchen_ticket_item",
+            item.Id,
+            new { ticket_id = ticket.Id, order_item_id = item.OrderItemId, round_number = ticket.RoundNumber });
+
+        await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
+        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    public async Task VoidOrderItemAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        LocalOrderItem orderItem,
+        string reason,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        if (orderItem.Status is "voided" or "cancelled")
+        {
+            return;
+        }
+
+        var kitchenItems = await db.KitchenTicketItems
+            .Where(value => value.OrderItemId == orderItem.Id &&
+                            value.Status != "voided" &&
+                            value.Status != "cancelled")
+            .ToArrayAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var releasedReservations = 0;
+        var producedItems = 0;
+
+        foreach (var kitchenItem in kitchenItems)
+        {
+            var reservation = await db.InventoryReservations
+                .SingleOrDefaultAsync(
+                    value => value.KitchenTicketItemId == kitchenItem.Id,
+                    cancellationToken);
+
+            if (reservation?.Status == "reserved")
+            {
+                await _inventory.ReleaseKitchenItemReservationAsync(
+                    db,
+                    kitchenItem,
+                    actor,
+                    reason,
+                    cancellationToken);
+                releasedReservations++;
+            }
+            else if (reservation?.Status == "committed")
+            {
+                producedItems++;
+            }
+
+            kitchenItem.Status = "voided";
+            kitchenItem.VoidedAt = now;
+            kitchenItem.VoidReason = reason;
+
+            var ticket = await db.KitchenTickets
+                .SingleAsync(value => value.Id == kitchenItem.KitchenTicketId, cancellationToken);
+            await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+            AddChange(
+                db,
+                "kitchen_ticket",
+                ticket.Id,
+                null,
+                await TicketSnapshotAsync(db, ticket, cancellationToken));
+        }
+
+        orderItem.Status = "voided";
+        orderItem.VoidedAt = now;
+        orderItem.VoidReason = reason;
+        orderItem.UpdatedAtUtc = now;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "order",
+            kitchenItems.Length == 0 ? "order.item_voided_pre_kot" : "order.item_voided_post_kot",
+            order.BranchId,
+            "order_item",
+            orderItem.Id,
+            new
+            {
+                order_id = order.Id,
+                order_item_id = orderItem.Id,
+                reason,
+                kitchen_items = kitchenItems.Length,
+                released_reservations = releasedReservations,
+                produced_items_not_returned = producedItems,
+            });
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<object> RefireItemAsync(
+        string sourceKitchenItemId,
+        string clientRefireId,
+        string reason,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureKitchenRole(actor);
+
+        if (string.IsNullOrWhiteSpace(clientRefireId) || clientRefireId.Length > 100)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "client_refire_id is required.");
+        }
+
+        reason = reason?.Trim() ?? string.Empty;
+        if (reason.Length == 0 || reason.Length > 500)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "A re-fire reason is required.");
+        }
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var source = await db.KitchenTicketItems
+            .SingleOrDefaultAsync(value => value.Id == sourceKitchenItemId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Source kitchen item does not exist.");
+
+        if (source.Status is "voided" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Voided or cancelled kitchen items cannot be re-fired.");
+        }
+
+        var sourceTicket = await RequireTicketAsync(db, source.KitchenTicketId, cancellationToken);
+        var order = await db.Orders
+            .SingleAsync(value => value.Id == sourceTicket.OrderId, cancellationToken);
+
+        if (order.Status is "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "This order can no longer create production re-fires.");
+        }
+
+        var mutationId = $"refire:{clientRefireId}";
+        var existingRound = await db.KotRounds
+            .SingleOrDefaultAsync(
+                value => value.OrderId == order.Id && value.MutationId == mutationId,
+                cancellationToken);
+
+        if (existingRound is not null)
+        {
+            var existingTicket = await db.KitchenTickets
+                .Where(value => value.KotRoundId == existingRound.Id)
+                .OrderBy(value => value.QueuedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existingTicket is not null)
+            {
+                return await TicketSnapshotAsync(db, existingTicket, cancellationToken);
+            }
+        }
+
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var round = existingRound ?? await CreateRoundAsync(
+            db,
+            order,
+            actor,
+            mutationId,
+            settings,
+            cancellationToken);
+
+        var station = await db.KitchenStations
+            .SingleAsync(value => value.Id == sourceTicket.KitchenStationId, cancellationToken);
+        var orderItem = await db.OrderItems
+            .SingleAsync(value => value.Id == source.OrderItemId, cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var initialStatus = round.QueueEnabled ? "queued" : "active";
+
+        var ticket = new LocalKitchenTicket
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            OrderId = order.Id,
+            KotRoundId = round.Id,
+            RoundNumber = round.RoundNumber,
+            KitchenStationId = station.Id,
+            SubmittedByUserId = actor.UserId,
+            TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}",
+            KotNumber = round.KotNumber,
+            Priority = "rush",
+            Status = initialStatus,
+            QueuedAt = now,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+
+        var refireItem = new LocalKitchenTicketItem
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            KitchenTicketId = ticket.Id,
+            OrderItemId = orderItem.Id,
+            ItemName = source.ItemName,
+            Quantity = source.Quantity,
+            Notes = source.Notes,
+            Status = initialStatus,
+            SeatNumber = source.SeatNumber,
+            CourseNumber = source.CourseNumber,
+            CourseName = source.CourseName,
+            Priority = "rush",
+            ModifiersJson = source.ModifiersJson,
+            AllergyInstructions = source.AllergyInstructions,
+            KitchenInstructions = source.KitchenInstructions,
+            RefireOfKitchenItemId = source.Id,
+            RefireReason = reason,
+        };
+
+        db.KitchenTickets.Add(ticket);
+        db.KitchenTicketItems.Add(refireItem);
+        await db.SaveChangesAsync(cancellationToken);
+
+        await _inventory.ReserveKitchenItemAsync(db, refireItem, actor, cancellationToken);
+        if (!round.QueueEnabled && !round.PreparingEnabled)
+        {
+            await _inventory.CommitKitchenItemAsync(db, refireItem, actor, cancellationToken);
+        }
+
+        var printer = await db.KitchenPrinterBindings
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                value => value.KitchenStationId == station.Id && value.IsEnabled,
+                cancellationToken);
+
+        if (printer is not null)
+        {
+            db.PrintJobs.Add(new LocalPrintJob
+            {
+                Id = Guid.CreateVersion7().ToString("N"),
+                KitchenTicketId = ticket.Id,
+                PrinterName = printer.PrinterName,
+                DocumentName = $"{round.KotNumber} REFIRE - {station.Name}",
+                PayloadText = await BuildKotTextAsync(db, ticket, station, order, cancellationToken),
+                Copies = Math.Clamp(printer.Copies, 1, 5),
+                Status = "pending",
+                Attempts = 0,
+                CreatedAtUtc = now,
+            });
+        }
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "kitchen",
+            "kitchen.item_refired",
+            order.BranchId,
+            "kitchen_ticket_item",
+            refireItem.Id,
+            new
+            {
+                order_id = order.Id,
+                source_kitchen_item_id = source.Id,
+                new_kitchen_item_id = refireItem.Id,
+                round_number = round.RoundNumber,
+                reason,
+            });
+
+        await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
+        AddChange(db, "kot_round", round.Id, order.WaiterId, RoundSnapshot(round));
+        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        AddChange(db, "order", order.Id, order.WaiterId, await BasicOrderSnapshotAsync(db, order, cancellationToken));
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
     public async Task ConfigurePrinterAsync(
         string stationId,
         string printerName,
@@ -544,6 +868,7 @@ public sealed class LocalKitchenService
                 voided_at = item.VoidedAt,
                 void_reason = item.VoidReason,
                 refire_of_kitchen_item_id = item.RefireOfKitchenItemId,
+                refire_reason = item.RefireReason,
             }).ToArray(),
         };
     }
@@ -660,12 +985,12 @@ public sealed class LocalKitchenService
         }
 
         var now = DateTimeOffset.UtcNow;
-        item.Status = "ready";
+        item.Status = round.ExpoEnabled ? "expo" : "ready";
         item.ReadyAt ??= now;
 
         var orderItem = await db.OrderItems
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
-        orderItem.Status = "ready";
+        orderItem.Status = item.Status;
         orderItem.UpdatedAtUtc = now;
 
         if (!round.PreparingEnabled)
@@ -677,11 +1002,17 @@ public sealed class LocalKitchenService
             db,
             actor,
             "kitchen",
-            "kitchen.item_ready",
+            round.ExpoEnabled ? "kitchen.item_sent_to_expo" : "kitchen.item_ready",
             null,
             "kitchen_ticket_item",
             item.Id,
-            new { ticket_id = ticket.Id, order_item_id = item.OrderItemId, round_number = ticket.RoundNumber });
+            new
+            {
+                ticket_id = ticket.Id,
+                order_item_id = item.OrderItemId,
+                round_number = ticket.RoundNumber,
+                expo_enabled = round.ExpoEnabled,
+            });
     }
 
     private static async Task RefreshTicketAndOrderAsync(
@@ -702,6 +1033,11 @@ public sealed class LocalKitchenService
         else if (items.Length > 0 && items.All(value => value.Status is "ready" or "completed" or "voided" or "cancelled"))
         {
             ticket.Status = "ready";
+            ticket.ReadyAt ??= DateTimeOffset.UtcNow;
+        }
+        else if (items.Any(value => value.Status == "expo"))
+        {
+            ticket.Status = "expo";
             ticket.ReadyAt ??= DateTimeOffset.UtcNow;
         }
         else if (items.Any(value => value.Status == "preparing"))
@@ -752,6 +1088,10 @@ public sealed class LocalKitchenService
         if (itemStatuses.All(status => status is "ready" or "completed" or "voided" or "cancelled"))
         {
             order.Status = "ready";
+        }
+        else if (itemStatuses.Any(status => status == "expo"))
+        {
+            order.Status = "expo";
         }
         else if (itemStatuses.Any(status => status == "preparing"))
         {
@@ -986,6 +1326,10 @@ public sealed class LocalKitchenService
         foreach (var item in items)
         {
             builder.AppendLine($"{item.Quantity} x {item.ItemName}");
+            if (!string.IsNullOrWhiteSpace(item.RefireOfKitchenItemId))
+            {
+                builder.AppendLine($"  !!! REFIRE: {item.RefireReason ?? "Requested re-fire"} !!!");
+            }
             if (item.SeatNumber.HasValue) builder.AppendLine($"  SEAT: {item.SeatNumber.Value}");
             if (item.CourseNumber.HasValue) builder.AppendLine($"  COURSE: {item.CourseNumber.Value} {item.CourseName}".TrimEnd());
             foreach (var modifier in ModifierLines(item.ModifiersJson)) builder.AppendLine($"  {modifier}");
@@ -1044,6 +1388,17 @@ public sealed class LocalKitchenService
     {
         var safe = new string(code.Where(char.IsLetterOrDigit).ToArray()).ToUpperInvariant();
         return string.IsNullOrWhiteSpace(safe) ? "GENERAL" : safe;
+    }
+
+    private static void EnsureExpoRole(LocalTerminalPrincipal actor)
+    {
+        if (actor.UserRole is not ("owner" or "manager" or "expo"))
+        {
+            throw new LocalSyncConflictException(
+                "forbidden",
+                "This user role cannot operate Expo.",
+                "rejected");
+        }
     }
 
     private static void EnsureKitchenRole(LocalTerminalPrincipal actor)
