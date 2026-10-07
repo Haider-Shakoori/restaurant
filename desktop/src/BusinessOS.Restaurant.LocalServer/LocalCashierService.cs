@@ -741,42 +741,111 @@ public sealed class LocalCashierService
         var source = await db.Orders.SingleOrDefaultAsync(value => value.Id == sourceOrderId, cancellationToken)
             ?? throw new LocalSyncConflictException("dependency_missing", "Source order does not exist.");
 
-        if (target.Status != "draft" || source.Status != "draft")
+        if (target.Status is "served" or "billed" or "closed" or "cancelled" ||
+            source.Status is "served" or "billed" or "closed" or "cancelled")
         {
             throw new LocalSyncConflictException(
                 "order_state_conflict",
-                "Orders can only be merged while both are still draft, before kitchen routing.");
+                "Served, billed, closed or cancelled orders cannot be merged.");
         }
 
-        var sourceTable = await db.DiningTables.SingleAsync(value => value.Id == source.DiningTableId, cancellationToken);
-        var items = await db.OrderItems.Where(value => value.OrderId == source.Id).ToArrayAsync(cancellationToken);
+        if (target.ServiceType != "dine_in" || source.ServiceType != "dine_in" ||
+            string.IsNullOrWhiteSpace(target.DiningTableId) ||
+            string.IsNullOrWhiteSpace(source.DiningTableId))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Table/order merge is only available for active dine-in orders.");
+        }
+
+        var sourceHasKitchen = await db.KitchenTickets
+            .AnyAsync(value => value.OrderId == source.Id, cancellationToken);
+        if (sourceHasKitchen)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "The source order already has kitchen production. Transfer its table instead of rewriting historical KOT lineage.");
+        }
+
+        var sourceHasBill = await db.Bills.AnyAsync(value => value.OrderId == source.Id, cancellationToken);
+        var targetHasBill = await db.Bills.AnyAsync(value => value.OrderId == target.Id, cancellationToken);
+        if (sourceHasBill || targetHasBill)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Orders with an issued bill cannot be merged.");
+        }
+
+        var sourceTable = await db.DiningTables
+            .SingleAsync(value => value.Id == source.DiningTableId, cancellationToken);
+        var targetTable = await db.DiningTables
+            .SingleAsync(value => value.Id == target.DiningTableId, cancellationToken);
+        var sourceArea = await db.DiningAreas
+            .SingleAsync(value => value.Id == sourceTable.DiningAreaId, cancellationToken);
+        var targetArea = await db.DiningAreas
+            .SingleAsync(value => value.Id == targetTable.DiningAreaId, cancellationToken);
+
+        if (!string.Equals(sourceArea.BranchId, targetArea.BranchId, StringComparison.Ordinal))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Orders from different branches cannot be merged.");
+        }
+
+        var items = await db.OrderItems
+            .Where(value => value.OrderId == source.Id &&
+                            value.Status != "voided" &&
+                            value.Status != "cancelled")
+            .ToArrayAsync(cancellationToken);
+
+        if (items.Any(value =>
+                !string.IsNullOrWhiteSpace(value.KotRoundId) ||
+                value.Status is not ("pending" or "held")))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Only an unsent source order can merge into another active order.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var targetStatusBefore = target.Status;
 
         foreach (var item in items)
         {
             item.OrderId = target.Id;
             item.ClientLineId = $"{source.ClientOrderId}-{item.ClientLineId}";
-            item.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            item.UpdatedAtUtc = now;
         }
 
         target.GuestCount += source.GuestCount;
-        target.Subtotal = Money(target.Subtotal + source.Subtotal);
-        target.Total = Money(target.Total + source.Total);
-        target.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        target.UpdatedAtUtc = now;
+        if (target.Status == "ready" && items.Length > 0)
+        {
+            target.Status = "submitted";
+        }
 
         source.Status = "closed";
-        source.ClosedAt = DateTimeOffset.UtcNow;
-        source.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        source.Subtotal = 0m;
+        source.Total = 0m;
+        source.ClosedAt = now;
+        source.UpdatedAtUtc = now;
         sourceTable.Status = "available";
 
         await db.SaveChangesAsync(cancellationToken);
 
+        target.Subtotal = Money(await db.OrderItems
+            .Where(value =>
+                value.OrderId == target.Id &&
+                value.Status != "voided" &&
+                value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken));
+        target.Total = target.Subtotal;
+
         AddChange(db, "order", target.Id, target.WaiterId, await OrderSnapshotAsync(db, target, cancellationToken));
         AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
+        AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
 
-        var sourceArea = await db.DiningAreas.AsNoTracking().SingleAsync(
-            value => value.Id == sourceTable.DiningAreaId,
-            cancellationToken);
         LocalOperationsControlService.AddAudit(
             db,
             actor,
@@ -785,7 +854,176 @@ public sealed class LocalCashierService
             sourceArea.BranchId,
             "order",
             target.Id,
-            new { target_order_id = target.Id, source_order_id = source.Id, released_table_id = sourceTable.Id });
+            new
+            {
+                target_order_id = target.Id,
+                source_order_id = source.Id,
+                target_status_before = targetStatusBefore,
+                target_status_after = target.Status,
+                moved_item_ids = items.Select(value => value.Id).ToArray(),
+                source_kot_rewritten = false,
+                released_table_id = sourceTable.Id,
+            });
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return await OrderSnapshotAsync(db, target, cancellationToken);
+    }
+
+    public async Task<object> MoveUnsentItemsAsync(
+        string sourceOrderId,
+        string targetOrderId,
+        IReadOnlyList<string> orderItemIds,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureManagerOrCashier(actor);
+
+        if (sourceOrderId == targetOrderId)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "Source and target order must be different.");
+        }
+
+        if (orderItemIds.Count == 0)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "Select at least one unsent item to move.");
+        }
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var source = await db.Orders.SingleOrDefaultAsync(value => value.Id == sourceOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Source order does not exist.");
+        var target = await db.Orders.SingleOrDefaultAsync(value => value.Id == targetOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Target order does not exist.");
+
+        if (source.Status is "billed" or "closed" or "cancelled" ||
+            target.Status is "served" or "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Items cannot move into or out of financially closed orders.");
+        }
+
+        if (source.ServiceType != "dine_in" || target.ServiceType != "dine_in" ||
+            string.IsNullOrWhiteSpace(source.DiningTableId) ||
+            string.IsNullOrWhiteSpace(target.DiningTableId))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Item move is only available between active dine-in orders.");
+        }
+
+        var sourceTable = await db.DiningTables.SingleAsync(
+            value => value.Id == source.DiningTableId,
+            cancellationToken);
+        var targetTable = await db.DiningTables.SingleAsync(
+            value => value.Id == target.DiningTableId,
+            cancellationToken);
+        var sourceArea = await db.DiningAreas.SingleAsync(
+            value => value.Id == sourceTable.DiningAreaId,
+            cancellationToken);
+        var targetArea = await db.DiningAreas.SingleAsync(
+            value => value.Id == targetTable.DiningAreaId,
+            cancellationToken);
+
+        if (!string.Equals(sourceArea.BranchId, targetArea.BranchId, StringComparison.Ordinal))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Items cannot move between orders in different branches.");
+        }
+
+        var distinctIds = orderItemIds.Distinct(StringComparer.Ordinal).ToArray();
+        var items = await db.OrderItems
+            .Where(value => value.OrderId == source.Id && distinctIds.Contains(value.Id))
+            .ToArrayAsync(cancellationToken);
+
+        if (items.Length != distinctIds.Length)
+        {
+            throw new LocalSyncConflictException(
+                "dependency_missing",
+                "One or more selected items do not belong to the source order.");
+        }
+
+        if (items.Any(value =>
+                !string.IsNullOrWhiteSpace(value.KotRoundId) ||
+                value.Status is not ("pending" or "held")))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Only unsent pending/held items can move between active orders.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var item in items)
+        {
+            item.OrderId = target.Id;
+            item.ClientLineId = $"{source.ClientOrderId}-{item.ClientLineId}";
+            item.UpdatedAtUtc = now;
+        }
+
+        source.UpdatedAtUtc = now;
+        target.UpdatedAtUtc = now;
+        if (target.Status == "ready")
+        {
+            target.Status = "submitted";
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+
+        source.Subtotal = Money(await db.OrderItems
+            .Where(value =>
+                value.OrderId == source.Id &&
+                value.Status != "voided" &&
+                value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken));
+        source.Total = source.Subtotal;
+        target.Subtotal = Money(await db.OrderItems
+            .Where(value =>
+                value.OrderId == target.Id &&
+                value.Status != "voided" &&
+                value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken));
+        target.Total = target.Subtotal;
+
+        var sourceHasItems = await db.OrderItems.AnyAsync(
+            value => value.OrderId == source.Id &&
+                     value.Status != "voided" &&
+                     value.Status != "cancelled",
+            cancellationToken);
+        var sourceHasKitchen = await db.KitchenTickets.AnyAsync(
+            value => value.OrderId == source.Id,
+            cancellationToken);
+
+        if (!sourceHasItems && !sourceHasKitchen)
+        {
+            source.Status = "closed";
+            source.ClosedAt = now;
+            sourceTable.Status = "available";
+        }
+
+        AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
+        AddChange(db, "order", target.Id, target.WaiterId, await OrderSnapshotAsync(db, target, cancellationToken));
+        AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
+        AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "order",
+            "order.items_moved",
+            sourceArea.BranchId,
+            "order",
+            target.Id,
+            new
+            {
+                source_order_id = source.Id,
+                target_order_id = target.Id,
+                moved_item_ids = distinctIds,
+                kitchen_production_moved = false,
+            });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
