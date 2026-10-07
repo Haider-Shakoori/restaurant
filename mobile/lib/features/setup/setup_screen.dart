@@ -294,11 +294,14 @@ class _PairingQrScannerState extends State<_PairingQrScanner> {
           MobileScanner(
             onDetect: (capture) {
               if (_handled) return;
-              final value = capture.barcodes
-                  .map((barcode) => barcode.rawValue)
-                  .whereType<String>()
-                  .where((value) => value.isNotEmpty)
-                  .firstOrNull;
+              String? value;
+              for (final barcode in capture.barcodes) {
+                final raw = barcode.rawValue;
+                if (raw != null && raw.isNotEmpty) {
+                  value = raw;
+                  break;
+                }
+              }
               if (value == null) return;
               _handled = true;
               Navigator.of(context).pop(value);
