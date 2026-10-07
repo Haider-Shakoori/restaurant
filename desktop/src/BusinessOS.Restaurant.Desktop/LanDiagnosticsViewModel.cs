@@ -31,6 +31,7 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private string _pairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
     private string _pairingPayload = string.Empty;
     private BitmapImage? _pairingQrImage;
+    private string _mobileAllowance = "Unknown";
 
     public LanDiagnosticsViewModel()
     {
@@ -115,6 +116,12 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
         private set => SetProperty(ref _pairingQrImage, value);
     }
 
+    public string MobileAllowance
+    {
+        get => _mobileAllowance;
+        private set => SetProperty(ref _mobileAllowance, value);
+    }
+
     public int OpenCloudConflicts
     {
         get => _openCloudConflicts;
@@ -172,6 +179,7 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 PairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
                 PairingPayload = string.Empty;
                 PairingQrImage = null;
+                MobileAllowance = "Not activated";
                 return;
             }
 
@@ -225,6 +233,13 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
             {
                 Terminals.Add(terminal);
             }
+
+            var mobileCount = terminals.Count(value =>
+                string.Equals(value.ClientType, "android", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value.ClientType, "ios", StringComparison.OrdinalIgnoreCase));
+            MobileAllowance = activation.Snapshot.MobileDeviceLimit is int mobileLimit
+                ? $"{mobileCount} / {mobileLimit} paired"
+                : $"{mobileCount} paired · unlimited";
 
             StatusMessage = diagnostics.NetworkMode == LocalNetworkMode.IsolatedLocal
                 ? "Cloud is unavailable or intentionally disabled. Local ordering, KOT and cashier operations remain authoritative while the signed offline lease is valid."
