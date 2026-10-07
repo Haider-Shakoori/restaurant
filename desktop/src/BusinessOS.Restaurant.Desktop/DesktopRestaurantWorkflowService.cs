@@ -14,6 +14,7 @@ public sealed class DesktopRestaurantWorkflowService
     private readonly LocalCashierService _cashier;
     private readonly LocalOperationsControlService _operations;
     private readonly LocalExpenseService _expenses;
+    private readonly LocalRestaurantSettingsService _settings;
 
     public DesktopRestaurantWorkflowService()
     {
@@ -21,6 +22,7 @@ public sealed class DesktopRestaurantWorkflowService
         _cashier = new LocalCashierService(_factory);
         _operations = new LocalOperationsControlService(_factory);
         _expenses = new LocalExpenseService(_factory);
+        _settings = new LocalRestaurantSettingsService(_factory);
         _sync = new LocalSyncService(_factory, new OperationalSnapshotStore(_factory), _kitchen);
     }
 
@@ -66,9 +68,12 @@ public sealed class DesktopRestaurantWorkflowService
     }
 
     public async Task SubmitOrderAsync(string clientOrderId, CancellationToken token = default)
+        => await SendKotAsync(clientOrderId, token);
+
+    public async Task SendKotAsync(string clientOrderId, CancellationToken token = default)
     {
         var payload = JsonSerializer.SerializeToElement(new { client_order_id = clientOrderId });
-        await PushSingleAsync("order.submit", payload, token);
+        await PushSingleAsync("order.kot.send", payload, token);
     }
 
     public async Task StartKitchenTicketAsync(string ticketId, CancellationToken token = default)
@@ -76,6 +81,20 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task MarkKitchenTicketReadyAsync(string ticketId, CancellationToken token = default)
         => _ = await _kitchen.ReadyAsync(ticketId, await CurrentPrincipalAsync(token), token);
+
+    public async Task StartKitchenItemAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.StartItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task MarkKitchenItemReadyAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.ReadyItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public Task<RestaurantWorkflowSettings> RestaurantSettingsAsync(CancellationToken token = default)
+        => _settings.GetAsync(token);
+
+    public async Task<RestaurantWorkflowSettings> UpdateRestaurantSettingsAsync(
+        RestaurantWorkflowSettingsUpdate update,
+        CancellationToken token = default)
+        => await _settings.UpdateAsync(update, await CurrentPrincipalAsync(token), token);
 
 
     public async Task<object> OpenCashierSessionAsync(string branchId, decimal openingCash, CancellationToken token = default)
