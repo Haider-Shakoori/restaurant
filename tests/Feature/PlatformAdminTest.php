@@ -190,7 +190,6 @@ class PlatformAdminTest extends TestCase
         ]);
     }
 
-
     public function test_super_admin_can_reset_operator_password(): void
     {
         $admin = AdminUser::factory()->create([
