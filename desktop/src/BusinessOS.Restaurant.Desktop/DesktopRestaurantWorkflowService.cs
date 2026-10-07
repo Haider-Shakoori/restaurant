@@ -41,12 +41,25 @@ public sealed class DesktopRestaurantWorkflowService
     }
 
     public async Task<string> OpenOrderAsync(string tableId, int guestCount, string? notes = null, CancellationToken token = default)
+        => await OpenOrderAsync("dine_in", tableId, string.Empty, null, guestCount, notes, token);
+
+    public async Task<string> OpenOrderAsync(
+        string serviceType,
+        string? tableId,
+        string branchId,
+        string? serviceReference,
+        int guestCount,
+        string? notes = null,
+        CancellationToken token = default)
     {
         var clientOrderId = $"DESK-{Guid.CreateVersion7():N}";
         var payload = JsonSerializer.SerializeToElement(new
         {
             client_order_id = clientOrderId,
             dining_table_id = tableId,
+            branch_id = branchId,
+            service_type = serviceType,
+            service_reference = serviceReference,
             guest_count = guestCount,
             notes
         });
@@ -55,14 +68,56 @@ public sealed class DesktopRestaurantWorkflowService
     }
 
     public async Task AddItemAsync(string clientOrderId, string menuItemId, int quantity, string? notes = null, CancellationToken token = default)
+        => await AddItemAsync(
+            clientOrderId,
+            menuItemId,
+            quantity,
+            notes,
+            seatNumber: null,
+            courseNumber: null,
+            courseName: null,
+            held: false,
+            priority: "normal",
+            allergyInstructions: null,
+            kitchenInstructions: null,
+            modifierOptionIds: null,
+            token);
+
+    public async Task AddItemAsync(
+        string clientOrderId,
+        string menuItemId,
+        int quantity,
+        string? notes,
+        int? seatNumber,
+        int? courseNumber,
+        string? courseName,
+        bool held,
+        string priority,
+        string? allergyInstructions,
+        string? kitchenInstructions,
+        IReadOnlyList<string>? modifierOptionIds,
+        CancellationToken token = default)
     {
+        var modifiers = (modifierOptionIds ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => new { option_id = value })
+            .ToArray();
+
         var payload = JsonSerializer.SerializeToElement(new
         {
             client_order_id = clientOrderId,
             client_line_id = $"LINE-{Guid.CreateVersion7():N}",
             menu_item_id = menuItemId,
             quantity,
-            notes
+            notes,
+            seat_number = seatNumber,
+            course_number = courseNumber,
+            course_name = courseName,
+            held,
+            priority,
+            allergy_instructions = allergyInstructions,
+            kitchen_instructions = kitchenInstructions,
+            modifiers,
         });
         await PushSingleAsync("order.item.add", payload, token);
     }
@@ -76,6 +131,47 @@ public sealed class DesktopRestaurantWorkflowService
         await PushSingleAsync("order.kot.send", payload, token);
     }
 
+    public async Task FireCourseAsync(
+        string clientOrderId,
+        int courseNumber,
+        CancellationToken token = default)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            course_number = courseNumber,
+        });
+        await PushSingleAsync("course.fire", payload, token);
+    }
+
+    public async Task VoidOrderItemAsync(
+        string clientOrderId,
+        string clientLineId,
+        string reason,
+        CancellationToken token = default)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            client_line_id = clientLineId,
+            reason,
+        });
+        await PushSingleAsync("order.item.void", payload, token);
+    }
+
+    public async Task CancelOrderAsync(
+        string clientOrderId,
+        string reason,
+        CancellationToken token = default)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            reason,
+        });
+        await PushSingleAsync("order.cancel", payload, token);
+    }
+
     public async Task StartKitchenTicketAsync(string ticketId, CancellationToken token = default)
         => _ = await _kitchen.StartAsync(ticketId, await CurrentPrincipalAsync(token), token);
 
@@ -87,6 +183,32 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task MarkKitchenItemReadyAsync(string itemId, CancellationToken token = default)
         => _ = await _kitchen.ReadyItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task PassExpoItemAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.PassExpoItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task RefireKitchenItemAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RefireItemAsync(
+            itemId,
+            $"DESK-REFIRE-{Guid.CreateVersion7():N}",
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task<object> TransferOrderAsync(
+        string orderId,
+        string targetTableId,
+        CancellationToken token = default)
+        => await _cashier.TransferOrderAsync(orderId, targetTableId, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> MergeDraftOrdersAsync(
+        string targetOrderId,
+        string sourceOrderId,
+        CancellationToken token = default)
+        => await _cashier.MergeDraftOrdersAsync(targetOrderId, sourceOrderId, await CurrentPrincipalAsync(token), token);
 
     public Task<RestaurantWorkflowSettings> RestaurantSettingsAsync(CancellationToken token = default)
         => _settings.GetAsync(token);
