@@ -86,6 +86,18 @@ class TenantPortalController extends Controller
                 ->latest('opened_at')
                 ->limit(100)
                 ->get(),
+            'availableTables' => DiningTable::query()
+                ->with('diningArea.branch')
+                ->where('is_active', true)
+                ->where('status', DiningTable::STATUS_AVAILABLE)
+                ->orderBy('name')
+                ->get(),
+            'menuCategories' => MenuCategory::query()
+                ->with(['items' => fn ($query) => $query->where('is_available', true)->orderBy('sort_order')->orderBy('name')])
+                ->where('is_active', true)
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(),
             'statuses' => [
                 Order::STATUS_DRAFT,
                 Order::STATUS_SUBMITTED,
