@@ -26,14 +26,14 @@ internal static class OperationalActionViews
             .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
         var modifierChoices = await (
             from link in db.MenuItemModifierGroups.AsNoTracking()
-            join group in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals group.Id
-            join option in db.ModifierOptions.AsNoTracking() on group.Id equals option.ModifierGroupId
-            where group.IsActive && option.IsActive
-            orderby link.SortOrder, group.SortOrder, option.SortOrder, option.Name
+            join modifierGroup in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals modifierGroup.Id
+            join option in db.ModifierOptions.AsNoTracking() on modifierGroup.Id equals option.ModifierGroupId
+            where modifierGroup.IsActive && option.IsActive
+            orderby link.SortOrder, modifierGroup.SortOrder, option.SortOrder, option.Name
             select new ModifierChoice(
                 link.MenuItemId,
                 option.Id,
-                $"{group.Name}: {option.Name}",
+                $"{modifierGroup.Name}: {option.Name}",
                 option.PriceDelta))
             .ToListAsync();
         var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
