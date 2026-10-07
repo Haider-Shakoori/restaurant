@@ -34,6 +34,7 @@
         @php
             $entitlementExamples = [
                 ['key' => 'max_waiters', 'value' => '10'],
+                ['key' => 'max_devices', 'value' => '5'],
                 ['key' => 'max_mobile_devices', 'value' => '5'],
                 ['key' => 'max_branches', 'value' => '1'],
                 ['key' => 'inventory', 'value' => 'true'],
