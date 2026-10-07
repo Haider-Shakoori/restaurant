@@ -226,6 +226,37 @@ class LicenseFoundationTest extends TestCase
         );
     }
 
+    public function test_legacy_device_limit_labels_are_enforced_for_existing_subscription_snapshots(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness([
+            'Max devices' => '3',
+            'Max mobile devices' => '1',
+        ]);
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $desktop = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'legacy-desktop-001',
+            'platform' => 'windows',
+        ])->assertCreated();
+
+        $this->assertSame(3, $desktop->json('lease.payload.device_limit'));
+        $this->assertSame(1, $desktop->json('lease.payload.mobile_device_limit'));
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'legacy-mobile-001',
+            'platform' => 'android',
+        ])->assertCreated();
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'legacy-mobile-002',
+            'platform' => 'ios',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('device_uid');
+    }
+
     public function test_license_rotation_revokes_old_license_and_device_credentials(): void
     {
         [$business, , $domain] = $this->createActiveBusiness();
