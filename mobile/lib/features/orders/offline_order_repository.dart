@@ -30,7 +30,10 @@ class OfflineOrderRepository {
   final Uuid _uuid;
 
   Future<String> createOrder({
-    required String tableId,
+    String? tableId,
+    required String branchId,
+    String serviceType = 'dine_in',
+    String? serviceReference,
     required int guestCount,
     String? notes,
   }) async {
@@ -41,6 +44,9 @@ class OfflineOrderRepository {
       clientOrderId: clientOrderId,
       mutationId: _uuid.v4(),
       tableId: tableId,
+      branchId: branchId,
+      serviceType: serviceType,
+      serviceReference: serviceReference,
       guestCount: guestCount,
       notes: notes,
     );
