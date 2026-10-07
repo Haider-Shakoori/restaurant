@@ -13,6 +13,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'item_name',
     'quantity',
     'notes',
+    'seat_number',
+    'course_number',
+    'course_name',
+    'modifiers_snapshot',
+    'allergy_instructions',
+    'kitchen_instructions',
     'status',
 ])]
 class KitchenTicketItem extends Model
@@ -20,6 +26,15 @@ class KitchenTicketItem extends Model
     use HasUlids;
 
     protected $connection = 'tenant';
+
+    protected function casts(): array
+    {
+        return [
+            'seat_number' => 'integer',
+            'course_number' => 'integer',
+            'modifiers_snapshot' => 'array',
+        ];
+    }
 
     public function ticket(): BelongsTo
     {
