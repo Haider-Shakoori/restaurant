@@ -13,6 +13,7 @@ class KitchenTicketController extends Controller
     {
         $tickets = KitchenTicket::query()
             ->with([
+                'round',
                 'station',
                 'items',
                 'order.table.diningArea.branch',
@@ -26,12 +27,13 @@ class KitchenTicketController extends Controller
                 $request->filled('status'),
                 fn ($query) => $query->where('status', $request->string('status')->toString()),
                 fn ($query) => $query->whereIn('status', [
+                    KitchenTicket::STATUS_ACTIVE,
                     KitchenTicket::STATUS_QUEUED,
                     KitchenTicket::STATUS_PREPARING,
                     KitchenTicket::STATUS_READY,
                 ]),
             )
-            ->orderByRaw("CASE status WHEN 'preparing' THEN 0 WHEN 'queued' THEN 1 WHEN 'ready' THEN 2 ELSE 3 END")
+            ->orderByRaw("CASE status WHEN 'preparing' THEN 0 WHEN 'queued' THEN 1 WHEN 'active' THEN 1 WHEN 'ready' THEN 2 ELSE 3 END")
             ->orderBy('queued_at')
             ->limit(200)
             ->get();
@@ -43,6 +45,7 @@ class KitchenTicketController extends Controller
     {
         return response()->json([
             'data' => $kitchenTicket->load([
+                'round',
                 'station.branch',
                 'items.orderItem',
                 'events.actor',
