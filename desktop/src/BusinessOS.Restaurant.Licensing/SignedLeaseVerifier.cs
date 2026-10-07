@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using NSec.Cryptography;
 
@@ -70,7 +71,12 @@ public sealed class SignedLeaseVerifier
     internal static byte[] Canonicalize(JsonElement element)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
+        using (var writer = new Utf8JsonWriter(
+                   buffer,
+                   new JsonWriterOptions
+                   {
+                       Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                   }))
         {
             WriteCanonical(writer, element);
         }
