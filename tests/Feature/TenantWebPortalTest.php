@@ -8,6 +8,7 @@ use App\Enums\LicenseStatus;
 use App\Enums\ProvisioningState;
 use App\Models\Business;
 use App\Models\DeviceActivation;
+use App\Models\InventoryBalance;
 use App\Models\InventoryItem;
 use App\Models\LicenseKey;
 use App\Models\Plan;
@@ -155,6 +156,33 @@ class TenantWebPortalTest extends TestCase
             $this->assertSame($supplier->id, $purchaseOrder->supplier_id);
             $this->assertSame('300.00', $purchaseOrder->estimated_total);
             $this->assertSame('Rice', $purchaseOrder->lines->first()->item_name);
+            $purchaseOrderId = $purchaseOrder->id;
+            $purchaseOrderLineId = $purchaseOrder->lines->first()->id;
+        } finally {
+            tenancy()->end();
+        }
+
+        $this->get("http://{$domain}/purchasing")
+            ->assertOk()
+            ->assertSee('Receive PO')
+            ->assertSee('Receive & Add to Inventory', false);
+
+        $this->post("http://{$domain}/purchasing/orders/{$purchaseOrderId}/receive", [
+            'client_receipt_id' => 'WEB-GRN-001',
+            'notes' => 'All goods received',
+            'lines' => [[
+                'purchase_order_line_id' => $purchaseOrderLineId,
+                'purchase_quantity' => '2.0000',
+            ]],
+        ])
+            ->assertRedirect('/purchasing')
+            ->assertSessionHas('status');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $this->assertSame(PurchaseOrder::STATUS_RECEIVED, PurchaseOrder::query()->findOrFail($purchaseOrderId)->status);
+            $this->assertSame('2000.0000', InventoryBalance::query()->where('inventory_item_id', $item->id)->value('quantity'));
         } finally {
             tenancy()->end();
         }
