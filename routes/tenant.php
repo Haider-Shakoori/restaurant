@@ -16,6 +16,7 @@ use App\Http\Controllers\Tenant\ExpoController;
 use App\Http\Controllers\Tenant\FireOrderCourseController;
 use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\JournalEntryController;
+use App\Http\Controllers\Tenant\KitchenPerformanceReportController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
 use App\Http\Controllers\Tenant\KitchenStationController;
 use App\Http\Controllers\Tenant\KitchenTicketController;
@@ -268,6 +269,9 @@ Route::middleware($tenantMiddleware)
 
                 Route::get('/kitchen/expo', ExpoController::class)
                     ->name('tenant.api.kitchen.expo');
+
+                Route::get('/kitchen/reports/performance', KitchenPerformanceReportController::class)
+                    ->name('tenant.api.kitchen.reports.performance');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
