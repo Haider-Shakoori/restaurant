@@ -25,6 +25,7 @@ class _OrderScreenState extends State<OrderScreen> {
   List<Map<String, Object?>> _categories = const [];
   Map<String, List<Map<String, Object?>>> _menu = const {};
   bool _working = false;
+  bool _hasUnsent = false;
 
   @override
   void initState() {
@@ -37,6 +38,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final order = await db.order(widget.localOrderId);
     final items = await db.orderItems(widget.localOrderId);
     final categories = await db.menuCategories();
+    final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
     final menu = <String, List<Map<String, Object?>>>{};
 
     for (final category in categories) {
@@ -53,6 +55,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _items = items;
       _categories = categories;
       _menu = menu;
+      _hasUnsent = hasUnsent;
     });
   }
 
@@ -126,7 +129,15 @@ class _OrderScreenState extends State<OrderScreen> {
       );
     }
 
-    final draft = order['status'] == 'draft';
+    const editableStatuses = <String>{
+      'draft',
+      'submitted',
+      'submitted_pending_sync',
+      'preparing',
+      'ready',
+      'served',
+    };
+    final editable = editableStatuses.contains(order['status']?.toString());
 
     return Scaffold(
       appBar: AppBar(
@@ -189,7 +200,7 @@ class _OrderScreenState extends State<OrderScreen> {
                       const SizedBox(width: 8),
                       IconButton(
                         tooltip: widget.strings.add,
-                        onPressed: draft && !_working
+                        onPressed: editable && !_working
                             ? () => _addItem(item)
                             : null,
                         icon: const Icon(Icons.add_circle_outline),
@@ -203,7 +214,7 @@ class _OrderScreenState extends State<OrderScreen> {
           const SizedBox(height: 24),
         ],
       ),
-      bottomNavigationBar: draft
+      bottomNavigationBar: editable && _hasUnsent
           ? SafeArea(
               minimum: const EdgeInsets.all(16),
               child: FilledButton.icon(
