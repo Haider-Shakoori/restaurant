@@ -107,22 +107,6 @@ def save_desktop(root: Path) -> None:
     )
     icon.save(target / "BusinessOS.Restaurant.png", format="PNG")
 
-    # Build the installer backdrop from the same approved Restaurant artwork.
-    # It is deliberately cropped, softened and dimmed so Inno Setup controls
-    # remain readable while preserving the glass/teal product identity.
-    source = target / "RestaurantGlassBackground.jpg"
-    if source.exists():
-        with Image.open(source) as background:
-            background = background.convert("RGB")
-            background = ImageOps.fit(
-                background,
-                (640, 360),
-                method=Image.Resampling.LANCZOS,
-                centering=(0.5, 0.5),
-            )
-            background = background.filter(ImageFilter.GaussianBlur(radius=5.5))
-            background = ImageEnhance.Brightness(background).enhance(0.76)
-            background.save(target / "RestaurantInstallerBackground.png", format="PNG", optimize=True)
 
 
 def save_android(mobile: Path) -> None:
