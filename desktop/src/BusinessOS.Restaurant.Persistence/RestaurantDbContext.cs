@@ -22,6 +22,9 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
     public DbSet<LocalMutation> Mutations => Set<LocalMutation>();
     public DbSet<LocalChange> Changes => Set<LocalChange>();
+    public DbSet<LocalRestaurantSetting> RestaurantSettings => Set<LocalRestaurantSetting>();
+    public DbSet<LocalKotRound> KotRounds => Set<LocalKotRound>();
+    public DbSet<LocalKotCounter> KotCounters => Set<LocalKotCounter>();
     public DbSet<LocalKitchenTicket> KitchenTickets => Set<LocalKitchenTicket>();
     public DbSet<LocalKitchenTicketItem> KitchenTicketItems => Set<LocalKitchenTicketItem>();
     public DbSet<LocalKitchenPrinterBinding> KitchenPrinterBindings => Set<LocalKitchenPrinterBinding>();
@@ -194,12 +197,36 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasIndex(value => new { value.EntityType, value.EntityId });
             entity.HasIndex(value => value.OwnerUserId);
         });
+        modelBuilder.Entity<LocalRestaurantSetting>(entity =>
+        {
+            entity.ToTable("restaurant_settings");
+            entity.HasKey(value => value.Key);
+            entity.HasIndex(value => value.UpdatedAtUtc);
+        });
+
+        modelBuilder.Entity<LocalKotRound>(entity =>
+        {
+            entity.ToTable("kot_rounds");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.OrderId, value.RoundNumber }).IsUnique();
+            entity.HasIndex(value => value.MutationId).IsUnique();
+            entity.HasIndex(value => value.KotNumber);
+            entity.HasIndex(value => value.SentAt);
+        });
+
+        modelBuilder.Entity<LocalKotCounter>(entity =>
+        {
+            entity.ToTable("kot_counters");
+            entity.HasKey(value => new { value.BranchId, value.BusinessDate });
+        });
+
         modelBuilder.Entity<LocalKitchenTicket>(entity =>
         {
             entity.ToTable("kitchen_tickets");
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => value.TicketNumber).IsUnique();
-            entity.HasIndex(value => new { value.OrderId, value.KitchenStationId }).IsUnique();
+            entity.HasIndex(value => new { value.KotRoundId, value.KitchenStationId }).IsUnique();
+            entity.HasIndex(value => new { value.OrderId, value.RoundNumber });
             entity.HasIndex(value => new { value.KitchenStationId, value.Status });
         });
 
