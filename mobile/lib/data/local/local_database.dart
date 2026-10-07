@@ -15,7 +15,7 @@ class LocalDatabase implements SyncStore {
     final root = await getDatabasesPath();
     final database = await openDatabase(
       p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -96,6 +96,7 @@ class LocalDatabase implements SyncStore {
             seat_number INTEGER,
             course_number INTEGER,
             course_name TEXT,
+            course_state TEXT NOT NULL DEFAULT 'open',
             modifiers_snapshot_json TEXT,
             allergy_instructions TEXT,
             kitchen_instructions TEXT,
@@ -172,6 +173,11 @@ class LocalDatabase implements SyncStore {
           );
           await db.execute(
             'ALTER TABLE order_items ADD COLUMN kitchen_instructions TEXT',
+          );
+        }
+        if (oldVersion < 4) {
+          await db.execute(
+            "ALTER TABLE order_items ADD COLUMN course_state TEXT NOT NULL DEFAULT 'open'",
           );
         }
       },
@@ -437,9 +443,36 @@ class LocalDatabase implements SyncStore {
     );
   }
 
+  Future<void> fireCourse({
+    required String localOrderId,
+    required int courseNumber,
+    required String mutationId,
+    String priority = 'normal',
+  }) async {
+    await _db.transaction((txn) async {
+      await txn.update(
+        'order_items',
+        <String, Object?>{'course_state': 'fired'},
+        where: "local_order_id = ? AND course_number = ? AND course_state = 'held'",
+        whereArgs: <Object?>[localOrderId, courseNumber],
+      );
+
+      await _enqueue(
+        txn,
+        mutationId: mutationId,
+        operation: 'order.course.fire',
+        payload: <String, Object?>{
+          'client_order_id': localOrderId,
+          'course_number': courseNumber,
+          'priority': priority,
+        },
+      );
+    });
+  }
+
   Future<bool> hasUnsentItems(String localOrderId) async {
     final rows = await _db.rawQuery(
-      'SELECT COUNT(*) AS total FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity',
+      "SELECT COUNT(*) AS total FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
       <Object?>[localOrderId],
     );
     return ((rows.first['total'] as num?)?.toInt() ?? 0) > 0;
@@ -513,6 +546,13 @@ class LocalDatabase implements SyncStore {
     required Map<String, Object?> menuItem,
     required int quantity,
     String? notes,
+    int? seatNumber,
+    int? courseNumber,
+    String? courseName,
+    bool holdForCourse = false,
+    List<Map<String, Object?>> modifiers = const [],
+    String? allergyInstructions,
+    String? kitchenInstructions,
   }) async {
     await _db.transaction((txn) async {
       final orderRows = await txn.query(
@@ -554,6 +594,13 @@ class LocalDatabase implements SyncStore {
           'dispatched_quantity': 0,
           'line_total': lineTotal,
           'notes': notes,
+          'seat_number': seatNumber,
+          'course_number': courseNumber,
+          'course_name': courseName,
+          'course_state': holdForCourse ? 'held' : 'open',
+          'modifiers_snapshot_json': jsonEncode(modifiers),
+          'allergy_instructions': allergyInstructions,
+          'kitchen_instructions': kitchenInstructions,
           'status': 'pending',
         },
       );
@@ -590,6 +637,13 @@ class LocalDatabase implements SyncStore {
           'menu_item_id': menuItem['id']!.toString(),
           'quantity': quantity,
           'notes': notes,
+          'seat_number': seatNumber,
+          'course_number': courseNumber,
+          'course_name': courseName,
+          'hold_for_course': holdForCourse,
+          'modifiers': modifiers,
+          'allergy_instructions': allergyInstructions,
+          'kitchen_instructions': kitchenInstructions,
         },
       );
     });
@@ -602,7 +656,7 @@ class LocalDatabase implements SyncStore {
     await _db.transaction((txn) async {
       final unsentCount = Sqflite.firstIntValue(
             await txn.rawQuery(
-              'SELECT COUNT(*) FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity',
+              "SELECT COUNT(*) FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
               <Object?>[localOrderId],
             ),
           ) ??
@@ -624,7 +678,7 @@ class LocalDatabase implements SyncStore {
         whereArgs: <Object?>[localOrderId],
       );
       await txn.rawUpdate(
-        "UPDATE order_items SET dispatched_quantity = quantity, status = 'submitted_pending_sync' WHERE local_order_id = ? AND dispatched_quantity < quantity",
+        "UPDATE order_items SET dispatched_quantity = quantity, status = 'submitted_pending_sync' WHERE local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
         <Object?>[localOrderId],
       );
 
@@ -863,6 +917,7 @@ class LocalDatabase implements SyncStore {
           'seat_number': (item['seat_number'] as num?)?.toInt(),
           'course_number': (item['course_number'] as num?)?.toInt(),
           'course_name': item['course_name']?.toString(),
+          'course_state': item['course_state']?.toString() ?? 'open',
           'modifiers_snapshot_json': jsonEncode(
             item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
           ),
