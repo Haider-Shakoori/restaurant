@@ -4,6 +4,7 @@ namespace App\Services\Tenant;
 
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
+use App\Models\KitchenTicketItem;
 use App\Models\KotDispatchRound;
 use App\Models\MenuItemKitchenRoute;
 use App\Models\Order;
@@ -279,7 +280,10 @@ class KitchenService
                         'status' => KitchenTicket::STATUS_COMPLETED,
                         'completed_at' => now(),
                     ]);
-                    $ticket->items()->update(['status' => KitchenTicket::STATUS_COMPLETED]);
+                    $ticket->items()->update([
+                        'status' => KitchenTicket::STATUS_COMPLETED,
+                        'completed_at' => now(),
+                    ]);
                     $this->event($ticket, $actor, 'kot.completed', $from, KitchenTicket::STATUS_COMPLETED);
                 }
             }
@@ -301,6 +305,166 @@ class KitchenService
                 'inventoryConsumption.lines.stockMovement.item',
             ]);
         });
+    }
+
+
+    public function startItem(KitchenTicketItem $item, TenantUser $actor): KitchenTicketItem
+    {
+        $item->loadMissing('ticket.round');
+        $workflow = $this->workflowForTicket($item->ticket);
+
+        if (! $workflow['preparing_stage_enabled']) {
+            throw ValidationException::withMessages([
+                'item' => 'Preparing is disabled for this KOT round.',
+            ]);
+        }
+
+        return $this->transitionItem(
+            $item,
+            $actor,
+            $workflow['kitchen_queue_enabled']
+                ? [KitchenTicketItem::STATUS_QUEUED]
+                : [KitchenTicketItem::STATUS_ACTIVE],
+            KitchenTicketItem::STATUS_PREPARING,
+            'kot.item.preparing',
+        );
+    }
+
+    public function readyItem(KitchenTicketItem $item, TenantUser $actor): KitchenTicketItem
+    {
+        $item->loadMissing('ticket.round');
+        $workflow = $this->workflowForTicket($item->ticket);
+
+        $allowed = $workflow['preparing_stage_enabled']
+            ? [KitchenTicketItem::STATUS_PREPARING]
+            : ($workflow['kitchen_queue_enabled']
+                ? [KitchenTicketItem::STATUS_QUEUED]
+                : [KitchenTicketItem::STATUS_ACTIVE]);
+
+        return $this->transitionItem(
+            $item,
+            $actor,
+            $allowed,
+            KitchenTicketItem::STATUS_READY,
+            'kot.item.ready',
+        );
+    }
+
+    private function transitionItem(
+        KitchenTicketItem $item,
+        TenantUser $actor,
+        array $allowedFrom,
+        string $to,
+        string $eventType,
+    ): KitchenTicketItem {
+        return DB::connection('tenant')->transaction(function () use ($item, $actor, $allowedFrom, $to, $eventType): KitchenTicketItem {
+            $item = KitchenTicketItem::query()
+                ->with(['ticket.order', 'ticket.round'])
+                ->lockForUpdate()
+                ->findOrFail($item->getKey());
+
+            if ($item->status === $to) {
+                return $item->fresh(['ticket.station']);
+            }
+
+            if (! in_array($item->status, $allowedFrom, true)) {
+                throw ValidationException::withMessages([
+                    'item' => "Kitchen item cannot move from {$item->status} to {$to}.",
+                ]);
+            }
+
+            $from = $item->status;
+            $updates = ['status' => $to];
+
+            if ($to === KitchenTicketItem::STATUS_PREPARING) {
+                $updates['started_at'] = now();
+            }
+
+            if ($to === KitchenTicketItem::STATUS_READY) {
+                $updates['ready_at'] = now();
+                if ($from === KitchenTicketItem::STATUS_PREPARING) {
+                    $updates['started_at'] = $item->started_at ?? now();
+                }
+            }
+
+            $item->update($updates);
+
+            $this->event(
+                $item->ticket,
+                $actor,
+                $eventType,
+                $from,
+                $to,
+                [
+                    'kitchen_ticket_item_id' => $item->id,
+                    'order_item_id' => $item->order_item_id,
+                    'quantity' => $item->quantity,
+                ],
+            );
+
+            $this->synchronizeTicketFromItems($item->ticket, $actor);
+            $this->synchronizeOrderStatus($item->ticket->order, $actor);
+
+            return $item->fresh(['ticket.station', 'ticket.round']);
+        });
+    }
+
+    private function synchronizeTicketFromItems(KitchenTicket $ticket, TenantUser $actor): void
+    {
+        $ticket = KitchenTicket::query()
+            ->with('items')
+            ->lockForUpdate()
+            ->findOrFail($ticket->getKey());
+
+        $relevant = $ticket->items->reject(
+            fn (KitchenTicketItem $item) => in_array($item->status, [
+                KitchenTicketItem::STATUS_VOIDED,
+                KitchenTicketItem::STATUS_CANCELLED,
+            ], true),
+        );
+
+        if ($relevant->isEmpty()) {
+            if ($ticket->status !== KitchenTicket::STATUS_CANCELLED) {
+                $from = $ticket->status;
+                $ticket->update(['status' => KitchenTicket::STATUS_CANCELLED]);
+                $this->event($ticket, $actor, 'kot.cancelled', $from, KitchenTicket::STATUS_CANCELLED);
+            }
+
+            return;
+        }
+
+        $next = $ticket->status;
+
+        if ($relevant->every(fn (KitchenTicketItem $item) => in_array($item->status, [
+            KitchenTicketItem::STATUS_READY,
+            KitchenTicketItem::STATUS_COMPLETED,
+        ], true))) {
+            $next = KitchenTicket::STATUS_READY;
+        } elseif ($relevant->contains(fn (KitchenTicketItem $item) => $item->status === KitchenTicketItem::STATUS_PREPARING)) {
+            $next = KitchenTicket::STATUS_PREPARING;
+        } elseif ($relevant->contains(fn (KitchenTicketItem $item) => $item->status === KitchenTicketItem::STATUS_ACTIVE)) {
+            $next = KitchenTicket::STATUS_ACTIVE;
+        } else {
+            $next = KitchenTicket::STATUS_QUEUED;
+        }
+
+        if ($next === $ticket->status) {
+            return;
+        }
+
+        $from = $ticket->status;
+        $updates = ['status' => $next];
+
+        if ($next === KitchenTicket::STATUS_PREPARING) {
+            $updates['started_at'] = $ticket->started_at ?? now();
+        }
+
+        if ($next === KitchenTicket::STATUS_READY) {
+            $updates['ready_at'] = now();
+        }
+
+        $ticket->update($updates);
+        $this->event($ticket, $actor, 'kot.aggregate_changed', $from, $next);
     }
 
     private function transition(
@@ -345,7 +509,17 @@ class KitchenService
                 ...$timestamps,
             ]);
 
-            $ticket->items()->update(['status' => $to]);
+            $itemUpdates = ['status' => $to];
+
+            if ($to === KitchenTicket::STATUS_PREPARING) {
+                $itemUpdates['started_at'] = now();
+            }
+
+            if ($to === KitchenTicket::STATUS_READY) {
+                $itemUpdates['ready_at'] = now();
+            }
+
+            $ticket->items()->update($itemUpdates);
 
             $this->event($ticket, $actor, $eventType, $from, $to);
             $this->synchronizeOrderStatus($ticket->order, $actor);
