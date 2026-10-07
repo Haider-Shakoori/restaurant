@@ -1330,7 +1330,10 @@ public sealed class LocalCashierService
 
         AddChange(db, "bill", bill.Id, null, await BillSnapshotAsync(db, bill, cancellationToken));
         AddChange(db, "order", order.Id, order.WaiterId, await OrderSnapshotAsync(db, order, cancellationToken));
-        AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+        if (table is not null)
+        {
+            AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+        }
     }
 
     private static async Task AddReceiptJobAsync(
