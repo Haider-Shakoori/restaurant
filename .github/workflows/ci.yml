@@ -43,10 +43,7 @@ jobs:
         run: composer audit
 
       - name: Laravel Pint
-        run: |
-          vendor/bin/pint app/Services/Platform/LicenseService.php -v
-          git diff -- app/Services/Platform/LicenseService.php
-          git diff --exit-code -- app/Services/Platform/LicenseService.php
+        run: vendor/bin/pint --test
 
       - name: Cache production configuration and views
         run: |
