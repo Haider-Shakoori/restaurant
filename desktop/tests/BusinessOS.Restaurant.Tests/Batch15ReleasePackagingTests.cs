@@ -32,8 +32,8 @@ public sealed class Batch15ReleasePackagingTests
     {
         var root=RepositoryRoot();
         var installer=File.ReadAllText(Path.Combine(root,"desktop","installer","BusinessOS.Restaurant.iss"));
+        var generator=File.ReadAllText(Path.Combine(root,"tools","generate_restaurant_icons.py"));
         var background=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantGlassBackground.jpg");
-        var appBackground=background;
 
         Assert.Contains("https://restaurant.businessos.af",installer,StringComparison.Ordinal);
         Assert.Contains("Start 7-Day Trial",installer,StringComparison.Ordinal);
@@ -41,13 +41,14 @@ public sealed class Batch15ReleasePackagingTests
         Assert.Contains("--installer-activate-file",installer,StringComparison.Ordinal);
         Assert.Contains("days_remaining",installer,StringComparison.Ordinal);
         Assert.Contains("Already activated on this computer",installer,StringComparison.Ordinal);
-        Assert.Contains("WizardBackImageFile=",installer,StringComparison.Ordinal);
-        Assert.Contains("RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
+        Assert.Contains("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+        Assert.Contains("WizardBackImageFileDynamicDark=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+        Assert.DoesNotContain("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
+        Assert.Contains("RestaurantInstallerBackground.png",generator,StringComparison.Ordinal);
+        Assert.Contains("format=\"PNG\"",generator,StringComparison.Ordinal);
 
         Assert.True(File.Exists(background));
         Assert.True(new FileInfo(background).Length > 5_000);
-        Assert.True(File.Exists(appBackground));
-        Assert.True(new FileInfo(appBackground).Length > 5_000);
     }
 
     [Fact]
