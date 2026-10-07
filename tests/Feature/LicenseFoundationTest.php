@@ -176,6 +176,56 @@ class LicenseFoundationTest extends TestCase
         $this->assertSame(1, $business->fresh()->devices()->where('status', DeviceStatus::Active)->count());
     }
 
+    public function test_waiter_mobile_limit_is_separate_from_desktop_activation_and_is_signed_into_lease(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness([
+            'max_devices' => '5',
+            'max_mobile_devices' => '1',
+        ]);
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $desktop = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'restaurant-desktop-001',
+            'device_name' => 'Main Cashier',
+            'platform' => 'windows',
+        ])->assertCreated();
+
+        $this->assertSame(1, $desktop->json('lease.payload.mobile_device_limit'));
+
+        $mobile = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'waiter-mobile-001',
+            'device_name' => 'Waiter Phone 1',
+            'platform' => 'android',
+        ])->assertCreated();
+
+        $this->assertSame(1, $mobile->json('lease.payload.mobile_device_limit'));
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'waiter-mobile-002',
+            'device_name' => 'Waiter Phone 2',
+            'platform' => 'ios',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('device_uid');
+
+        $this->assertSame(
+            1,
+            $business->fresh()->devices()
+                ->where('status', DeviceStatus::Active)
+                ->whereIn('platform', ['android', 'ios'])
+                ->count(),
+        );
+        $this->assertSame(
+            1,
+            $business->fresh()->devices()
+                ->where('status', DeviceStatus::Active)
+                ->where('platform', 'windows')
+                ->count(),
+        );
+    }
+
     public function test_license_rotation_revokes_old_license_and_device_credentials(): void
     {
         [$business, , $domain] = $this->createActiveBusiness();

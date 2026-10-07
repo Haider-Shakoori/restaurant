@@ -2,9 +2,71 @@
 
 @section('title', 'Settings')
 @section('heading', 'Restaurant Settings')
-@section('subheading', 'Configure branches, dining areas and kitchen stations.')
+@section('subheading', 'Configure restaurant operations, mobile connectivity and kitchen structure.')
 
 @section('content')
+    <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+                <h2 class="font-black">Desktop & waiter connectivity</h2>
+                <p class="mt-1 max-w-3xl text-sm text-slate-500">
+                    Waiter apps use Automatic mode: restaurant LAN first, cloud fallback when LAN is unavailable,
+                    offline queue when neither path is reachable, then automatic return to LAN.
+                </p>
+            </div>
+            <div class="grid min-w-[280px] grid-cols-2 gap-3">
+                <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="text-xs font-bold uppercase tracking-wide text-slate-400">Waiter mobiles</div>
+                    <div class="mt-1 text-lg font-black">{{ $activeMobileDevices }} / {{ $mobileDeviceLimit ?? '∞' }}</div>
+                </div>
+                <div class="rounded-xl bg-slate-50 p-3">
+                    <div class="text-xs font-bold uppercase tracking-wide text-slate-400">Cloud route</div>
+                    <div class="mt-1 text-sm font-black text-emerald-700">Available via this tenant</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-5 overflow-x-auto">
+            <table class="min-w-full text-left text-sm">
+                <thead class="text-xs uppercase tracking-wide text-slate-400">
+                    <tr>
+                        <th class="px-3 py-2">Device</th>
+                        <th class="px-3 py-2">Platform</th>
+                        <th class="px-3 py-2">Status</th>
+                        <th class="px-3 py-2">Last seen</th>
+                        <th class="px-3 py-2 text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    @forelse ($activatedDevices as $device)
+                        <tr>
+                            <td class="px-3 py-3 font-semibold">{{ $device->device_name ?: 'Unnamed device' }}</td>
+                            <td class="px-3 py-3">{{ strtoupper($device->platform) }}</td>
+                            <td class="px-3 py-3">{{ ucfirst($device->status->value) }}</td>
+                            <td class="px-3 py-3 text-slate-500">{{ $device->last_seen_at?->diffForHumans() ?? 'Never' }}</td>
+                            <td class="px-3 py-3 text-right">
+                                @if (in_array(strtolower($device->platform), ['android', 'ios'], true) && $device->status->value === 'active')
+                                    <form method="POST" action="/settings/devices/{{ $device->id }}/revoke" onsubmit="return confirm('Revoke this waiter mobile activation?');">
+                                        @csrf
+                                        <button class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50">
+                                            Revoke mobile
+                                        </button>
+                                    </form>
+                                @else
+                                    <span class="text-xs text-slate-400">—</span>
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="5" class="px-3 py-5 text-center text-slate-500">No activated devices yet.</td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </section>
+
     <div class="grid gap-6 xl:grid-cols-3">
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="font-black">Add branch</h2>

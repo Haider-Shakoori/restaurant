@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
@@ -382,6 +383,333 @@ public sealed class CloudReconciliationService
         }
 
         UpsertLink(db, "order", order.Id, cloudId);
+        await db.SaveChangesAsync(cancellationToken);
+
+        var table = await db.DiningTables.SingleOrDefaultAsync(
+            value => value.Id == order.DiningTableId,
+            cancellationToken);
+        if (table is not null)
+        {
+            table.Status = order.Status is "closed" or "cancelled"
+                ? "available"
+                : "occupied";
+        }
+
+        await SynchronizeCloudOrderItemsAsync(db, order, payload, cancellationToken);
+        await SynchronizeCloudKitchenTicketsAsync(db, order, payload, cancellationToken);
+    }
+
+    private static async Task SynchronizeCloudOrderItemsAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (!payload.TryGetProperty("items", out var items) ||
+            items.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var itemPayload in items.EnumerateArray())
+        {
+            var clientLineId = String(itemPayload, "client_line_id");
+            var cloudLineId = String(itemPayload, "id");
+            var menuItemId = String(itemPayload, "menu_item_id");
+
+            if (string.IsNullOrWhiteSpace(clientLineId) ||
+                string.IsNullOrWhiteSpace(menuItemId) ||
+                !await db.MenuItems.AnyAsync(value => value.Id == menuItemId, cancellationToken))
+            {
+                continue;
+            }
+
+            var item = await db.OrderItems.SingleOrDefaultAsync(
+                value => value.OrderId == order.Id && value.ClientLineId == clientLineId,
+                cancellationToken);
+
+            if (item is null)
+            {
+                item = new LocalOrderItem
+                {
+                    Id = Guid.CreateVersion7().ToString("N"),
+                    OrderId = order.Id,
+                    MenuItemId = menuItemId,
+                    ClientLineId = clientLineId,
+                    ItemName = String(itemPayload, "item_name") ?? "Menu item",
+                    UnitPrice = Decimal(itemPayload, "unit_price"),
+                    Quantity = Int(itemPayload, "quantity", 1),
+                    LineTotal = Decimal(itemPayload, "line_total"),
+                    Notes = String(itemPayload, "notes"),
+                    Status = String(itemPayload, "status") ?? "queued",
+                    CreatedAtUtc = DateTimeOffset.UtcNow,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                db.OrderItems.Add(item);
+            }
+            else
+            {
+                item.MenuItemId = menuItemId;
+                item.ItemName = String(itemPayload, "item_name") ?? item.ItemName;
+                item.UnitPrice = Decimal(itemPayload, "unit_price", item.UnitPrice);
+                item.Quantity = Int(itemPayload, "quantity", item.Quantity);
+                item.LineTotal = Decimal(itemPayload, "line_total", item.LineTotal);
+                item.Notes = String(itemPayload, "notes");
+                item.Status = String(itemPayload, "status") ?? item.Status;
+                item.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            if (!string.IsNullOrWhiteSpace(cloudLineId))
+            {
+                UpsertLink(db, "order_item", item.Id, cloudLineId);
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SynchronizeCloudKitchenTicketsAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (!payload.TryGetProperty("kitchen_tickets", out var tickets) ||
+            tickets.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var ticketPayload in tickets.EnumerateArray())
+        {
+            var ticketNumber = String(ticketPayload, "ticket_number");
+            var cloudTicketId = String(ticketPayload, "id");
+            var stationId = String(ticketPayload, "kitchen_station_id");
+
+            if (string.IsNullOrWhiteSpace(stationId) &&
+                ticketPayload.TryGetProperty("station", out var stationPayload) &&
+                stationPayload.ValueKind == JsonValueKind.Object)
+            {
+                stationId = String(stationPayload, "id");
+            }
+
+            if (string.IsNullOrWhiteSpace(ticketNumber) ||
+                string.IsNullOrWhiteSpace(stationId))
+            {
+                continue;
+            }
+
+            var station = await db.KitchenStations.SingleOrDefaultAsync(
+                value => value.Id == stationId,
+                cancellationToken);
+
+            if (station is null &&
+                ticketPayload.TryGetProperty("station", out var embeddedStation) &&
+                embeddedStation.ValueKind == JsonValueKind.Object)
+            {
+                var table = await db.DiningTables.SingleAsync(
+                    value => value.Id == order.DiningTableId,
+                    cancellationToken);
+                var area = await db.DiningAreas.SingleAsync(
+                    value => value.Id == table.DiningAreaId,
+                    cancellationToken);
+
+                station = new LocalKitchenStation
+                {
+                    Id = stationId,
+                    BranchId = String(embeddedStation, "branch_id") ?? area.BranchId,
+                    Code = String(embeddedStation, "code") ?? $"CLOUD-{stationId[..Math.Min(8, stationId.Length)]}",
+                    Name = String(embeddedStation, "name") ?? "Cloud Kitchen",
+                    SortOrder = Int(embeddedStation, "sort_order", 999),
+                    IsActive = Bool(embeddedStation, "is_active", true),
+                };
+                db.KitchenStations.Add(station);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            if (station is null)
+            {
+                continue;
+            }
+
+            var ticket = await db.KitchenTickets.SingleOrDefaultAsync(
+                value => value.OrderId == order.Id && value.TicketNumber == ticketNumber,
+                cancellationToken);
+
+            var isNew = ticket is null;
+            if (ticket is null)
+            {
+                ticket = new LocalKitchenTicket
+                {
+                    Id = Guid.CreateVersion7().ToString("N"),
+                    OrderId = order.Id,
+                    KitchenStationId = station.Id,
+                    SubmittedByUserId = Long(ticketPayload, "submitted_by_user_id") is var submitted && submitted > 0
+                        ? submitted
+                        : order.WaiterId,
+                    TicketNumber = ticketNumber,
+                    Status = String(ticketPayload, "status") ?? "queued",
+                    QueuedAt = Date(ticketPayload, "queued_at") ?? DateTimeOffset.UtcNow,
+                    StartedAt = Date(ticketPayload, "started_at"),
+                    ReadyAt = Date(ticketPayload, "ready_at"),
+                    CompletedAt = Date(ticketPayload, "completed_at"),
+                    CreatedAtUtc = DateTimeOffset.UtcNow,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                db.KitchenTickets.Add(ticket);
+            }
+            else
+            {
+                ticket.KitchenStationId = station.Id;
+                ticket.Status = String(ticketPayload, "status") ?? ticket.Status;
+                ticket.StartedAt = Date(ticketPayload, "started_at");
+                ticket.ReadyAt = Date(ticketPayload, "ready_at");
+                ticket.CompletedAt = Date(ticketPayload, "completed_at");
+                ticket.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+
+            if (!string.IsNullOrWhiteSpace(cloudTicketId))
+            {
+                UpsertLink(db, "kitchen_ticket", ticket.Id, cloudTicketId);
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            await SynchronizeCloudKitchenTicketItemsAsync(
+                db,
+                ticket,
+                ticketPayload,
+                cancellationToken);
+
+            if (isNew)
+            {
+                await QueueImportedKotPrintAsync(db, order, ticket, station, cancellationToken);
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task SynchronizeCloudKitchenTicketItemsAsync(
+        RestaurantDbContext db,
+        LocalKitchenTicket ticket,
+        JsonElement ticketPayload,
+        CancellationToken cancellationToken)
+    {
+        if (!ticketPayload.TryGetProperty("items", out var ticketItems) ||
+            ticketItems.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var itemPayload in ticketItems.EnumerateArray())
+        {
+            var cloudOrderItemId = String(itemPayload, "order_item_id");
+            if (string.IsNullOrWhiteSpace(cloudOrderItemId))
+            {
+                continue;
+            }
+
+            var orderItemId = await db.CloudEntityLinks
+                .Where(value =>
+                    value.EntityType == "order_item" &&
+                    value.CloudEntityId == cloudOrderItemId)
+                .Select(value => value.LocalEntityId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(orderItemId))
+            {
+                continue;
+            }
+
+            var existing = await db.KitchenTicketItems.SingleOrDefaultAsync(
+                value => value.KitchenTicketId == ticket.Id && value.OrderItemId == orderItemId,
+                cancellationToken);
+
+            if (existing is null)
+            {
+                db.KitchenTicketItems.Add(new LocalKitchenTicketItem
+                {
+                    Id = Guid.CreateVersion7().ToString("N"),
+                    KitchenTicketId = ticket.Id,
+                    OrderItemId = orderItemId,
+                    ItemName = String(itemPayload, "item_name") ?? "Menu item",
+                    Quantity = Int(itemPayload, "quantity", 1),
+                    Notes = String(itemPayload, "notes"),
+                    Status = String(itemPayload, "status") ?? ticket.Status,
+                });
+            }
+            else
+            {
+                existing.ItemName = String(itemPayload, "item_name") ?? existing.ItemName;
+                existing.Quantity = Int(itemPayload, "quantity", existing.Quantity);
+                existing.Notes = String(itemPayload, "notes");
+                existing.Status = String(itemPayload, "status") ?? existing.Status;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task QueueImportedKotPrintAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        LocalKitchenTicket ticket,
+        LocalKitchenStation station,
+        CancellationToken cancellationToken)
+    {
+        if (ticket.Status is "cancelled" or "completed" ||
+            await db.PrintJobs.AnyAsync(value => value.KitchenTicketId == ticket.Id, cancellationToken))
+        {
+            return;
+        }
+
+        var binding = await db.KitchenPrinterBindings.AsNoTracking()
+            .SingleOrDefaultAsync(
+                value => value.KitchenStationId == station.Id && value.IsEnabled,
+                cancellationToken);
+
+        if (binding is null)
+        {
+            return;
+        }
+
+        var table = await db.DiningTables.AsNoTracking()
+            .SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
+        var items = await db.KitchenTicketItems.AsNoTracking()
+            .Where(value => value.KitchenTicketId == ticket.Id)
+            .ToArrayAsync(cancellationToken);
+
+        var text = new StringBuilder();
+        text.AppendLine("BUSINESSOS RESTAURANT");
+        text.AppendLine($"KOT: {ticket.TicketNumber}");
+        text.AppendLine($"STATION: {station.Name}");
+        text.AppendLine($"TABLE: {table.Name} ({table.Code})");
+        text.AppendLine($"WAITER: {order.WaiterName}");
+        text.AppendLine($"TIME: {ticket.QueuedAt:yyyy-MM-dd HH:mm:ss}");
+        text.AppendLine("--------------------------------");
+        foreach (var item in items)
+        {
+            text.AppendLine($"{item.Quantity} x {item.ItemName}");
+            if (!string.IsNullOrWhiteSpace(item.Notes))
+            {
+                text.AppendLine($"  NOTE: {item.Notes}");
+            }
+        }
+        text.AppendLine("--------------------------------");
+        text.AppendLine("SOURCE: CLOUD FALLBACK");
+
+        db.PrintJobs.Add(new LocalPrintJob
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            KitchenTicketId = ticket.Id,
+            PrinterName = binding.PrinterName,
+            DocumentName = ticket.TicketNumber,
+            PayloadText = text.ToString(),
+            Copies = Math.Clamp(binding.Copies, 1, 5),
+            Status = "pending",
+            Attempts = 0,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        });
     }
 
     private async Task ApplyBillAsync(

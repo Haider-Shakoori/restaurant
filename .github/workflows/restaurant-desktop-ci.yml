@@ -1,5 +1,9 @@
 name: Restaurant Desktop CI
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -8,10 +12,12 @@ on:
     paths:
       - 'desktop/**'
       - '.github/workflows/restaurant-desktop-ci.yml'
+      - 'tools/generate_restaurant_icons.py'
   pull_request:
     paths:
       - 'desktop/**'
       - '.github/workflows/restaurant-desktop-ci.yml'
+      - 'tools/generate_restaurant_icons.py'
 
 jobs:
   build-test:
@@ -27,6 +33,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Generate Restaurant brand icon
+        working-directory: .
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python tools/generate_restaurant_icons.py --repo-root . --desktop
 
       - name: Restore
         run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
@@ -50,6 +63,25 @@ jobs:
           $fw = Get-Content "installer/Configure-LanFirewall.ps1" -Raw
           if ($fw -notmatch 'Profile Domain,Private') { throw "Firewall profile scope regression." }
           if ($fw -match 'Profile Public') { throw "Public firewall exposure is forbidden by default." }
+
+      - name: Smoke-test packaged Desktop startup
+        shell: pwsh
+        run: |
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            $logRoot = Join-Path $env:LOCALAPPDATA "BusinessOS\Restaurant\logs"
+            if (Test-Path $logRoot) {
+              Get-ChildItem $logRoot -Filter "desktop-*.log" |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1 |
+                ForEach-Object { Get-Content $_.FullName -Tail 200 }
+            }
+            throw "Packaged Restaurant Desktop exited during startup smoke test."
+          }
+          Stop-Process -Id $process.Id -Force
 
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4

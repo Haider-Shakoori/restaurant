@@ -11,6 +11,7 @@
     <Authors>BusinessOS.af</Authors>
     <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="Exists('Assets\BusinessOS.Restaurant.ico')">Assets\BusinessOS.Restaurant.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -30,5 +31,6 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
   </ItemGroup>
 </Project>

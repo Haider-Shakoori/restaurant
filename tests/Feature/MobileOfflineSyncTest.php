@@ -176,6 +176,112 @@ class MobileOfflineSyncTest extends TestCase
         tenancy()->end();
     }
 
+    public function test_manager_desktop_qr_pairing_token_is_one_time_and_activates_waiter_without_raw_license(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $desktop = $this->activateDevice(
+            $business,
+            $domain,
+            'restaurant-desktop-pairing-001',
+            'windows',
+        );
+
+        tenancy()->initialize($tenant);
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Manager',
+            'email' => 'manager@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        tenancy()->end();
+
+        $managerToken = $this->login($domain, 'manager@restaurant.test');
+
+        $pairing = $this->withHeaders($this->syncHeaders($managerToken, $desktop))
+            ->postJson("http://{$domain}/api/v1/pairing-tokens")
+            ->assertCreated()
+            ->assertJsonPath('data.tenant_id', $tenant->id)
+            ->json('data');
+
+        $this->assertNotEmpty($pairing['pairing_token']);
+        $this->assertNotEmpty($pairing['expires_at']);
+
+        $activation = $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $pairing['pairing_token'],
+            'device_uid' => 'waiter-paired-mobile-001',
+            'device_name' => 'Dining Room Tablet',
+            'platform' => 'android',
+            'app_version' => '1.0.0',
+        ])->assertCreated();
+
+        $this->assertSame('android', $activation->json('device.platform'));
+        $this->assertNotEmpty($activation->json('device_secret'));
+        $this->assertSame(
+            $business->tenant_id,
+            $activation->json('lease.payload.tenant_id'),
+        );
+
+        $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $pairing['pairing_token'],
+            'device_uid' => 'waiter-paired-mobile-002',
+            'device_name' => 'Second Tablet',
+            'platform' => 'ios',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('pairing_token');
+    }
+
+    public function test_refreshing_desktop_qr_invalidates_the_previous_pairing_token(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $desktop = $this->activateDevice(
+            $business,
+            $domain,
+            'restaurant-desktop-pairing-refresh',
+            'windows',
+        );
+
+        tenancy()->initialize($tenant);
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Manager',
+            'email' => 'manager-refresh@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        tenancy()->end();
+
+        $managerToken = $this->login($domain, 'manager-refresh@restaurant.test');
+        $headers = $this->syncHeaders($managerToken, $desktop);
+
+        $first = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/pairing-tokens")
+            ->assertCreated()
+            ->json('data.pairing_token');
+
+        $second = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/pairing-tokens")
+            ->assertCreated()
+            ->json('data.pairing_token');
+
+        $this->assertNotSame($first, $second);
+
+        $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $first,
+            'device_uid' => 'stale-qr-mobile',
+            'platform' => 'android',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('pairing_token');
+
+        $this->postJson("http://{$domain}/api/v1/pairing-tokens/redeem", [
+            'pairing_token' => $second,
+            'device_uid' => 'fresh-qr-mobile',
+            'platform' => 'android',
+        ])->assertCreated();
+    }
+
     public function test_second_waiter_receives_deterministic_table_busy_conflict(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();
@@ -479,8 +585,12 @@ class MobileOfflineSyncTest extends TestCase
         return [$business->fresh(), $domain, $tenant];
     }
 
-    private function activateDevice(Business $business, string $domain, string $deviceUid): array
-    {
+    private function activateDevice(
+        Business $business,
+        string $domain,
+        string $deviceUid,
+        string $platform = 'android',
+    ): array {
         $license = app(LicenseService::class)->generate(
             $business,
             AdminUser::factory()->create([
@@ -492,8 +602,10 @@ class MobileOfflineSyncTest extends TestCase
         $activation = $this->postJson("http://{$domain}/api/v1/license/activate", [
             'license_key' => $license['raw_key'],
             'device_uid' => $deviceUid,
-            'device_name' => 'Waiter Test Phone',
-            'platform' => 'android',
+            'device_name' => $platform === 'windows'
+                ? 'Restaurant Desktop'
+                : 'Waiter Test Phone',
+            'platform' => $platform,
             'app_version' => '1.0.0',
         ])->assertCreated();
 

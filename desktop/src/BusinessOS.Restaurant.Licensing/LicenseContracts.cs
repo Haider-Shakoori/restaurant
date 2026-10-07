@@ -55,4 +55,5 @@ public sealed record LeaseSnapshot(
     DateTimeOffset IssuedAt,
     DateTimeOffset OfflineValidUntil,
     DateTimeOffset SubscriptionEndsAt,
-    JsonElement Features);
+    JsonElement Features,
+    int? MobileDeviceLimit = null);

@@ -40,6 +40,8 @@ public sealed class CloudReconciliationProcessor : IAsyncDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            var delay = TimeSpan.FromSeconds(30);
+
             try
             {
                 var settings = await _settingsStore.LoadAsync(cancellationToken);
@@ -52,6 +54,15 @@ public sealed class CloudReconciliationProcessor : IAsyncDisposable
                     if (activation is not null && session is not null)
                     {
                         await _service.RunOnceAsync(activation, session, cancellationToken);
+
+                        // Cloud is the live fallback transport when waiter devices
+                        // cannot reach this Desktop over LAN. Keep this poll short
+                        // enough for KOT/order hand-off to remain operational.
+                        delay = TimeSpan.FromSeconds(5);
+                    }
+                    else
+                    {
+                        delay = TimeSpan.FromSeconds(10);
                     }
                 }
             }
@@ -61,12 +72,14 @@ public sealed class CloudReconciliationProcessor : IAsyncDisposable
             }
             catch
             {
-                // Reconciliation is retryable; local operations remain authoritative on LAN.
+                // Local operations remain authoritative. Back off while the cloud
+                // is unhealthy, then recover automatically without user action.
+                delay = TimeSpan.FromSeconds(15);
             }
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                await Task.Delay(delay, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

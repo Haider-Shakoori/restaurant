@@ -29,6 +29,7 @@ class SessionService {
     String? localUrl,
     String? cloudUrl,
     required String licenseKey,
+    String? pairingToken,
     required String email,
     required String password,
     String deviceName = 'BusinessOS Waiter',
@@ -38,18 +39,42 @@ class SessionService {
       localUrl: localUrl,
       cloudUrl: cloudUrl,
     );
-    final baseUrl = target.baseUrl;
+
+    // First-time activation and sign-in are cloud-authoritative. Once the
+    // signed device lease and user token exist, automatic mode can prefer
+    // the Desktop LAN endpoint and fail back to cloud as connectivity changes.
+    var activationTarget = target;
+    if (connectionMode == ConnectionMode.automatic &&
+        cloudUrl != null &&
+        cloudUrl.trim().isNotEmpty) {
+      activationTarget = await _connectionResolver.resolve(
+        mode: ConnectionMode.cloud,
+        localUrl: localUrl,
+        cloudUrl: cloudUrl,
+      );
+    }
+
+    final baseUrl = activationTarget.baseUrl;
     final deviceUid = await _credentials.deviceUid();
     final keyResponse = await _api.publicKey(baseUrl);
     final publicKey = keyResponse['public_key']!.toString();
 
-    final activation = await _api.activate(
-      baseUrl: baseUrl,
-      licenseKey: licenseKey.trim(),
-      deviceUid: deviceUid,
-      deviceName: deviceName,
-      appVersion: '1.0.0',
-    );
+    final normalizedPairingToken = pairingToken?.trim() ?? '';
+    final activation = normalizedPairingToken.isNotEmpty
+        ? await _api.redeemPairing(
+            baseUrl: baseUrl,
+            pairingToken: normalizedPairingToken,
+            deviceUid: deviceUid,
+            deviceName: deviceName,
+            appVersion: '1.0.0',
+          )
+        : await _api.activate(
+            baseUrl: baseUrl,
+            licenseKey: licenseKey.trim(),
+            deviceUid: deviceUid,
+            deviceName: deviceName,
+            appVersion: '1.0.0',
+          );
     final device = Map<String, Object?>.from(
       activation['device']! as Map<Object?, Object?>,
     );
@@ -63,7 +88,7 @@ class SessionService {
       signedLease: lease,
       publicKey: publicKey,
       expectedDeviceId: deviceId,
-      expectedTenantId: target.tenantId,
+      expectedTenantId: activationTarget.tenantId,
     );
 
     if (!verified.valid) {
@@ -82,10 +107,10 @@ class SessionService {
       publicKey: publicKey,
       lease: lease,
       connectionMode: target.mode,
-      activeChannel: target.channel,
+      activeChannel: activationTarget.channel,
       localBaseUrl: target.localBaseUrl,
       cloudBaseUrl: target.cloudBaseUrl,
-      tenantId: target.tenantId,
+      tenantId: activationTarget.tenantId,
     );
 
     final login = await _api.login(
@@ -108,7 +133,7 @@ class SessionService {
     final bootstrap = await _api.syncBootstrap(session);
     await _database.applyBootstrap(bootstrap);
 
-    return target;
+    return activationTarget;
   }
 
   Future<void> logoutLocal() async {

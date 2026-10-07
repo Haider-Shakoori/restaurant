@@ -5,6 +5,7 @@ return [
     'schema_version' => (int) env('PLATFORM_LICENSE_SCHEMA_VERSION', 1),
     'offline_grace_days' => (int) env('PLATFORM_LICENSE_OFFLINE_GRACE_DAYS', 7),
     'default_max_devices' => (int) env('PLATFORM_LICENSE_DEFAULT_MAX_DEVICES', 5),
+    'pairing_token_minutes' => (int) env('PLATFORM_LICENSE_PAIRING_TOKEN_MINUTES', 5),
 
     'signing' => [
         'algorithm' => 'Ed25519',

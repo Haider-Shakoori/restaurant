@@ -1,4 +1,10 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Windows.Media.Imaging;
+using QRCoder;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
@@ -13,6 +19,7 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private readonly WindowsActivationStore _activationStore;
     private readonly WindowsSessionStore _sessionStore;
     private readonly LocalTerminalManagementService _terminalManagement;
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(8) };
 
     private string _networkMode = "Loading";
     private string _leaseStatus = "Unknown";
@@ -24,6 +31,10 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
     private LocalTerminalSnapshot? _selectedTerminal;
     private AuthSession? _session;
     private bool _isBusy;
+    private string _pairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
+    private string _pairingPayload = string.Empty;
+    private BitmapImage? _pairingQrImage;
+    private string _mobileAllowance = "Unknown";
 
     public LanDiagnosticsViewModel()
     {
@@ -90,6 +101,30 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
         private set => SetProperty(ref _pendingCloudMutations, value);
     }
 
+    public string PairingDetails
+    {
+        get => _pairingDetails;
+        private set => SetProperty(ref _pairingDetails, value);
+    }
+
+    public string PairingPayload
+    {
+        get => _pairingPayload;
+        private set => SetProperty(ref _pairingPayload, value);
+    }
+
+    public BitmapImage? PairingQrImage
+    {
+        get => _pairingQrImage;
+        private set => SetProperty(ref _pairingQrImage, value);
+    }
+
+    public string MobileAllowance
+    {
+        get => _mobileAllowance;
+        private set => SetProperty(ref _mobileAllowance, value);
+    }
+
     public int OpenCloudConflicts
     {
         get => _openCloudConflicts;
@@ -144,12 +179,45 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 TerminalSummary = "0 terminals";
                 StatusMessage = "Activate this Windows installation before enabling the local restaurant host.";
                 Terminals.Clear();
+                PairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
+                PairingPayload = string.Empty;
+                PairingQrImage = null;
+                MobileAllowance = "Not activated";
                 return;
             }
 
             var diagnostics = await _terminalManagement.GetDiagnosticsAsync(
                 activation.Snapshot.TenantId);
             var terminals = await _terminalManagement.GetTerminalsAsync();
+            var connection = await new ConnectionSettingsStore().LoadAsync();
+            var port = connection?.LocalServerPort ?? 8787;
+            var descriptor = LocalServerDescriptor.Create(
+                new LocalServerOptions(activation.Snapshot.TenantId, port));
+            var localAddress = descriptor.BaseUrls.FirstOrDefault();
+            var cloudAddress = connection?.TenantBaseUrl ?? activation.TenantBaseUrl;
+            var pairingToken = await TryCreateCloudPairingTokenAsync(
+                activation,
+                cloudAddress);
+
+            var pairingExpiry = pairingToken.ExpiresAt is null
+                ? "Cloud pairing token unavailable; QR configures connection addresses only."
+                : $"One-time mobile activation token expires {pairingToken.ExpiresAt:HH:mm:ss} UTC.";
+
+            PairingDetails = localAddress is null
+                ? $"Local: unavailable\nCloud: {cloudAddress}\nMode: Automatic (cloud until LAN returns)\n{pairingExpiry}"
+                : $"Local: {localAddress}\nCloud: {cloudAddress}\nMode: Automatic (LAN preferred)\n{pairingExpiry}";
+
+            PairingPayload = JsonSerializer.Serialize(new
+            {
+                type = "businessos.restaurant.pairing.v1",
+                tenant_id = activation.Snapshot.TenantId,
+                local_url = localAddress,
+                cloud_url = cloudAddress,
+                connection_mode = "automatic",
+                pairing_token = pairingToken.Token,
+                pairing_expires_at = pairingToken.ExpiresAt,
+            });
+            PairingQrImage = CreateQrImage(PairingPayload);
 
             NetworkMode = diagnostics.NetworkMode switch
             {
@@ -178,6 +246,13 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
             {
                 Terminals.Add(terminal);
             }
+
+            var mobileCount = terminals.Count(value =>
+                string.Equals(value.ClientType, "android", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value.ClientType, "ios", StringComparison.OrdinalIgnoreCase));
+            MobileAllowance = activation.Snapshot.MobileDeviceLimit is int mobileLimit
+                ? $"{mobileCount} / {mobileLimit} paired"
+                : $"{mobileCount} paired · unlimited";
 
             StatusMessage = diagnostics.NetworkMode == LocalNetworkMode.IsolatedLocal
                 ? "Cloud is unavailable or intentionally disabled. Local ordering, KOT and cashier operations remain authoritative while the signed offline lease is valid."
@@ -253,7 +328,71 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
         await RefreshAsync();
     }
 
+    private async Task<(string? Token, DateTimeOffset? ExpiresAt)> TryCreateCloudPairingTokenAsync(
+        ActivationState activation,
+        string cloudAddress)
+    {
+        var session = _session;
+        if (session is null || !IsManager(session.User.Role))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var baseUri = new Uri(cloudAddress.TrimEnd('/') + "/", UriKind.Absolute);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                new Uri(baseUri, "api/v1/pairing-tokens"));
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                session.AccessToken);
+            request.Headers.TryAddWithoutValidation("X-Device-Id", activation.DeviceId);
+            request.Headers.TryAddWithoutValidation("X-Device-Secret", activation.DeviceSecret);
+            request.Headers.TryAddWithoutValidation("X-App-Version", "1.0.0");
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                return (null, null);
+            }
+
+            using var document = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync());
+            var data = document.RootElement.GetProperty("data");
+            var token = data.GetProperty("pairing_token").GetString();
+            var expires = data.TryGetProperty("expires_at", out var expiresProperty) &&
+                          DateTimeOffset.TryParse(expiresProperty.GetString(), out var parsed)
+                ? parsed
+                : (DateTimeOffset?)null;
+
+            return (string.IsNullOrWhiteSpace(token) ? null : token, expires);
+        }
+        catch (Exception)
+        {
+            return (null, null);
+        }
+    }
+
+    private static BitmapImage CreateQrImage(string payload)
+    {
+        using var generator = new QRCodeGenerator();
+        using var qrData = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.Q);
+        var qr = new PngByteQRCode(qrData);
+        var bytes = qr.GetGraphic(8);
+
+        using var stream = new MemoryStream(bytes);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
     private static bool IsManager(string role) =>
         role.Equals(RestaurantRoles.Owner, StringComparison.OrdinalIgnoreCase) ||
-        role.Equals(RestaurantRoles.Manager, StringComparison.OrdinalIgnoreCase);
+        role.Equals(RestaurantRoles.Manager, StringComparison.OrdinalIgnoreCase) ||
+        role.Equals("admin", StringComparison.OrdinalIgnoreCase);
 }

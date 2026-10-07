@@ -298,12 +298,40 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
             ("WAITER DEVICES", diagnostics.TerminalSummary),
+            ("MOBILE ALLOWANCE", diagnostics.MobileAllowance),
             ("OFFLINE LEASE", diagnostics.LeaseStatus),
             ("CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts")));
 
         panel.Children.Add(Card(
             "Local restaurant network",
             $"{diagnostics.StatusMessage}\n\nCloud: {diagnostics.CloudStatus}\n\nWaiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid."));
+
+        var pairing = new TextBox
+        {
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 84,
+            Margin = new Thickness(0, 0, 12, 12),
+            Padding = new Thickness(12)
+        };
+        pairing.SetBinding(TextBox.TextProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingDetails)));
+        var pairingPanel = new StackPanel();
+        var qr = new Image
+        {
+            Width = 220,
+            Height = 220,
+            Stretch = System.Windows.Media.Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 12)
+        };
+        qr.SetBinding(Image.SourceProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingQrImage)));
+        pairingPanel.Children.Add(qr);
+        pairingPanel.Children.Add(pairing);
+
+        panel.Children.Add(Section(
+            "Waiter app connection",
+            "Scan this QR from the waiter app to configure both LAN and cloud routes. Automatic mode prefers LAN, falls back to cloud when LAN is unavailable, queues offline changes when neither route is reachable, and returns to LAN automatically.",
+            pairingPanel));
 
         var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
 

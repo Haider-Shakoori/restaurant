@@ -15,7 +15,7 @@ extension ConnectionModeValue on ConnectionMode {
   static ConnectionMode parse(String? value) {
     return ConnectionMode.values.firstWhere(
       (mode) => mode.name == value,
-      orElse: () => ConnectionMode.cloud,
+      orElse: () => ConnectionMode.automatic,
     );
   }
 }

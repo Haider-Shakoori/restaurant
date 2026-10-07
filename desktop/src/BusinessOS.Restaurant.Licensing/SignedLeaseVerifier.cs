@@ -50,7 +50,8 @@ public sealed class SignedLeaseVerifier
             ReadDate(root, "issued_at"),
             ReadDate(root, "offline_valid_until"),
             ReadDate(root, "subscription_ends_at"),
-            root.GetProperty("features").Clone());
+            root.GetProperty("features").Clone(),
+            ReadOptionalInt(root, "mobile_device_limit"));
 
         if (!string.Equals(snapshot.KeyId, lease.KeyId, StringComparison.Ordinal))
         {
@@ -134,6 +135,18 @@ public sealed class SignedLeaseVerifier
         root.TryGetProperty(name, out var value) && value.TryGetInt32(out var result)
             ? result
             : throw new CryptographicException($"Offline lease claim '{name}' is invalid.");
+
+    private static int? ReadOptionalInt(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return value.TryGetInt32(out var result) && result > 0
+            ? result
+            : throw new CryptographicException($"Offline lease claim '{name}' is invalid.");
+    }
 
     private static DateTimeOffset ReadDate(JsonElement root, string name) =>
         DateTimeOffset.TryParse(ReadString(root, name), out var result)

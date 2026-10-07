@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Tenant;
 
+use App\Enums\DeviceStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Bill;
 use App\Models\Business;
@@ -20,6 +21,7 @@ use App\Models\RestaurantBranch;
 use App\Models\Supplier;
 use App\Models\TenantPayment;
 use App\Models\TenantUser;
+use App\Services\Platform\SubscriptionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
@@ -170,10 +172,38 @@ class TenantPortalController extends Controller
         ]);
     }
 
-    public function settings(): View
+    public function settings(SubscriptionService $subscriptions): View
     {
+        $business = Business::query()->where('tenant_id', tenant('id'))->first();
+        $mobileDeviceLimit = null;
+        $activeMobileDevices = 0;
+        $activatedDevices = collect();
+
+        if ($business) {
+            $access = $subscriptions->access($business);
+            $rawMobileLimit = data_get(
+                $access->features,
+                'max_mobile_devices',
+                data_get($access->features, 'max_devices', config('license.default_max_devices', 5)),
+            );
+            $mobileDeviceLimit = is_string($rawMobileLimit) && strtolower(trim($rawMobileLimit)) === 'unlimited'
+                ? null
+                : (is_numeric($rawMobileLimit) && (int) $rawMobileLimit > 0 ? (int) $rawMobileLimit : null);
+            $activeMobileDevices = $business->devices()
+                ->where('status', DeviceStatus::Active)
+                ->whereIn('platform', ['android', 'ios'])
+                ->count();
+            $activatedDevices = $business->devices()
+                ->orderByDesc('last_seen_at')
+                ->limit(20)
+                ->get();
+        }
+
         return $this->view('tenant.settings.index', [
             'branches' => RestaurantBranch::query()->with(['diningAreas', 'kitchenStations'])->orderBy('name')->get(),
+            'mobileDeviceLimit' => $mobileDeviceLimit,
+            'activeMobileDevices' => $activeMobileDevices,
+            'activatedDevices' => $activatedDevices,
         ]);
     }
 

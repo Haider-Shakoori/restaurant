@@ -9,6 +9,7 @@ use App\Models\Business;
 use App\Models\DeviceActivation;
 use App\Models\LicenseKey;
 use App\Models\OfflineLease;
+use App\Models\TenantUser;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -142,24 +143,110 @@ class LicenseService
             ]);
         }
 
+        return $this->activateAgainstLicense(
+            $business,
+            $license,
+            $access->features,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+            false,
+        );
+    }
+
+    /**
+     * Activate a waiter mobile after a short-lived pairing token has already
+     * proved that an authorized Restaurant Desktop approved the pairing.
+     *
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    public function activatePairedMobile(
+        Business $business,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+    ): array {
+        if (! $this->isMobilePlatform($platform)) {
+            throw ValidationException::withMessages([
+                'platform' => 'Desktop pairing tokens may only activate Android or iOS waiter devices.',
+            ]);
+        }
+
+        $business->refresh();
+        $access = $this->subscriptions->access($business);
+
+        if (! $access->allowed) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'An active trial or subscription is required for waiter pairing.',
+            ]);
+        }
+
+        $license = LicenseKey::query()
+            ->where('business_id', $business->id)
+            ->where('status', LicenseStatus::Active)
+            ->latest('version')
+            ->first();
+
+        if (! $license) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'Generate an active Restaurant license before pairing waiter devices.',
+            ]);
+        }
+
+        return $this->activateAgainstLicense(
+            $business,
+            $license,
+            $access->features,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+            true,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $features
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    private function activateAgainstLicense(
+        Business $business,
+        LicenseKey $license,
+        array $features,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+        bool $paired,
+    ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
-            function () use ($business, $license, $deviceUid, $deviceName, $platform, $appVersion): array {
+            function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion, $paired): array {
                 $existing = DeviceActivation::query()
                     ->where('business_id', $business->id)
                     ->where('device_uid', $deviceUid)
                     ->first();
 
+                $mobile = $this->isMobilePlatform($platform);
                 $activeOtherDevices = DeviceActivation::query()
                     ->where('business_id', $business->id)
                     ->where('status', DeviceStatus::Active)
+                    ->when($mobile, fn ($query) => $query->whereIn('platform', ['android', 'ios']))
                     ->when($existing, fn ($query) => $query->whereKeyNot($existing->getKey()))
                     ->count();
 
-                $limit = $license->max_devices_snapshot;
+                $limit = $mobile
+                    ? $this->resolveMobileDeviceLimit($features)
+                    : $license->max_devices_snapshot;
 
                 if ($limit !== null && $activeOtherDevices >= $limit) {
                     throw ValidationException::withMessages([
-                        'device_uid' => "The restaurant has reached its {$limit}-device activation limit.",
+                        'device_uid' => sprintf(
+                            'The restaurant has reached its %d-%s activation limit.',
+                            $limit,
+                            $mobile ? 'mobile waiter' : 'device',
+                        ),
                     ]);
                 }
 
@@ -173,7 +260,7 @@ class LicenseService
                     [
                         'license_key_id' => $license->id,
                         'device_name' => $deviceName,
-                        'platform' => $platform,
+                        'platform' => strtolower(trim($platform)),
                         'app_version' => $appVersion,
                         'credential_hash' => $this->hashDeviceSecret($secret),
                         'credential_last4' => substr($secret, -4),
@@ -200,6 +287,7 @@ class LicenseService
                         'device_uid' => $deviceUid,
                         'platform' => $platform,
                         'app_version' => $appVersion,
+                        'paired' => $paired,
                     ],
                 );
 
@@ -311,6 +399,39 @@ class LicenseService
         );
     }
 
+    public function revokeMobileDeviceForTenant(
+        DeviceActivation $device,
+        TenantUser $user,
+    ): void {
+        if (! $this->isMobilePlatform((string) $device->platform)) {
+            throw ValidationException::withMessages([
+                'device' => 'Only waiter mobile activations can be revoked from restaurant settings.',
+            ]);
+        }
+
+        if ($device->status === DeviceStatus::Revoked) {
+            return;
+        }
+
+        $device->update([
+            'status' => DeviceStatus::Revoked,
+            'revoked_at' => now(),
+        ]);
+
+        $this->recordEvent(
+            $device->business,
+            $device->licenseKey,
+            $device,
+            null,
+            'device.revoked_by_tenant',
+            'Waiter mobile activation revoked by restaurant management.',
+            [
+                'tenant_user_id' => $user->id,
+                'tenant_user_public_id' => $user->public_id,
+            ],
+        );
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -362,6 +483,7 @@ class LicenseService
             ],
             'features' => $access->features,
             'device_limit' => $device->licenseKey->max_devices_snapshot,
+            'mobile_device_limit' => $this->resolveMobileDeviceLimit($access->features),
             'issued_at' => $issuedAt->copy()->utc()->toIso8601String(),
             'offline_valid_until' => $expiresAt->copy()->utc()->toIso8601String(),
             'subscription_ends_at' => $access->endsAt->copy()->utc()->toIso8601String(),
@@ -407,6 +529,32 @@ class LicenseService
     /**
      * @param  array<string, mixed>  $features
      */
+    private function resolveMobileDeviceLimit(array $features): ?int
+    {
+        $value = data_get($features, 'max_mobile_devices');
+
+        if ($value === null || $value === '') {
+            return $this->resolveDeviceLimit($features);
+        }
+
+        if (is_string($value) && strtolower(trim($value)) === 'unlimited') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            $limit = (int) $value;
+
+            return $limit > 0 ? $limit : null;
+        }
+
+        return $this->resolveDeviceLimit($features);
+    }
+
+    private function isMobilePlatform(string $platform): bool
+    {
+        return in_array(strtolower(trim($platform)), ['android', 'ios'], true);
+    }
+
     private function resolveDeviceLimit(array $features): ?int
     {
         $value = data_get($features, 'max_devices');

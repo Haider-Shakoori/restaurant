@@ -106,6 +106,7 @@ public sealed class LocalTerminalAuthenticator
             deviceHash,
             tokenHash,
             serverOptions,
+            activation.Snapshot.MobileDeviceLimit,
             cancellationToken);
     }
 
@@ -117,6 +118,7 @@ public sealed class LocalTerminalAuthenticator
         string deviceHash,
         string tokenHash,
         LocalServerOptions serverOptions,
+        int? mobileDeviceLimit,
         CancellationToken cancellationToken)
     {
         var settings = await _settingsStore.LoadAsync(cancellationToken);
@@ -194,6 +196,29 @@ public sealed class LocalTerminalAuthenticator
 
             var existing = await db.PairedTerminals
                 .SingleOrDefaultAsync(value => value.DeviceId == deviceId, cancellationToken);
+
+            var terminalType = localRequest.Headers["X-Terminal-Type"]
+                .ToString()
+                .Trim()
+                .ToLowerInvariant();
+            var isMobileTerminal =
+                terminalType is "android" or "ios" ||
+                (string.IsNullOrWhiteSpace(terminalType) &&
+                 string.Equals(role, "waiter", StringComparison.OrdinalIgnoreCase));
+
+            if (existing is null && isMobileTerminal && mobileDeviceLimit is not null)
+            {
+                var pairedMobileCount = await db.TerminalRuntimes
+                    .AsNoTracking()
+                    .CountAsync(
+                        value => value.ClientType == "android" || value.ClientType == "ios",
+                        cancellationToken);
+
+                if (pairedMobileCount >= mobileDeviceLimit.Value)
+                {
+                    return null;
+                }
+            }
 
             var now = DateTimeOffset.UtcNow;
 

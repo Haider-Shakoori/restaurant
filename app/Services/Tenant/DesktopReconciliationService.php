@@ -630,7 +630,7 @@ class DesktopReconciliationService
 
         return match ($change->entity_type) {
             'order' => Order::query()
-                ->with(['table.diningArea.branch', 'waiter', 'items', 'kitchenTickets.station'])
+                ->with(['table.diningArea.branch', 'waiter', 'items', 'kitchenTickets.station', 'kitchenTickets.items'])
                 ->find($change->entity_id)
                 ?->toArray(),
             'bill' => Bill::query()

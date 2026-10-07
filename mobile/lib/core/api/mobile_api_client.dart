@@ -74,7 +74,27 @@ class MobileApiClient implements SyncApi, ServerProbe {
         'license_key': licenseKey,
         'device_uid': deviceUid,
         'device_name': deviceName,
-        'platform': 'android',
+        'platform': Platform.isIOS ? 'ios' : 'android',
+        'app_version': appVersion,
+      },
+    );
+  }
+
+  Future<Map<String, Object?>> redeemPairing({
+    required String baseUrl,
+    required String pairingToken,
+    required String deviceUid,
+    required String deviceName,
+    required String appVersion,
+  }) {
+    return _request(
+      'POST',
+      _uri(baseUrl, '/api/v1/pairing-tokens/redeem'),
+      body: <String, Object?>{
+        'pairing_token': pairingToken,
+        'device_uid': deviceUid,
+        'device_name': deviceName,
+        'platform': Platform.isIOS ? 'ios' : 'android',
         'app_version': appVersion,
       },
     );
@@ -180,6 +200,8 @@ class MobileApiClient implements SyncApi, ServerProbe {
       'X-Device-Id': credentials.deviceId,
       'X-Device-Secret': credentials.deviceSecret,
       'X-App-Version': '1.0.0',
+      'X-Terminal-Type': Platform.isIOS ? 'ios' : 'android',
+      'X-Device-Name': 'BusinessOS Waiter',
     };
   }
 
