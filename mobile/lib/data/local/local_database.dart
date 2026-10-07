@@ -341,9 +341,11 @@ class LocalDatabase implements SyncStore {
 
       if (data is Map<Object?, Object?>) {
         final typed = Map<String, Object?>.from(data);
-        final order = result['entity_type'] == 'order_item'
-            ? typed['order']
-            : typed;
+        final entityType = result['entity_type']?.toString();
+        final order = switch (entityType) {
+          'order_item' || 'kitchen_ticket_item' => typed['order'],
+          _ => typed,
+        };
 
         if (order is Map<Object?, Object?>) {
           await _upsertOrderSnapshot(txn, Map<String, Object?>.from(order));
