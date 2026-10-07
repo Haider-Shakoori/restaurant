@@ -19,13 +19,22 @@ public partial class App : System.Windows.Application
     private CloudReconciliationProcessor? _cloudReconciliation;
     private HttpClient? _cloudReconciliationHttpClient;
 
-    protected override async void OnStartup(StartupEventArgs e)
+    protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
+        var window = new MainWindow();
+        MainWindow = window;
+        window.Show();
+
+        _ = InitializeServicesSafelyAsync();
+    }
+
+    private async Task InitializeServicesSafelyAsync()
+    {
         try
         {
             await InitializeServicesAsync();
@@ -33,11 +42,12 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             WriteCrashLog(exception);
-            MessageBox.Show(
-                "BusinessOS Restaurant could not initialize every background service. The desktop will remain open so you can review Settings and diagnostics.\n\n" + exception.Message,
-                "BusinessOS Restaurant",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            await Dispatcher.InvokeAsync(() =>
+                MessageBox.Show(
+                    "BusinessOS Restaurant could not initialize every background service. The desktop will remain open so you can review Settings and diagnostics.\n\n" + exception.Message,
+                    "BusinessOS Restaurant",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning));
         }
     }
 
