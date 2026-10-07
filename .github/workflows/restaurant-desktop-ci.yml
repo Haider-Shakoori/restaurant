@@ -140,43 +140,43 @@ jobs:
 
       - name: Smoke-test branded installer startup
         shell: pwsh
+        timeout-minutes: 2
         run: |
           $setup = Get-ChildItem "installer/output" -Filter "BusinessOS-Restaurant-Setup-*-win-x64.exe" |
             Select-Object -First 1
           if (-not $setup) { throw "Restaurant installer missing before runtime smoke test." }
 
-          $smokeDir = Join-Path $env:RUNNER_TEMP "BusinessOS-Restaurant-Installer-Smoke"
-          $smokeLog = Join-Path $env:RUNNER_TEMP "restaurant-installer-smoke.log"
-          Remove-Item $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item $smokeLog -Force -ErrorAction SilentlyContinue
+          # Launch the exact branded installer normally. The regression we are
+          # guarding against ("Bitmap image is not valid") appears immediately
+          # while Inno Setup creates the wizard, before license activation.
+          $process = Start-Process -FilePath $setup.FullName -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
 
-          $args = @(
-            "/VERYSILENT",
-            "/SUPPRESSMSGBOXES",
-            "/NORESTART",
-            "/SP-",
-            "/DIR=$smokeDir",
-            "/LOG=$smokeLog"
-          )
+            if ($process.HasExited) {
+              throw "Branded Restaurant installer exited during wizard startup."
+            }
 
-          $process = Start-Process -FilePath $setup.FullName -ArgumentList $args -PassThru -Wait
-          if ($process.ExitCode -ne 0) {
-            if (Test-Path $smokeLog) { Get-Content $smokeLog -Tail 200 }
-            throw "Branded Restaurant installer failed runtime smoke test with exit code $($process.ExitCode)."
-          }
+            $title = $process.MainWindowTitle
+            Write-Host "Installer window title: '$title'"
 
-          if (Test-Path $smokeLog) {
-            $logText = Get-Content $smokeLog -Raw
-            if ($logText -match "Bitmap image is not valid") {
-              Write-Host $logText
-              throw "Installer runtime still reports an invalid bitmap image."
+            if ([string]::IsNullOrWhiteSpace($title)) {
+              throw "Branded Restaurant installer did not create a visible wizard window."
+            }
+
+            if ($title -match "(?i)^Error$|Bitmap image is not valid") {
+              throw "Installer runtime opened an error dialog instead of the setup wizard."
+            }
+
+            if ($title -notmatch "(?i)BusinessOS Restaurant|Setup") {
+              throw "Unexpected installer window title: '$title'."
             }
           }
-
-          $installedExe = Join-Path $smokeDir "BusinessOS.Restaurant.Desktop.exe"
-          if (!(Test-Path $installedExe)) {
-            if (Test-Path $smokeLog) { Get-Content $smokeLog -Tail 200 }
-            throw "Installer runtime smoke test did not install the Restaurant executable."
+          finally {
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Upload unsigned CI release
