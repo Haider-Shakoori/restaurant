@@ -298,6 +298,7 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
             ("WAITER DEVICES", diagnostics.TerminalSummary),
+            ("MOBILE ALLOWANCE", diagnostics.MobileAllowance),
             ("OFFLINE LEASE", diagnostics.LeaseStatus),
             ("CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts")));
 
