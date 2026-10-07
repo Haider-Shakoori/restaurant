@@ -107,6 +107,21 @@ def save_desktop(root: Path) -> None:
     )
     icon.save(target / "BusinessOS.Restaurant.png", format="PNG")
 
+    # Inno Setup 6.7 wizard backgrounds are PNG/BMP assets. Keep the JPG as
+    # the WPF/app artwork source, but always generate a real PNG for Setup.
+    background_source = target / "RestaurantGlassBackground.jpg"
+    installer_background = target / "RestaurantInstallerBackground.png"
+    if not background_source.exists():
+        raise FileNotFoundError(f"Missing Restaurant background: {background_source}")
+
+    with Image.open(background_source) as background:
+        background.load()
+        background.convert("RGB").save(
+            installer_background,
+            format="PNG",
+            optimize=True,
+        )
+
 
 
 def save_android(mobile: Path) -> None:

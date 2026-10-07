@@ -29,8 +29,8 @@ WizardStyle=modern dynamic
 ; Inno Setup 6.7+ supports full wizard background images. This is a
 ; selected Restaurant artwork with installer opacity applied
 ; so controls remain readable while the installer carries the same visual brand.
-WizardBackImageFile=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantGlassBackground.jpg
-WizardBackImageFileDynamicDark=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantGlassBackground.jpg
+WizardBackImageFile=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantInstallerBackground.png
+WizardBackImageFileDynamicDark=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantInstallerBackground.png
 WizardBackImageOpacity=105
 WizardBackColor=#E8F1F4
 WizardBackColorDynamicDark=#0B1E2A
