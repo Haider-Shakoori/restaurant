@@ -15,7 +15,7 @@ class LocalDatabase implements SyncStore {
     final root = await getDatabasesPath();
     final database = await openDatabase(
       p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -39,6 +39,7 @@ class LocalDatabase implements SyncStore {
             name TEXT NOT NULL,
             description TEXT,
             image_url TEXT,
+            modifier_groups_json TEXT,
             price TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
             is_available INTEGER NOT NULL DEFAULT 1
@@ -64,6 +65,9 @@ class LocalDatabase implements SyncStore {
             client_order_id TEXT,
             server_id TEXT,
             table_id TEXT NOT NULL,
+            branch_id TEXT,
+            service_type TEXT NOT NULL DEFAULT 'dine_in',
+            service_reference TEXT,
             status TEXT NOT NULL,
             guest_count INTEGER NOT NULL,
             notes TEXT,
@@ -86,8 +90,15 @@ class LocalDatabase implements SyncStore {
             item_name TEXT NOT NULL,
             unit_price TEXT NOT NULL,
             quantity INTEGER NOT NULL,
+            dispatched_quantity INTEGER NOT NULL DEFAULT 0,
             line_total TEXT NOT NULL,
             notes TEXT,
+            seat_number INTEGER,
+            course_number INTEGER,
+            course_name TEXT,
+            modifiers_snapshot_json TEXT,
+            allergy_instructions TEXT,
+            kitchen_instructions TEXT,
             status TEXT NOT NULL
           )
         ''');
@@ -128,6 +139,39 @@ class LocalDatabase implements SyncStore {
         if (oldVersion < 2) {
           await db.execute(
             'ALTER TABLE menu_items ADD COLUMN image_url TEXT',
+          );
+        }
+        if (oldVersion < 3) {
+          await db.execute(
+            'ALTER TABLE menu_items ADD COLUMN modifier_groups_json TEXT',
+          );
+          await db.execute('ALTER TABLE orders ADD COLUMN branch_id TEXT');
+          await db.execute(
+            "ALTER TABLE orders ADD COLUMN service_type TEXT NOT NULL DEFAULT 'dine_in'",
+          );
+          await db.execute(
+            'ALTER TABLE orders ADD COLUMN service_reference TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN dispatched_quantity INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN seat_number INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN course_number INTEGER',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN course_name TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN modifiers_snapshot_json TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN allergy_instructions TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE order_items ADD COLUMN kitchen_instructions TEXT',
           );
         }
       },
@@ -684,6 +728,9 @@ class LocalDatabase implements SyncStore {
         'name': item['name']!.toString(),
         'description': item['description']?.toString(),
         'image_url': item['image_url']?.toString(),
+        'modifier_groups_json': jsonEncode(
+          item['modifier_groups'] as List<Object?>? ?? const <Object?>[],
+        ),
         'price': item['price']!.toString(),
         'sort_order': (item['sort_order'] as num?)?.toInt() ?? 0,
         'is_available': _boolInt(
@@ -744,6 +791,9 @@ class LocalDatabase implements SyncStore {
         'client_order_id': clientId,
         'server_id': serverId,
         'table_id': table['id']!.toString(),
+        'branch_id': order['branch_id']?.toString(),
+        'service_type': order['service_type']?.toString() ?? 'dine_in',
+        'service_reference': order['service_reference']?.toString(),
         'status': order['status']!.toString(),
         'guest_count': (order['guest_count'] as num?)?.toInt() ?? 1,
         'notes': order['notes']?.toString(),
@@ -779,8 +829,18 @@ class LocalDatabase implements SyncStore {
           'item_name': item['item_name']!.toString(),
           'unit_price': item['unit_price']!.toString(),
           'quantity': (item['quantity'] as num?)?.toInt() ?? 1,
+          'dispatched_quantity':
+              (item['dispatched_quantity'] as num?)?.toInt() ?? 0,
           'line_total': item['line_total']!.toString(),
           'notes': item['notes']?.toString(),
+          'seat_number': (item['seat_number'] as num?)?.toInt(),
+          'course_number': (item['course_number'] as num?)?.toInt(),
+          'course_name': item['course_name']?.toString(),
+          'modifiers_snapshot_json': jsonEncode(
+            item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
+          ),
+          'allergy_instructions': item['allergy_instructions']?.toString(),
+          'kitchen_instructions': item['kitchen_instructions']?.toString(),
           'status': item['status']!.toString(),
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
