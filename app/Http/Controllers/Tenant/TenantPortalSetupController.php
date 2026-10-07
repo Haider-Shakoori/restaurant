@@ -14,6 +14,7 @@ use App\Models\Supplier;
 use App\Models\TenantUser;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -110,17 +111,44 @@ class TenantPortalSetupController extends Controller
             'sku' => ['nullable', 'string', 'max:80', Rule::unique('menu_items', 'sku')],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
+            'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'price' => ['required', 'numeric', 'min:0'],
         ]);
 
+        $imagePath = $request->file('image')?->store('menu-items', 'public');
+
         MenuItem::query()->create([
-            ...$data,
+            'menu_category_id' => $data['menu_category_id'] ?? null,
             'sku' => filled($data['sku'] ?? null) ? Str::upper($data['sku']) : null,
+            'name' => $data['name'],
+            'description' => $data['description'] ?? null,
+            'image_path' => $imagePath,
+            'price' => $data['price'],
             'is_available' => true,
             'sort_order' => 0,
         ]);
 
         return back()->with('status', 'Menu item created.');
+    }
+
+    public function menuItemImage(Request $request, MenuItem $menuItem): RedirectResponse
+    {
+        $request->validate([
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $oldPath = $menuItem->image_path;
+        $newPath = $request->file('image')->store('menu-items', 'public');
+
+        $menuItem->update([
+            'image_path' => $newPath,
+        ]);
+
+        if (filled($oldPath) && $oldPath !== $newPath) {
+            Storage::disk('public')->delete($oldPath);
+        }
+
+        return back()->with('status', 'Menu item image updated.');
     }
 
     public function inventoryItem(Request $request): RedirectResponse
