@@ -135,6 +135,7 @@ public sealed class LocalKitchenTicketItem
     public DateTimeOffset? VoidedAt { get; set; }
     public string? VoidReason { get; set; }
     public string? RefireOfKitchenItemId { get; set; }
+    public string? RefireReason { get; set; }
 }
 
 public sealed class LocalKitchenPrinterBinding
