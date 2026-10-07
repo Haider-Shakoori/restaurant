@@ -32,7 +32,7 @@ public sealed class Batch15ReleasePackagingTests
     {
         var root=RepositoryRoot();
         var installer=File.ReadAllText(Path.Combine(root,"desktop","installer","BusinessOS.Restaurant.iss"));
-        var background=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantInstallerBackground.png");
+        var background=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantGlassBackground.jpg");
         var appBackground=background;
 
         Assert.Contains("https://restaurant.businessos.af",installer,StringComparison.Ordinal);
@@ -42,7 +42,7 @@ public sealed class Batch15ReleasePackagingTests
         Assert.Contains("days_remaining",installer,StringComparison.Ordinal);
         Assert.Contains("Already activated on this computer",installer,StringComparison.Ordinal);
         Assert.Contains("WizardBackImageFile=",installer,StringComparison.Ordinal);
-        Assert.Contains("RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+        Assert.Contains("RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
 
         Assert.True(File.Exists(background));
         Assert.True(new FileInfo(background).Length > 10_000);
