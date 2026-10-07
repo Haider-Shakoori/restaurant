@@ -218,6 +218,26 @@ public sealed class DesktopRestaurantWorkflowService
     public async Task PassExpoItemAsync(string itemId, CancellationToken token = default)
         => _ = await _kitchen.PassExpoItemAsync(itemId, await CurrentPrincipalAsync(token), token);
 
+    public async Task RecallKitchenItemAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RecallItemAsync(
+            itemId,
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task RecordKitchenWasteAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RecordWasteAsync(
+            itemId,
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
     public async Task RefireKitchenItemAsync(
         string itemId,
         string reason,
