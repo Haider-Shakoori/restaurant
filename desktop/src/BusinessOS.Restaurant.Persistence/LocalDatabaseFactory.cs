@@ -127,6 +127,9 @@ public sealed class LocalDatabaseFactory
             ("inventory_consumptions", "OrderItemId", "TEXT NULL"),
             ("inventory_consumptions", "KitchenTicketItemId", "TEXT NULL"),
             ("inventory_consumptions", "InventoryReservationId", "TEXT NULL"),
+            ("kot_rounds", "BranchId", "TEXT NULL"),
+            ("kot_rounds", "DisplayNumber", "INTEGER NOT NULL DEFAULT 0"),
+            ("kot_rounds", "BusinessDate", "TEXT NULL"),
         };
 
         foreach (var column in columns)
@@ -155,7 +158,10 @@ public sealed class LocalDatabaseFactory
             CREATE TABLE IF NOT EXISTS kot_rounds (
                 Id TEXT NOT NULL PRIMARY KEY,
                 OrderId TEXT NOT NULL,
+                BranchId TEXT NULL,
                 RoundNumber INTEGER NOT NULL,
+                DisplayNumber INTEGER NOT NULL DEFAULT 0,
+                BusinessDate TEXT NULL,
                 KotNumber TEXT NOT NULL,
                 MutationId TEXT NOT NULL,
                 SubmittedByUserId INTEGER NOT NULL,
@@ -167,8 +173,11 @@ public sealed class LocalDatabaseFactory
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_OrderId_RoundNumber
                 ON kot_rounds (OrderId, RoundNumber);
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_MutationId
-                ON kot_rounds (MutationId);
+            DROP INDEX IF EXISTS IX_kot_rounds_MutationId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_OrderId_MutationId
+                ON kot_rounds (OrderId, MutationId);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_Branch_BusinessDate_DisplayNumber
+                ON kot_rounds (BranchId, BusinessDate, DisplayNumber);
             CREATE INDEX IF NOT EXISTS IX_kot_rounds_KotNumber
                 ON kot_rounds (KotNumber);
             CREATE INDEX IF NOT EXISTS IX_kot_rounds_SentAt
