@@ -774,7 +774,11 @@ class KitchenService
             KitchenTicketItem::STATUS_COMPLETED,
         ], true))) {
             $next = KitchenTicket::STATUS_READY;
-        } elseif ($relevant->contains(fn (KitchenTicketItem $item) => $item->status === KitchenTicketItem::STATUS_PREPARING)) {
+        } elseif ($relevant->contains(fn (KitchenTicketItem $item) => in_array($item->status, [
+            KitchenTicketItem::STATUS_PREPARING,
+            KitchenTicketItem::STATUS_READY,
+            KitchenTicketItem::STATUS_COMPLETED,
+        ], true))) {
             $next = KitchenTicket::STATUS_PREPARING;
         } elseif ($relevant->contains(fn (KitchenTicketItem $item) => $item->status === KitchenTicketItem::STATUS_ACTIVE)) {
             $next = KitchenTicket::STATUS_ACTIVE;
