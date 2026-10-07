@@ -20,10 +20,32 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'allergy_instructions',
     'kitchen_instructions',
     'status',
+    'started_at',
+    'ready_at',
+    'completed_at',
+    'voided_at',
+    'refire_of_kitchen_ticket_item_id',
+    'production_reason',
 ])]
 class KitchenTicketItem extends Model
 {
     use HasUlids;
+
+    public const STATUS_HELD = 'held';
+
+    public const STATUS_QUEUED = 'queued';
+
+    public const STATUS_ACTIVE = 'active';
+
+    public const STATUS_PREPARING = 'preparing';
+
+    public const STATUS_READY = 'ready';
+
+    public const STATUS_COMPLETED = 'completed';
+
+    public const STATUS_VOIDED = 'voided';
+
+    public const STATUS_CANCELLED = 'cancelled';
 
     protected $connection = 'tenant';
 
@@ -33,6 +55,10 @@ class KitchenTicketItem extends Model
             'seat_number' => 'integer',
             'course_number' => 'integer',
             'modifiers_snapshot' => 'array',
+            'started_at' => 'datetime',
+            'ready_at' => 'datetime',
+            'completed_at' => 'datetime',
+            'voided_at' => 'datetime',
         ];
     }
 
@@ -44,5 +70,10 @@ class KitchenTicketItem extends Model
     public function orderItem(): BelongsTo
     {
         return $this->belongsTo(OrderItem::class);
+    }
+
+    public function refireOf(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'refire_of_kitchen_ticket_item_id');
     }
 }
