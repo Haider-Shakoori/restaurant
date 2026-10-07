@@ -548,6 +548,7 @@ class LicenseService
 
         if (is_numeric($value)) {
             $limit = (int) $value;
+
             return $limit > 0 ? $limit : null;
         }
 
