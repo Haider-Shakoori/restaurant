@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,7 +24,7 @@ internal static class RestaurantOperationalPages
             "expenses" => await ExpensesAsync(),
             "closing" => await OperationalActionViews.ClosingAsync(),
             "reports" => Reports(diagnostics),
-            "settings" => Settings(diagnostics),
+            "settings" => await SettingsAsync(diagnostics),
             _ => Placeholder(route),
         };
     }
@@ -331,10 +332,162 @@ internal static class RestaurantOperationalPages
         return Scroll(panel);
     }
 
-    private static FrameworkElement Settings(LanDiagnosticsViewModel diagnostics)
+    private static async Task<FrameworkElement> SettingsAsync(LanDiagnosticsViewModel diagnostics)
     {
         var panel = Stack();
         panel.DataContext = diagnostics;
+
+        var workflow = new DesktopRestaurantWorkflowService();
+        var workflowSettings = await workflow.RestaurantSettingsAsync();
+
+        var workflowPanel = new StackPanel();
+        workflowPanel.Children.Add(new TextBlock
+        {
+            Text = "Kitchen workflow",
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+        });
+
+        var workflowHelp = new TextBlock
+        {
+            Text = "Queue and Preparing are independent. Turning one off never changes the other. New KOT rounds snapshot these values so historical tickets keep the workflow they were created with.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 12),
+        };
+        workflowHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        workflowPanel.Children.Add(workflowHelp);
+
+        var queue = new CheckBox
+        {
+            Content = "Kitchen Queue",
+            IsChecked = workflowSettings.KitchenQueueEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var preparing = new CheckBox
+        {
+            Content = "Preparing stage",
+            IsChecked = workflowSettings.PreparingStageEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var expo = new CheckBox
+        {
+            Content = "Expo stage",
+            IsChecked = workflowSettings.ExpoEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var courses = new CheckBox
+        {
+            Content = "Course firing",
+            IsChecked = workflowSettings.CoursesEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var sound = new CheckBox
+        {
+            Content = "KOT notification sound",
+            IsChecked = workflowSettings.KotSoundEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var managerVoid = new CheckBox
+        {
+            Content = "Require manager approval for post-KOT void/cancel",
+            IsChecked = workflowSettings.RequireManagerApprovalForPostKotVoid,
+            Margin = new Thickness(0, 5, 0, 10),
+        };
+
+        workflowPanel.Children.Add(queue);
+        workflowPanel.Children.Add(preparing);
+        workflowPanel.Children.Add(expo);
+        workflowPanel.Children.Add(courses);
+        workflowPanel.Children.Add(sound);
+        workflowPanel.Children.Add(managerVoid);
+
+        var thresholds = new WrapPanel();
+        var warning = new TextBox
+        {
+            Text = workflowSettings.KitchenWarningMinutes.ToString(),
+            Width = 90,
+            Height = 34,
+            Margin = new Thickness(0, 4, 12, 6),
+        };
+        var late = new TextBox
+        {
+            Text = workflowSettings.KitchenLateMinutes.ToString(),
+            Width = 90,
+            Height = 34,
+            Margin = new Thickness(0, 4, 12, 6),
+        };
+        thresholds.Children.Add(new TextBlock
+        {
+            Text = "Warning min",
+            Margin = new Thickness(0, 12, 6, 0),
+        });
+        thresholds.Children.Add(warning);
+        thresholds.Children.Add(new TextBlock
+        {
+            Text = "Late min",
+            Margin = new Thickness(0, 12, 6, 0),
+        });
+        thresholds.Children.Add(late);
+        workflowPanel.Children.Add(thresholds);
+
+        var workflowActions = new WrapPanel();
+        var saveWorkflow = new Button
+        {
+            Content = "Save restaurant workflow",
+            MinWidth = 190,
+            Height = 38,
+            Margin = new Thickness(0, 4, 10, 0),
+        };
+        var workflowStatus = new TextBlock
+        {
+            Margin = new Thickness(4, 13, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        workflowStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        workflowActions.Children.Add(saveWorkflow);
+        workflowActions.Children.Add(workflowStatus);
+        workflowPanel.Children.Add(workflowActions);
+
+        saveWorkflow.Click += async (_, _) =>
+        {
+            try
+            {
+                if (!int.TryParse(warning.Text, out var warningMinutes))
+                    throw new InvalidOperationException("Enter a valid warning threshold.");
+                if (!int.TryParse(late.Text, out var lateMinutes))
+                    throw new InvalidOperationException("Enter a valid late threshold.");
+
+                saveWorkflow.IsEnabled = false;
+                var updated = await workflow.UpdateRestaurantSettingsAsync(
+                    new RestaurantWorkflowSettingsUpdate(
+                        queue.IsChecked == true,
+                        preparing.IsChecked == true,
+                        expo.IsChecked == true,
+                        courses.IsChecked == true,
+                        sound.IsChecked == true,
+                        warningMinutes,
+                        lateMinutes,
+                        managerVoid.IsChecked == true));
+
+                workflowStatus.Text =
+                    $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
+                    $"Preparing {(updated.PreparingStageEnabled ? "ON" : "OFF")} · " +
+                    $"Expo {(updated.ExpoEnabled ? "ON" : "OFF")}.";
+            }
+            catch (Exception ex)
+            {
+                workflowStatus.Text = ex.Message;
+            }
+            finally
+            {
+                saveWorkflow.IsEnabled = true;
+            }
+        };
+
+        panel.Children.Add(Section(
+            "Restaurant workflow settings",
+            "These settings drive the Desktop KOT/KDS state machine and are included in LAN bootstrap/settings APIs for cross-client alignment.",
+            workflowPanel));
 
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
