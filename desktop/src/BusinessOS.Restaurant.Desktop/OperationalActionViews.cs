@@ -24,8 +24,20 @@ internal static class OperationalActionViews
                             select new Choice(table.Id, $"{table.Name} ({table.Code})")).ToListAsync();
         var menu = await db.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
             .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
+        var modifierChoices = await (
+            from link in db.MenuItemModifierGroups.AsNoTracking()
+            join group in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals group.Id
+            join option in db.ModifierOptions.AsNoTracking() on group.Id equals option.ModifierGroupId
+            where group.IsActive && option.IsActive
+            orderby link.SortOrder, group.SortOrder, option.SortOrder, option.Name
+            select new ModifierChoice(
+                link.MenuItemId,
+                option.Id,
+                $"{group.Name}: {option.Name}",
+                option.PriceDelta))
+            .ToListAsync();
         var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
-                .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
+                .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
                 .ToListAsync())
             .OrderByDescending(x => x.UpdatedAtUtc)
             .Take(100)
@@ -44,43 +56,167 @@ internal static class OperationalActionViews
             .OrderByDescending(x => x.IssuedAt)
             .Select(x => x.Row)
             .ToList();
+        var orderLines = await (
+            from line in db.OrderItems.AsNoTracking()
+            join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
+            where order.Status != "closed" && order.Status != "cancelled" &&
+                  line.Status != "voided" && line.Status != "cancelled"
+            orderby line.CreatedAtUtc
+            select new OrderLineChoice(
+                order.ClientOrderId,
+                line.ClientLineId,
+                line.ItemName,
+                line.Quantity,
+                line.Status,
+                line.RoundNumber))
+            .ToListAsync();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(360) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var form = new StackPanel();
-        form.Children.Add(Header("New local order", "Creates the same local order used by LAN-connected waiter devices."));
+        form.Children.Add(Header(
+            "Restaurant order",
+            "Open dine-in, takeaway, delivery or counter orders. Send KOT repeatedly; only unsent items go in the next round."));
+
+        var serviceTypeBox = new ComboBox
+        {
+            ItemsSource = new[] { "dine_in", "takeaway", "delivery", "counter" },
+            SelectedIndex = 0,
+            Height = 34,
+            Margin = new Thickness(0, 4, 0, 6),
+        };
+        var orderBranchBox = Combo(branches, "Label");
         var tableBox = Combo(tables, "Label");
+        var serviceReferenceBox = new TextBox
+        {
+            Margin = new Thickness(0, 4, 0, 10),
+            Height = 34,
+        };
         var guestBox = new TextBox { Text = "1", Margin = new Thickness(0, 4, 0, 10), Height = 34 };
         var menuBox = Combo(menu, "Display");
-        var qtyBox = new TextBox { Text = "1", Margin = new Thickness(0, 4, 0, 10), Height = 34 };
+        var qtyBox = new TextBox { Text = "1", Margin = new Thickness(0, 4, 0, 6), Height = 34 };
+        var seatBox = new TextBox { Margin = new Thickness(0, 4, 8, 6), Height = 34, Width = 80 };
+        var courseBox = new TextBox { Margin = new Thickness(0, 4, 8, 6), Height = 34, Width = 80 };
+        var courseNameBox = new TextBox { Margin = new Thickness(0, 4, 0, 6), Height = 34, Width = 180 };
+        var itemNotesBox = new TextBox { Margin = new Thickness(0, 4, 0, 6), MinHeight = 54, TextWrapping = TextWrapping.Wrap };
+        var kitchenInstructionsBox = new TextBox { Margin = new Thickness(0, 4, 0, 6), MinHeight = 54, TextWrapping = TextWrapping.Wrap };
+        var allergyBox = new TextBox { Margin = new Thickness(0, 4, 0, 6), MinHeight = 54, TextWrapping = TextWrapping.Wrap };
+        var heldBox = new CheckBox { Content = "Hold for course firing", Margin = new Thickness(0, 5, 12, 5) };
+        var rushBox = new CheckBox { Content = "Rush priority", Margin = new Thickness(0, 5, 12, 5) };
+        var modifiersBox = new ListBox
+        {
+            SelectionMode = SelectionMode.Multiple,
+            Height = 100,
+            Margin = new Thickness(0, 4, 0, 6),
+            DisplayMemberPath = "Display",
+        };
         var orderIdBox = new TextBox { IsReadOnly = true, Margin = new Thickness(0, 4, 0, 10), Height = 34 };
-        var status = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+        var fireCourseBox = new TextBox { Width = 80, Height = 34, Margin = new Thickness(0, 4, 8, 6) };
+        var voidReasonBox = new TextBox { Height = 34, Margin = new Thickness(0, 4, 8, 6), MinWidth = 220 };
+        var lineBox = Combo(orderLines, "Display");
+        var status = new TextBlock { Foreground = Brushes.SlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
 
-        form.Children.Add(Label("Table")); form.Children.Add(tableBox);
+        form.Children.Add(Label("Service type")); form.Children.Add(serviceTypeBox);
+        form.Children.Add(Label("Branch (required for non-dine-in)")); form.Children.Add(orderBranchBox);
+        form.Children.Add(Label("Table (required for dine-in)")); form.Children.Add(tableBox);
+        form.Children.Add(Label("Takeaway / delivery / counter reference")); form.Children.Add(serviceReferenceBox);
         form.Children.Add(Label("Guests")); form.Children.Add(guestBox);
         var open = Button("Open order");
         form.Children.Add(open);
         form.Children.Add(Label("Current order")); form.Children.Add(orderIdBox);
         form.Children.Add(Label("Menu item")); form.Children.Add(menuBox);
         form.Children.Add(Label("Quantity")); form.Children.Add(qtyBox);
-        var add = Button("Add item"); var submit = Button("Send KOT");
-        form.Children.Add(add); form.Children.Add(submit); form.Children.Add(status);
+
+        var seatCourseRow = new WrapPanel();
+        seatCourseRow.Children.Add(Label("Seat"));
+        seatCourseRow.Children.Add(seatBox);
+        seatCourseRow.Children.Add(Label("Course"));
+        seatCourseRow.Children.Add(courseBox);
+        seatCourseRow.Children.Add(courseNameBox);
+        form.Children.Add(seatCourseRow);
+
+        var itemFlags = new WrapPanel();
+        itemFlags.Children.Add(heldBox);
+        itemFlags.Children.Add(rushBox);
+        form.Children.Add(itemFlags);
+
+        form.Children.Add(Label("Modifiers")); form.Children.Add(modifiersBox);
+        form.Children.Add(Label("Item note")); form.Children.Add(itemNotesBox);
+        form.Children.Add(Label("Kitchen instruction")); form.Children.Add(kitchenInstructionsBox);
+        form.Children.Add(Label("Allergy / special warning")); form.Children.Add(allergyBox);
+
+        var add = Button("Add item");
+        var submit = Button("Send new KOT round");
+        form.Children.Add(add);
+        form.Children.Add(submit);
+
+        var courseRow = new WrapPanel();
+        courseRow.Children.Add(fireCourseBox);
+        var fireCourse = Button("Fire course");
+        courseRow.Children.Add(fireCourse);
+        form.Children.Add(courseRow);
+
+        form.Children.Add(Label("Existing order line"));
+        form.Children.Add(lineBox);
+        var voidRow = new WrapPanel();
+        voidRow.Children.Add(voidReasonBox);
+        var voidLine = Button("Void selected line");
+        var cancelOrder = Button("Cancel order");
+        voidRow.Children.Add(voidLine);
+        voidRow.Children.Add(cancelOrder);
+        form.Children.Add(voidRow);
+        form.Children.Add(status);
 
         open.Click += async (_, _) =>
         {
             try
             {
-                if (tableBox.SelectedItem is not Choice table) throw new InvalidOperationException("Select a table.");
+                var serviceType = serviceTypeBox.SelectedItem?.ToString() ?? "dine_in";
                 if (!int.TryParse(guestBox.Text, out var guests)) guests = 1;
-                orderIdBox.Text = await workflow.OpenOrderAsync(table.Id, guests);
-                status.Text = "Order opened locally. Add items and send KOT.";
+
+                string? tableId = null;
+                var branchId = string.Empty;
+                if (serviceType == "dine_in")
+                {
+                    if (tableBox.SelectedItem is not Choice table)
+                        throw new InvalidOperationException("Select a table for dine-in.");
+                    tableId = table.Id;
+                }
+                else
+                {
+                    if (orderBranchBox.SelectedItem is not Choice branch)
+                        throw new InvalidOperationException("Select a branch for this service type.");
+                    branchId = branch.Id;
+                }
+
+                orderIdBox.Text = await workflow.OpenOrderAsync(
+                    serviceType,
+                    tableId,
+                    branchId,
+                    string.IsNullOrWhiteSpace(serviceReferenceBox.Text) ? null : serviceReferenceBox.Text.Trim(),
+                    guests);
+
+                lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
+                status.Text = "Order opened locally. Add items now or later; each Send KOT creates only the next unsent production round.";
             }
             catch (Exception ex) { status.Text = ex.Message; }
         };
+        menuBox.SelectionChanged += (_, _) =>
+        {
+            if (menuBox.SelectedItem is MenuChoice selected)
+            {
+                modifiersBox.ItemsSource = modifierChoices.Where(x => x.MenuItemId == selected.Id).ToList();
+            }
+            else
+            {
+                modifiersBox.ItemsSource = Array.Empty<ModifierChoice>();
+            }
+        };
+
         add.Click += async (_, _) =>
         {
             try
@@ -88,8 +224,40 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
                 if (menuBox.SelectedItem is not MenuChoice item) throw new InvalidOperationException("Select a menu item.");
                 if (!int.TryParse(qtyBox.Text, out var qty)) qty = 1;
-                await workflow.AddItemAsync(orderIdBox.Text, item.Id, qty);
-                status.Text = $"{qty} × {item.Name} added.";
+
+                int? seat = int.TryParse(seatBox.Text, out var parsedSeat) ? parsedSeat : null;
+                int? course = int.TryParse(courseBox.Text, out var parsedCourse) ? parsedCourse : null;
+                var selectedModifiers = modifiersBox.SelectedItems
+                    .Cast<ModifierChoice>()
+                    .Select(x => x.OptionId)
+                    .ToArray();
+
+                var clientLineId = await workflow.AddItemDetailedAsync(
+                    orderIdBox.Text,
+                    item.Id,
+                    qty,
+                    string.IsNullOrWhiteSpace(itemNotesBox.Text) ? null : itemNotesBox.Text.Trim(),
+                    seat,
+                    course,
+                    string.IsNullOrWhiteSpace(courseNameBox.Text) ? null : courseNameBox.Text.Trim(),
+                    heldBox.IsChecked == true,
+                    rushBox.IsChecked == true ? "rush" : "normal",
+                    string.IsNullOrWhiteSpace(allergyBox.Text) ? null : allergyBox.Text.Trim(),
+                    string.IsNullOrWhiteSpace(kitchenInstructionsBox.Text) ? null : kitchenInstructionsBox.Text.Trim(),
+                    selectedModifiers);
+
+                var localLine = new OrderLineChoice(
+                    orderIdBox.Text,
+                    clientLineId,
+                    item.Name,
+                    qty,
+                    heldBox.IsChecked == true ? "held" : "pending",
+                    null);
+                orderLines.Add(localLine);
+                lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
+                lineBox.SelectedItem = localLine;
+
+                status.Text = $"{qty} × {item.Name} added. Send KOT when this round is ready.";
             }
             catch (Exception ex) { status.Text = ex.Message; }
         };
@@ -98,14 +266,51 @@ internal static class OperationalActionViews
             try
             {
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
-                await workflow.SubmitOrderAsync(orderIdBox.Text);
-                status.Text = "Order sent to kitchen/KOT.";
+                await workflow.SendKotAsync(orderIdBox.Text);
+                status.Text = "New KOT round sent. Previously sent items were not duplicated.";
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+        };
+
+        fireCourse.Click += async (_, _) =>
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open/select an order first.");
+                if (!int.TryParse(fireCourseBox.Text, out var courseNumber)) throw new InvalidOperationException("Enter a course number.");
+                await workflow.FireCourseAsync(orderIdBox.Text, courseNumber);
+                status.Text = $"Course {courseNumber} fired as a new KOT round.";
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+        };
+
+        voidLine.Click += async (_, _) =>
+        {
+            try
+            {
+                if (lineBox.SelectedItem is not OrderLineChoice line) throw new InvalidOperationException("Select an order line.");
+                if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a void reason.");
+                await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
+                status.Text = $"{line.ItemName} voided. Reserved stock was released when production had not started.";
+            }
+            catch (Exception ex) { status.Text = ex.Message; }
+        };
+
+        cancelOrder.Click += async (_, _) =>
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open/select an order first.");
+                if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a cancellation reason.");
+                await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
+                status.Text = "Order cancelled with audit history preserved.";
             }
             catch (Exception ex) { status.Text = ex.Message; }
         };
 
         var grid = DataGrid(orders);
         grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
+        grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
         grid.Columns.Add(Column("Waiter", nameof(OrderChoice.Waiter), 150));
         grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
         grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
@@ -830,7 +1035,15 @@ internal static class OperationalActionViews
 
     private sealed record Choice(string Id, string Label);
     private sealed record MenuChoice(string Id, string Name, decimal Price) { public string Display => $"{Name} — AFN {Price:N2}"; }
-    private sealed record OrderChoice(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total);
+    private sealed record ModifierChoice(string MenuItemId, string OptionId, string Name, decimal PriceDelta)
+    {
+        public string Display => PriceDelta == 0m ? Name : $"{Name} ({PriceDelta:+0.##;-0.##} AFN)";
+    }
+    private sealed record OrderLineChoice(string ClientOrderId, string ClientLineId, string ItemName, int Quantity, string Status, int? RoundNumber)
+    {
+        public string Display => $"{Quantity} × {ItemName} · {Status}{(RoundNumber.HasValue ? $" · R{RoundNumber}" : "")}";
+    }
+    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total);
     private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
     private sealed record KitchenItemCard(
