@@ -291,6 +291,15 @@ class LocalDatabase implements SyncStore {
         );
       }
 
+      final restaurantSettings = data['restaurant_settings'];
+      if (restaurantSettings is Map<Object?, Object?>) {
+        await _setSettingTxn(
+          txn,
+          'restaurant_settings_json',
+          jsonEncode(Map<String, Object?>.from(restaurantSettings)),
+        );
+      }
+
       await _setSettingTxn(
         txn,
         'sync_cursor_' + cursorScope,
