@@ -37,7 +37,7 @@
     </Window.Resources>
 
     <Grid>
-        <Image Source="Assets/RestaurantInstallerBackground.png"
+        <Image Source="Assets/RestaurantGlassBackground.jpg"
                Stretch="UniformToFill"
                Effect="{DynamicResource BackgroundBlurEffect}" />
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
