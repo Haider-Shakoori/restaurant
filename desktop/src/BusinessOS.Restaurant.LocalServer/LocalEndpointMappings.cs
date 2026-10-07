@@ -1655,6 +1655,28 @@ public static class LocalEndpointMappings
             return Results.Ok(new { data = await reports.TopItemsAsync(branch_id, from, to, limit ?? 10, token) });
         });
 
+        app.MapGet("/api/v1/reports/kitchen", async (
+            string branch_id,
+            DateOnly from,
+            DateOnly to,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalReportingService reports,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+                return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal))
+                return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+
+            return Results.Ok(new
+            {
+                data = await reports.KitchenPerformanceAsync(branch_id, from, to, token),
+            });
+        });
+
         app.MapGet("/api/v1/reports/closings", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>
         {
             var principal = await authenticator.AuthenticateAsync(request, options, true, token);
