@@ -35,7 +35,7 @@ jobs:
         run: flutter pub get
 
       - working-directory: mobile
-        run: dart format lib test
+        run: dart format lib/data/local/local_database.dart lib/features/orders/offline_order_repository.dart lib/features/orders/order_screen.dart
 
       - name: Commit formatting
         run: |
