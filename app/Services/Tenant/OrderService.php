@@ -36,13 +36,14 @@ class OrderService
             }
 
             if (($data['submit_action'] ?? 'kitchen') === 'kitchen') {
-                return $this->submit($order, $actor);
+                return $this->submit($order, $actor, $data['client_dispatch_id'] ?? null);
             }
 
             return $order->fresh()->load([
                 'table.diningArea',
                 'waiter',
                 'items',
+                'kotRounds.tickets.station',
             ]);
         });
     }
@@ -108,9 +109,9 @@ class OrderService
         return DB::connection('tenant')->transaction(function () use ($order, $actor, $data): OrderItem {
             $order = Order::query()->lockForUpdate()->findOrFail($order->getKey());
 
-            if ($order->status !== Order::STATUS_DRAFT) {
+            if (! in_array($order->status, Order::KITCHEN_EDITABLE_STATUSES, true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Items can only be edited while the order is in draft.',
+                    'order' => 'Items cannot be added after billing, closing, or cancellation.',
                 ]);
             }
 
@@ -145,6 +146,7 @@ class OrderService
                 'item_name' => $menuItem->name,
                 'unit_price' => $unitPrice,
                 'quantity' => $quantity,
+                'dispatched_quantity' => 0,
                 'line_total' => $lineTotal,
                 'notes' => $data['notes'] ?? null,
                 'status' => 'pending',
@@ -160,58 +162,67 @@ class OrderService
                 'order_item_id' => $line->id,
                 'menu_item_id' => $menuItem->id,
                 'quantity' => $quantity,
+                'pending_dispatch_quantity' => $quantity,
             ]);
 
             return $line->fresh();
         });
     }
 
-    public function submit(Order $order, TenantUser $actor): Order
+    public function submit(Order $order, TenantUser $actor, ?string $clientDispatchId = null): Order
     {
-        return DB::connection('tenant')->transaction(function () use ($order, $actor): Order {
-            $order = Order::query()->withCount('items')->lockForUpdate()->findOrFail($order->getKey());
+        return DB::connection('tenant')->transaction(function () use ($order, $actor, $clientDispatchId): Order {
+            $order = Order::query()
+                ->with('items')
+                ->lockForUpdate()
+                ->findOrFail($order->getKey());
 
-            if (in_array($order->status, [
-                Order::STATUS_SUBMITTED,
-                Order::STATUS_PREPARING,
-                Order::STATUS_READY,
-            ], true)) {
-                $this->kitchen->dispatch($order, $actor);
-
-                return $order->fresh()->load([
-                    'table.diningArea',
-                    'waiter',
-                    'items',
-                    'kitchenTickets.station',
-                ]);
-            }
-
-            if ($order->status !== Order::STATUS_DRAFT) {
+            if (! in_array($order->status, Order::KITCHEN_EDITABLE_STATUSES, true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Only draft orders can be submitted.',
+                    'order' => 'This order can no longer send kitchen items.',
                 ]);
             }
 
-            if ($order->items_count < 1) {
+            if ($order->items->isEmpty()) {
                 throw ValidationException::withMessages([
                     'order' => 'Add at least one item before submitting the order.',
                 ]);
             }
 
-            $from = $order->status;
+            $hasPendingItems = $order->items
+                ->contains(fn (OrderItem $item): bool => $item->pendingDispatchQuantity() > 0);
 
+            if (! $hasPendingItems) {
+                return $order->fresh()->load([
+                    'table.diningArea',
+                    'waiter',
+                    'items',
+                    'kotRounds.tickets.station',
+                    'kitchenTickets.station',
+                ]);
+            }
+
+            $from = $order->status;
             $order->update([
                 'status' => Order::STATUS_SUBMITTED,
-                'submitted_at' => now(),
+                'submitted_at' => $order->submitted_at ?? now(),
             ]);
 
-            $this->event($order, $actor, 'order.submitted', $from, Order::STATUS_SUBMITTED);
-            $this->kitchen->dispatch($order, $actor);
+            $this->event(
+                $order,
+                $actor,
+                $from === Order::STATUS_DRAFT ? 'order.submitted' : 'order.kitchen_round_pending',
+                $from,
+                Order::STATUS_SUBMITTED,
+            );
+
+            $this->kitchen->dispatch($order, $actor, $clientDispatchId);
 
             return $order->fresh()->load([
                 'table.diningArea',
                 'waiter',
                 'items',
+                'kotRounds.tickets.station',
                 'kitchenTickets.station',
             ]);
         });
