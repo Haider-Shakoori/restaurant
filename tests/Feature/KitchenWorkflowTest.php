@@ -383,7 +383,9 @@ class KitchenWorkflowTest extends TestCase
         $kitchen->start($ticket, $waiter);
         $kitchen->ready($ticket->fresh(), $waiter);
 
-        $response = $this->actingAs($waiter, 'sanctum')
+        $waiter->update(['role' => 'kitchen']);
+
+        $response = $this->actingAs($waiter->fresh(), 'sanctum')
             ->getJson('http://expo.test/api/v1/kitchen/expo');
 
         $response->assertOk()
