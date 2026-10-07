@@ -23,19 +23,23 @@ Desktop continues to support all three.
 
 Desktop also accepts `order.kot.send` as an additive/local alias for incremental KOT dispatch. Do **not** remove `order.submit` while Web/Flutter still uses that mutation name.
 
-## Shared KOT round fields
+## Shared KOT dispatch-round fields
 
-Use these exact names:
+The current `feat/kot-realignment-web` contract uses these canonical names:
 
-- `round_number`
-- `display_number`
-- `business_date`
-- `client_dispatch_id`
-- `dispatched_at`
+- `sequence`
+- `submitted_by_user_id`
+- `client_mutation_id`
+- `kot_number`
+- `priority`
+- `workflow_snapshot`
+- `service_context` (nullable)
+- `course_context` (nullable)
+- `sent_at`
 
-Desktop may also expose `kot_number` for staff display. It represents the human-readable form of `display_number`, for example `KOT-0001`.
+Desktop now emits these canonical names in KOT-round snapshots. It also keeps the older Desktop aliases `round_number`, `display_number`, `business_date`, `client_dispatch_id`, `dispatched_at`, and `workflow` additively so existing Desktop/LAN consumers are not broken.
 
-Station ticket-number formatting is an implementation/display detail. Web currently formats station tickets with date/branch/display/station tokens; Desktop may use a local printer/display format. The stable shared identities are the round/ticket IDs and the fields above, not the rendered ticket string.
+Desktop internal property/column names do not need a destructive rename as long as the shared payload preserves the canonical Web/Flutter semantics.
 
 ## Shared order states
 
@@ -56,24 +60,20 @@ Desktop currently has an additive local `expo` aggregate order state when Expo i
 
 ## Shared kitchen states
 
-The current Web branch defines:
+The current Web contract defines these canonical persisted production states:
 
+- `held`
 - `queued`
+- `active`
 - `preparing`
 - `ready`
 - `completed`
+- `voided`
 - `cancelled`
 
-Desktop keeps these exact meanings.
+Desktop uses the same meanings. `pending` remains an unsent order-line state rather than dispatched production.
 
-Desktop has two additive local execution states required by the configurable KDS flow:
-
-- `active` — Queue was skipped for this KOT round
-- `expo` — kitchen production is finished but Expo has not passed the item
-
-These are not replacements for the shared states. They are Desktop execution detail until Web/Flutter explicitly adopts them. New Desktop-only work must not introduce another synonym for Queue/Preparing/Ready.
-
-The UI-only label `DELAYED` is derived from elapsed time and the configured late threshold. It is **not** persisted as a new kitchen status.
+Desktop `expo` is still additive execution detail because the current Web model does not define `expo` as a canonical persisted production state. The UI-only label `DELAYED` remains derived from elapsed time and is never persisted as another status.
 
 ## Queue / Preparing matrix
 
@@ -170,12 +170,10 @@ Across Desktop/Web/Flutter:
 - reconnect must reconcile rather than create a second logical order/KOT;
 - historical IDs/timestamps/events are not destructively rewritten.
 
-## Current Web contract delta requiring a later Desktop phase
-
-The newer Web branch has also moved the KOT dispatch-round contract to `sequence`, `client_mutation_id`, `kot_number`, `workflow_snapshot`, `service_context`, `course_context`, and `sent_at`, and now treats `active` as canonical kitchen state. Desktop still carries its earlier round aliases internally. That round-contract migration is deliberately **not** part of the Restaurant Settings / negative-stock phase in this commit and should be handled as the next isolated compatibility phase.
-
 ## Handoff note
 
-At the inspected Web/Flutter reference, the Web kitchen service still uses the baseline fixed queued → preparing → ready → completed flow and Flutter mobile sync still names submission `order.submit`. The Desktop branch therefore keeps those core names intact and treats Queue-off `active`, Expo, and the newer operations as additive until the Web/Flutter branch adopts them.
+At Web head `83d9813dcc00ac0a4443d74214d02b0ba8a9e1c8`, Queue-off `active` and configurable Queue/Preparing snapshots are part of the Web realignment contract. Flutter mobile sync still preserves the legacy `order.submit` mutation, so Desktop continues to accept it alongside additive `order.kot.send`.
+
+Desktop-only operational actions such as Expo pass, recall, waste and active-order item movement remain additive until the Web/Flutter branch explicitly adopts them. They do not rename or replace existing shared mutations/states.
 
 Before any future shared-contract change, re-read this file **and** re-inspect the current Web/Flutter branch head; this snapshot can become stale as the parallel branch advances.

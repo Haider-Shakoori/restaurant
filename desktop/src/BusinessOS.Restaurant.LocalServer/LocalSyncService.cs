@@ -620,7 +620,8 @@ public sealed class LocalSyncService
             principal,
             mutation.MutationId,
             settings,
-            cancellationToken);
+            cancellationToken,
+            unsent.Any(value => value.Priority == "rush") ? "rush" : "normal");
 
         var now = DateTimeOffset.UtcNow;
         order.Status = "submitted";
@@ -710,7 +711,8 @@ public sealed class LocalSyncService
             principal,
             mutation.MutationId,
             settings,
-            cancellationToken);
+            cancellationToken,
+            heldItems.Any(value => value.Priority == "rush") ? "rush" : "normal");
 
         order.Status = "submitted";
         order.SubmittedAt ??= DateTimeOffset.UtcNow;

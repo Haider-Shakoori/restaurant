@@ -44,6 +44,14 @@ public sealed class KotRealignmentTests
                 second.GetProperty("entity_id").GetString(),
                 replay.GetProperty("entity_id").GetString());
 
+            var sharedRound = second.GetProperty("data").GetProperty("round");
+            Assert.Equal(2, sharedRound.GetProperty("sequence").GetInt32());
+            Assert.Equal("SEND-2", sharedRound.GetProperty("client_mutation_id").GetString());
+            Assert.Matches("^KOT-[0-9]{4}$", sharedRound.GetProperty("kot_number").GetString()!);
+            Assert.Equal("normal", sharedRound.GetProperty("priority").GetString());
+            Assert.True(sharedRound.TryGetProperty("workflow_snapshot", out _));
+            Assert.True(sharedRound.TryGetProperty("sent_at", out _));
+
             await using var db = factory.Create();
             var rounds = await db.KotRounds.OrderBy(x => x.RoundNumber).ToArrayAsync();
             var orderItems = (await db.OrderItems.ToArrayAsync())

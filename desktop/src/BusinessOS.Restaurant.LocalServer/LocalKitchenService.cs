@@ -49,7 +49,8 @@ public sealed class LocalKitchenService
             actor,
             mutationId: $"legacy-submit:{order.Id}",
             settings,
-            cancellationToken);
+            cancellationToken,
+            items.Any(value => value.Priority == "rush") ? "rush" : "normal");
 
         await DispatchRoundAsync(db, order, round, items, actor, cancellationToken);
     }
@@ -60,7 +61,8 @@ public sealed class LocalKitchenService
         LocalTerminalPrincipal actor,
         string mutationId,
         RestaurantWorkflowSettings settings,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string priority = "normal")
     {
         var existing = await db.KotRounds
             .SingleOrDefaultAsync(
@@ -89,6 +91,7 @@ public sealed class LocalKitchenService
             BusinessDate = sequence.BusinessDate,
             KotNumber = sequence.KotNumber,
             MutationId = mutationId,
+            Priority = priority is "rush" ? "rush" : "normal",
             SubmittedByUserId = actor.UserId,
             QueueEnabled = settings.KitchenQueueEnabled,
             PreparingEnabled = settings.PreparingStageEnabled,
@@ -851,7 +854,8 @@ public sealed class LocalKitchenService
             actor,
             mutationId,
             settings,
-            cancellationToken);
+            cancellationToken,
+            priority: "rush");
 
         var station = await db.KitchenStations
             .SingleAsync(value => value.Id == sourceTicket.KitchenStationId, cancellationToken);
@@ -1015,7 +1019,9 @@ public sealed class LocalKitchenService
         {
             id = ticket.Id,
             ticket_number = ticket.TicketNumber,
+            human_kot_number = ticket.KotNumber ?? round?.KotNumber ?? ticket.TicketNumber,
             kot_number = ticket.KotNumber ?? round?.KotNumber ?? ticket.TicketNumber,
+            kot_dispatch_round_id = ticket.KotRoundId,
             round_id = ticket.KotRoundId,
             round_number = ticket.RoundNumber,
             status = ticket.Status,
@@ -1040,16 +1046,21 @@ public sealed class LocalKitchenService
             items = items.Select(item => new
             {
                 id = item.Id,
+                source_order_item_id = item.OrderItemId,
                 order_item_id = item.OrderItemId,
                 item_name = item.ItemName,
+                source_quantity = item.Quantity,
                 quantity = item.Quantity,
                 notes = item.Notes,
+                state = item.Status,
                 status = item.Status,
                 seat_number = item.SeatNumber,
                 course_number = item.CourseNumber,
                 course_name = item.CourseName,
                 priority = item.Priority,
+                modifiers_snapshot = ParseJson(item.ModifiersJson),
                 modifiers = ParseJson(item.ModifiersJson),
+                critical_instruction = item.AllergyInstructions,
                 allergy_instructions = item.AllergyInstructions,
                 kitchen_instructions = item.KitchenInstructions,
                 started_at = item.StartedAt,
@@ -1057,6 +1068,7 @@ public sealed class LocalKitchenService
                 completed_at = item.CompletedAt,
                 voided_at = item.VoidedAt,
                 void_reason = item.VoidReason,
+                refire_of_kitchen_ticket_item_id = item.RefireOfKitchenItemId,
                 refire_of_kitchen_item_id = item.RefireOfKitchenItemId,
                 refire_reason = item.RefireReason,
                 recalled_at = item.RecalledAt,
@@ -1074,14 +1086,30 @@ public sealed class LocalKitchenService
         id = round.Id,
         order_id = round.OrderId,
         branch_id = round.BranchId,
+
+        // Canonical shared Web/Flutter contract names.
+        sequence = round.RoundNumber,
+        client_mutation_id = round.MutationId,
+        kot_number = round.KotNumber,
+        priority = round.Priority,
+        workflow_snapshot = new
+        {
+            kitchen_queue_enabled = round.QueueEnabled,
+            preparing_stage_enabled = round.PreparingEnabled,
+            expo_enabled = round.ExpoEnabled,
+            courses_enabled = round.CoursesEnabled,
+        },
+        service_context = (object?)null,
+        course_context = (object?)null,
+        sent_at = round.SentAt,
+
+        // Backward-compatible Desktop aliases kept additive.
         round_number = round.RoundNumber,
         display_number = round.DisplayNumber,
         business_date = round.BusinessDate,
-        kot_number = round.KotNumber,
         client_dispatch_id = round.MutationId,
         submitted_by_user_id = round.SubmittedByUserId,
         dispatched_at = round.SentAt,
-        sent_at = round.SentAt,
         workflow = new
         {
             kitchen_queue_enabled = round.QueueEnabled,

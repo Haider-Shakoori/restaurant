@@ -603,6 +603,7 @@ public sealed class LocalKotRound
     public DateOnly BusinessDate { get; set; }
     public required string KotNumber { get; set; }
     public required string MutationId { get; set; }
+    public string Priority { get; set; } = "normal";
     public long SubmittedByUserId { get; set; }
     public bool QueueEnabled { get; set; }
     public bool PreparingEnabled { get; set; }
