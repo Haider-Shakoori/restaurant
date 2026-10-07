@@ -6,7 +6,6 @@ use App\Models\Business;
 use App\Models\DeviceActivation;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class WaiterPairingService
