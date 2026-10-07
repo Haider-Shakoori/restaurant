@@ -598,6 +598,8 @@ class MobileSyncService
             'table.diningArea.branch',
             'waiter',
             'items',
+            'kotRounds.tickets.station',
+            'kotRounds.tickets.items',
             'kitchenTickets.station',
         ]);
 
@@ -640,6 +642,34 @@ class MobileSyncService
                 'kitchen_instructions' => $item->kitchen_instructions,
                 'dispatched_quantity' => $item->dispatched_quantity,
                 'status' => $item->status,
+            ])->all(),
+            'kot_rounds' => $order->kotRounds->map(fn ($round) => [
+                'id' => $round->id,
+                'sequence' => $round->sequence,
+                'kot_number' => $round->kot_number,
+                'priority' => $round->priority,
+                'sent_at' => $round->sent_at?->toIso8601String(),
+                'tickets' => $round->tickets->map(fn ($ticket) => [
+                    'id' => $ticket->id,
+                    'status' => $ticket->status,
+                    'station' => [
+                        'id' => $ticket->station->id,
+                        'name' => $ticket->station->name,
+                    ],
+                    'items' => $ticket->items->map(fn ($item) => [
+                        'id' => $item->id,
+                        'order_item_id' => $item->order_item_id,
+                        'item_name' => $item->item_name,
+                        'quantity' => $item->quantity,
+                        'status' => $item->status,
+                        'seat_number' => $item->seat_number,
+                        'course_number' => $item->course_number,
+                        'course_name' => $item->course_name,
+                        'refire_of_kitchen_ticket_item_id' => $item->refire_of_kitchen_ticket_item_id,
+                        'production_reason' => $item->production_reason,
+                        'recalled_at' => $item->recalled_at?->toIso8601String(),
+                    ])->all(),
+                ])->all(),
             ])->all(),
             'kitchen_tickets' => $order->kitchenTickets->map(fn ($ticket) => [
                 'id' => $ticket->id,
