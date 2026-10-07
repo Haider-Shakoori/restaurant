@@ -52,7 +52,7 @@
             <Border Grid.Column="0"
                     Background="{DynamicResource SidebarBrush}"
                     BorderBrush="{DynamicResource CardBorderBrush}"
-                    BorderThickness="1"
+                    BorderThickness="0,0,1,0"
                     CornerRadius="0">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="28"
@@ -174,7 +174,7 @@
                 <Border Grid.Row="0"
                         Background="{DynamicResource TopBarBrush}"
                         BorderBrush="{DynamicResource CardBorderBrush}"
-                        BorderThickness="1"
+                        BorderThickness="0,0,0,1"
                         CornerRadius="0"
                         Padding="20,0">
                     <Border.Effect>
