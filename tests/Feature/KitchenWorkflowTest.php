@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\KitchenStation;
@@ -354,7 +355,7 @@ class KitchenWorkflowTest extends TestCase
 
     public function test_expo_endpoint_is_derived_from_ready_production_items(): void
     {
-        $this->withoutMiddleware(\App\Http\Middleware\EnsureTenantSubscriptionActive::class);
+        $this->withoutMiddleware(EnsureTenantSubscriptionActive::class);
         $tenant = $this->createTenant('restaurant-expo', 'expo.test');
         tenancy()->initialize($tenant);
 
