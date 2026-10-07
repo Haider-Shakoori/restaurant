@@ -560,6 +560,7 @@ internal static class OperationalActionViews
         var canProduce = principal.UserRole is "owner" or "manager" or "kitchen";
         var canExpo = principal.UserRole is "owner" or "manager" or "expo";
         var canRefire = principal.UserRole is "owner" or "manager" or "kitchen";
+        var canRecallWaste = canRefire;
 
         var root = new StackPanel();
         root.Children.Add(Header(
@@ -576,7 +577,7 @@ internal static class OperationalActionViews
         };
         var statusFilter = new ComboBox
         {
-            ItemsSource = new[] { "All states", "queued", "active", "preparing", "expo", "ready" },
+            ItemsSource = new[] { "All states", "queued", "active", "preparing", "expo", "ready", "completed" },
             SelectedIndex = 0,
             Width = 160,
             Height = 34,
@@ -602,7 +603,7 @@ internal static class OperationalActionViews
         };
         root.Children.Add(board);
 
-        var timerBindings = new List<(TextBlock Label, Border Badge, DateTimeOffset QueuedAt, string Priority)>();
+        var timerBindings = new List<(TextBlock Label, Border Badge, TextBlock State, DateTimeOffset QueuedAt, string Priority, string Status)>();
 
         void RefreshStationChoices()
         {
@@ -618,18 +619,44 @@ internal static class OperationalActionViews
                 choices.FirstOrDefault(choice => choice.Id == selected) ?? choices[0];
         }
 
-        void UpdateAge(TextBlock label, Border badge, DateTimeOffset queuedAt, string priority)
+        void UpdateAge(
+            TextBlock label,
+            Border badge,
+            TextBlock state,
+            DateTimeOffset queuedAt,
+            string priority,
+            string currentStatus)
         {
             var age = DateTimeOffset.UtcNow - queuedAt;
             var minutes = Math.Max(0, (int)Math.Floor(age.TotalMinutes));
             label.Text = $"{minutes:00}:{Math.Max(0, age.Seconds):00}";
 
-            if (priority == "rush" || minutes >= settings.KitchenLateMinutes)
+            var delayed = currentStatus is "queued" or "active" or "preparing" or "expo" &&
+                          minutes >= settings.KitchenLateMinutes;
+            state.Text = delayed
+                ? "DELAYED"
+                : currentStatus switch
+                {
+                    "queued" => "NEW",
+                    "active" => "ACCEPTED",
+                    "preparing" => "PREPARING",
+                    "expo" => "EXPO",
+                    "ready" => "READY",
+                    "completed" => "COMPLETED",
+                    _ => currentStatus.ToUpperInvariant(),
+                };
+
+            if (priority == "rush" || delayed)
             {
                 badge.Background = Brushes.IndianRed;
                 label.Foreground = Brushes.White;
+                if (delayed)
+                {
+                    state.Foreground = Brushes.IndianRed;
+                }
             }
-            else if (minutes >= settings.KitchenWarningMinutes)
+            else if (minutes >= settings.KitchenWarningMinutes &&
+                     currentStatus is not ("ready" or "completed"))
             {
                 badge.Background = Brushes.Goldenrod;
                 label.Foreground = Brushes.White;
@@ -638,6 +665,7 @@ internal static class OperationalActionViews
             {
                 badge.Background = Brushes.Transparent;
                 label.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                state.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
             }
         }
 
@@ -677,8 +705,10 @@ internal static class OperationalActionViews
                 BorderThickness = new Thickness(1),
                 BorderBrush = Brushes.Transparent,
             };
-            UpdateAge(timerText, timerBadge, row.QueuedAt, row.Priority);
-            timerBindings.Add((timerText, timerBadge, row.QueuedAt, row.Priority));
+            var stateChip = KitchenChip(row.Status.ToUpperInvariant());
+            var stateText = (TextBlock)stateChip.Child;
+            UpdateAge(timerText, timerBadge, stateText, row.QueuedAt, row.Priority, row.Status);
+            timerBindings.Add((timerText, timerBadge, stateText, row.QueuedAt, row.Priority, row.Status));
             Grid.SetColumn(timerBadge, 1);
             header.Children.Add(timerBadge);
             panel.Children.Add(header);
@@ -695,7 +725,7 @@ internal static class OperationalActionViews
             panel.Children.Add(itemTitle);
 
             var chips = new WrapPanel();
-            chips.Children.Add(KitchenChip(row.Status.ToUpperInvariant()));
+            chips.Children.Add(stateChip);
             if (row.Priority == "rush") chips.Children.Add(KitchenChip("RUSH"));
             if (row.SeatNumber.HasValue) chips.Children.Add(KitchenChip($"Seat {row.SeatNumber.Value}"));
             if (row.CourseNumber.HasValue)
@@ -725,14 +755,35 @@ internal static class OperationalActionViews
                 refire.FontWeight = FontWeights.Bold;
                 panel.Children.Add(refire);
             }
+            if (!string.IsNullOrWhiteSpace(row.RecallReason))
+                panel.Children.Add(KitchenDetail("RECALLED", row.RecallReason));
+            if (!string.IsNullOrWhiteSpace(row.WasteReason))
+            {
+                var waste = KitchenDetail("WASTE", row.WasteReason);
+                waste.Foreground = Brushes.IndianRed;
+                waste.FontWeight = FontWeights.Bold;
+                panel.Children.Add(waste);
+            }
 
-            var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+            var actionReason = new TextBox
+            {
+                MinWidth = 300,
+                Height = 34,
+                Margin = new Thickness(0, 8, 8, 4),
+                ToolTip = "Reason for recall, waste or re-fire",
+            };
+            if (canRecallWaste && row.Status is "ready" or "completed" or "expo")
+            {
+                panel.Children.Add(actionReason);
+            }
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
 
             Button? primary = null;
             Func<Task>? primaryAction = null;
             string? success = null;
 
-            if (canProduce && row.Status is "queued" or "active")
+            if (canProduce && (row.Status is "queued" or "active"))
             {
                 if (row.PreparingEnabled)
                 {
@@ -779,7 +830,51 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (canRefire && row.Status is "ready" or "expo")
+            if (canRecallWaste && (row.Status is "ready" or "completed"))
+            {
+                var recall = Button("RECALL");
+                actions.Children.Add(recall);
+                recall.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(actionReason.Text))
+                            throw new InvalidOperationException("Enter a recall reason.");
+                        recall.IsEnabled = false;
+                        await workflow.RecallKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
+                        statusText.Text = $"{row.ItemName} recalled to the kitchen without reversing its prior consumption.";
+                    }
+                    catch (Exception ex)
+                    {
+                        recall.IsEnabled = true;
+                        statusText.Text = ex.Message;
+                    }
+                };
+            }
+
+            if (canRecallWaste && (row.Status is "preparing" or "expo" or "ready" or "completed"))
+            {
+                var waste = Button("MARK WASTE");
+                actions.Children.Add(waste);
+                waste.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(actionReason.Text))
+                            throw new InvalidOperationException("Enter a waste reason.");
+                        waste.IsEnabled = false;
+                        await workflow.RecordKitchenWasteAsync(row.ItemId, actionReason.Text.Trim());
+                        statusText.Text = $"{row.ItemName} recorded as production waste; inventory was not returned.";
+                    }
+                    catch (Exception ex)
+                    {
+                        waste.IsEnabled = true;
+                        statusText.Text = ex.Message;
+                    }
+                };
+            }
+
+            if (canRefire && (row.Status is "ready" or "expo" or "completed"))
             {
                 var refire = Button("RE-FIRE");
                 actions.Children.Add(refire);
@@ -787,10 +882,10 @@ internal static class OperationalActionViews
                 {
                     try
                     {
+                        if (string.IsNullOrWhiteSpace(actionReason.Text))
+                            throw new InvalidOperationException("Enter a re-fire reason.");
                         refire.IsEnabled = false;
-                        await workflow.RefireKitchenItemAsync(
-                            row.ItemId,
-                            $"Desktop KDS re-fire of {row.KotNumber}");
+                        await workflow.RefireKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
                     }
                     catch (Exception ex)
@@ -801,7 +896,7 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (!canProduce && !canExpo && !canRefire)
+            if (!canProduce && !canExpo && !canRefire && !canRecallWaste)
             {
                 var readOnly = KitchenDetail("Role", "Read-only kitchen visibility");
                 readOnly.FontStyle = FontStyles.Italic;
@@ -870,7 +965,13 @@ internal static class OperationalActionViews
         {
             foreach (var binding in timerBindings)
             {
-                UpdateAge(binding.Label, binding.Badge, binding.QueuedAt, binding.Priority);
+                UpdateAge(
+                    binding.Label,
+                    binding.Badge,
+                    binding.State,
+                    binding.QueuedAt,
+                    binding.Priority,
+                    binding.Status);
             }
         };
 
@@ -1102,13 +1203,15 @@ internal static class OperationalActionViews
     {
         await using var db = factory.Create();
 
+        var recentCompletedCutoff = DateTimeOffset.UtcNow.AddHours(-2);
         var tickets = await db.KitchenTickets
             .AsNoTracking()
             .Where(x => x.Status == "queued" ||
                         x.Status == "active" ||
                         x.Status == "preparing" ||
                         x.Status == "expo" ||
-                        x.Status == "ready")
+                        x.Status == "ready" ||
+                        (x.Status == "completed" && x.CompletedAt >= recentCompletedCutoff))
             .OrderByDescending(x => x.Priority == "rush")
             .ThenBy(x => x.QueuedAt)
             .ToArrayAsync();
@@ -1119,7 +1222,6 @@ internal static class OperationalActionViews
             : await db.KitchenTicketItems
                 .AsNoTracking()
                 .Where(x => ticketIds.Contains(x.KitchenTicketId) &&
-                            x.Status != "completed" &&
                             x.Status != "voided" &&
                             x.Status != "cancelled")
                 .ToArrayAsync();
@@ -1216,7 +1318,9 @@ internal static class OperationalActionViews
                     round?.QueueEnabled ?? true,
                     round?.PreparingEnabled ?? true,
                     round?.ExpoEnabled ?? false,
-                    item.RefireReason));
+                    item.RefireReason,
+                    item.RecallReason,
+                    item.WasteReason));
             }
         }
 
@@ -1229,7 +1333,7 @@ internal static class OperationalActionViews
             rows
                 .OrderBy(row => row.ItemId, StringComparer.Ordinal)
                 .Select(row =>
-                    $"{row.ItemId}:{row.Status}:{row.Priority}:{row.RoundNumber}:{row.ExpoEnabled}:{row.PreparingEnabled}"));
+                    $"{row.ItemId}:{row.Status}:{row.Priority}:{row.RoundNumber}:{row.ExpoEnabled}:{row.PreparingEnabled}:{row.RecallReason}:{row.WasteReason}"));
 
     private static Border KitchenChip(string text)
     {
@@ -1353,7 +1457,9 @@ internal static class OperationalActionViews
         bool QueueEnabled,
         bool PreparingEnabled,
         bool ExpoEnabled,
-        string? RefireReason);
+        string? RefireReason,
+        string? RecallReason,
+        string? WasteReason);
     private sealed record CashierSessionChoice(string Id, string Cashier, string Status, decimal OpeningCash, decimal? ExpectedCash, decimal? DeclaredCash, decimal? Variance, DateTimeOffset OpenedAt);
     private sealed record ClosingChoice(string Id, DateOnly BusinessDate, string Status, DateTimeOffset? FinalizedAt);
 }
