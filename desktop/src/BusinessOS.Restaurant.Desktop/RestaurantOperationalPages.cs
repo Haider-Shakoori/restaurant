@@ -45,12 +45,24 @@ internal static class RestaurantOperationalPages
             .Sum(x => x.Total);
 
         var panel = Stack();
+        panel.Children.Add(Hero(
+            "Restaurant command center",
+            "A polished local-first overview for cashier, floor and kitchen operations.",
+            diagnostics.NetworkMode,
+            diagnostics.LeaseStatus));
         panel.Children.Add(Cards(
             ("TODAY'S SALES", $"AFN {sales:N2}"),
             ("OPEN ORDERS", openOrders.ToString()),
             ("ACTIVE TABLES", activeTables.ToString()),
             ("KITCHEN TICKETS", activeKot.ToString())));
-        panel.Children.Add(Card("Local-first status", $"{diagnostics.NetworkMode}\n{diagnostics.TerminalSummary}\n{diagnostics.StatusMessage}"));
+        panel.Children.Add(Cards(
+            ("NETWORK MODE", diagnostics.NetworkMode),
+            ("WAITER DEVICES", diagnostics.TerminalSummary),
+            ("LICENSE / OFFLINE", diagnostics.LeaseStatus)));
+        panel.Children.Add(Card(
+            "Live operations",
+            diagnostics.StatusMessage,
+            double.NaN));
         return Scroll(panel);
     }
 
@@ -409,55 +421,176 @@ internal static class RestaurantOperationalPages
         return Scroll(panel);
     }
 
-    private static FrameworkElement Placeholder(string route) => Section(route, "This management screen is part of the operational UI completion phase.", new TextBlock { Text = "The local service layer already exists; the full editing surface is being connected.", Foreground = System.Windows.Media.Brushes.SlateGray });
+    private static FrameworkElement Placeholder(string route)
+    {
+        var note = new TextBlock
+        {
+            Text = "The local service layer already exists; the full editing surface is being connected.",
+            TextWrapping = TextWrapping.Wrap,
+        };
+        note.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        return Section(route, "This management screen is part of the operational UI completion phase.", note);
+    }
 
     private static StackPanel Stack() => new() { Margin = new Thickness(0) };
-    private static ScrollViewer Scroll(UIElement child) => new() { Content = child, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+    private static ScrollViewer Scroll(UIElement child) => new()
+    {
+        Content = child,
+        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+    };
+
+    private static Border Hero(string title, string subtitle, string network, string license)
+    {
+        var titleText = new TextBlock
+        {
+            Text = title,
+            FontSize = 25,
+            FontWeight = FontWeights.Bold,
+        };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var subtitleText = new TextBlock
+        {
+            Text = subtitle,
+            FontSize = 13,
+            Margin = new Thickness(0, 6, 0, 16),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var networkText = new TextBlock
+        {
+            Text = $"●  {network}",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 18, 0),
+        };
+        networkText.SetResourceReference(TextBlock.ForegroundProperty, "SuccessBrush");
+
+        var licenseText = new TextBlock
+        {
+            Text = license,
+            FontWeight = FontWeights.SemiBold,
+        };
+        licenseText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(networkText);
+        row.Children.Add(licenseText);
+
+        var panel = new StackPanel();
+        panel.Children.Add(titleText);
+        panel.Children.Add(subtitleText);
+        panel.Children.Add(row);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(20),
+            Padding = new Thickness(22),
+            Margin = new Thickness(0, 0, 12, 18),
+            BorderThickness = new Thickness(1),
+            Child = panel,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 24,
+            ShadowDepth = 5,
+            Opacity = 0.12,
+            Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
+        };
+        return border;
+    }
 
     private static Border Cards(params (string Label, string Value)[] values)
     {
         var wrap = new WrapPanel();
         foreach (var value in values)
             wrap.Children.Add(Card(value.Label, value.Value, 235));
-        return new Border { Child = wrap, Margin = new Thickness(0, 0, 0, 16) };
+        return new Border { Child = wrap, Margin = new Thickness(0, 0, 0, 6) };
     }
 
-    private static Border Card(string title, string value, double width = double.NaN) => new()
+    private static Border Card(string title, string value, double width = double.NaN)
     {
-        Background = System.Windows.Media.Brushes.White,
-        CornerRadius = new CornerRadius(16),
-        Padding = new Thickness(18),
-        Margin = new Thickness(0, 0, 12, 12),
-        Width = width,
-        Child = new StackPanel
+        var titleText = new TextBlock
         {
-            Children =
-            {
-                new TextBlock { Text = title, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = System.Windows.Media.Brushes.SlateGray },
-                new TextBlock { Text = value, FontSize = 20, FontWeight = FontWeights.Bold, Margin = new Thickness(0,8,0,0), TextWrapping = TextWrapping.Wrap }
-            }
-        }
-    };
+            Text = title,
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+        };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+        var valueText = new TextBlock
+        {
+            Text = value,
+            FontSize = 20,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 8, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        valueText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var panel = new StackPanel();
+        panel.Children.Add(titleText);
+        panel.Children.Add(valueText);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(18),
+            Margin = new Thickness(0, 0, 12, 12),
+            Width = width,
+            BorderThickness = new Thickness(1),
+            Child = panel,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 18,
+            ShadowDepth = 4,
+            Opacity = 0.10,
+            Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
+        };
+        return border;
+    }
 
     private static FrameworkElement Section(string title, string subtitle, UIElement content)
     {
         var panel = Stack();
-        panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold });
-        panel.Children.Add(new TextBlock { Text = subtitle, Foreground = System.Windows.Media.Brushes.SlateGray, Margin = new Thickness(0,4,0,16), TextWrapping = TextWrapping.Wrap });
+        var titleText = new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        var subtitleText = new TextBlock
+        {
+            Text = subtitle,
+            Margin = new Thickness(0, 4, 0, 16),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(titleText);
+        panel.Children.Add(subtitleText);
         panel.Children.Add(content);
         return Scroll(panel);
     }
 
-    private static DataGrid GridFor(object items) => new()
+    private static DataGrid GridFor(object items)
     {
-        ItemsSource = (System.Collections.IEnumerable)items,
-        AutoGenerateColumns = false,
-        IsReadOnly = true,
-        CanUserAddRows = false,
-        MinHeight = 430,
-        Background = System.Windows.Media.Brushes.White,
-        BorderThickness = new Thickness(0)
-    };
+        var grid = new DataGrid
+        {
+            ItemsSource = (System.Collections.IEnumerable)items,
+            AutoGenerateColumns = false,
+            IsReadOnly = true,
+            CanUserAddRows = false,
+            MinHeight = 430,
+            BorderThickness = new Thickness(1),
+            AlternationCount = 2,
+        };
+        grid.SetResourceReference(DataGrid.BackgroundProperty, "SurfaceBrush");
+        grid.SetResourceReference(DataGrid.BorderBrushProperty, "BorderBrush");
+        return grid;
+    }
 
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new Binding(property), Width = width };
 

@@ -1,3 +1,5 @@
+using BusinessOS.Restaurant.Desktop.Appearance;
+using BusinessOS.Restaurant.Licensing;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -6,19 +8,29 @@ namespace BusinessOS.Restaurant.Desktop;
 public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly LanDiagnosticsViewModel _diagnostics = new();
+    private readonly RestaurantLicenseCoordinator _licenses = new();
 
     [ObservableProperty] private string _pageTitle = "Dashboard";
     [ObservableProperty] private string _pageSubtitle = "Restaurant overview and today's operations";
     [ObservableProperty] private object? _currentPage;
+    [ObservableProperty] private string _licenseText = "Checking license…";
 
     public string NetworkMode => _diagnostics.NetworkMode;
+
+    public string ThemeButtonText =>
+        ThemeManager.Current == AppearanceTheme.Glass ? "◐  Glass" : "◐  Classic";
+
     public IAsyncRelayCommand RefreshCommand { get; }
+
     public IAsyncRelayCommand<string> NavigateCommand { get; }
+
+    public IRelayCommand ToggleThemeCommand { get; }
 
     public MainWindowViewModel()
     {
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
+        ToggleThemeCommand = new RelayCommand(ToggleTheme);
     }
 
     public async Task InitializeAsync()
@@ -31,6 +43,18 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         await _diagnostics.RefreshCommand.ExecuteAsync(null);
         OnPropertyChanged(nameof(NetworkMode));
+
+        var license = await _licenses.GetStatusAsync();
+        LicenseText = license.IsValid
+            ? $"{license.PlanName} · {license.DaysRemaining} day(s)"
+            : "License expired";
+    }
+
+    private void ToggleTheme()
+    {
+        var next = ThemeManager.Toggle();
+        new AppearanceSettingsStore().Save(next);
+        OnPropertyChanged(nameof(ThemeButtonText));
     }
 
     private async Task NavigateAsync(string? key)
