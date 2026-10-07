@@ -41,3 +41,14 @@ Continuation branch: `feat/premium-restaurant-desktop`
 ## CI policy
 
 When CI is pending, stop before the next dependent batch and re-check the result in the next active session. CI red must be investigated and fixed rather than ignored; do not claim an unattended 30–60 minute waiting period or automatic session resumption.
+
+## Batch 1 continuation — Sidebar route state and keyboard usability
+
+Verified gap: the existing Desktop sidebar had hover styling but no active-route state or explicit keyboard-focus treatment. All twelve routes were already wired to working navigation commands, so the commands and pages are preserved.
+
+- Added a reusable rounded sidebar button template and route-aware selected state.
+- The active route updates only after its operational page is successfully loaded.
+- Keyboard focus is visibly outlined in both Classic and Glass themes.
+- The converter changes presentation only; it does not introduce a second navigation or authorization system.
+- Added static XAML/view-model regression tests. Windows build and GitHub CI are the acceptance gate.
+- **Deferred**: role-specific hiding/authorization until the MainWindow startup/authenticated-session boundary is audited. The existing app starts the main window after licensing without an interactive operator login; hiding menu items without an authenticated operator would be misleading and could block access. Role enforcement must be handled separately at the service boundary.

@@ -13,6 +13,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _pageTitle = "Dashboard";
     [ObservableProperty] private string _pageSubtitle = "Restaurant overview and today's operations";
     [ObservableProperty] private object? _currentPage;
+    [ObservableProperty] private string _currentRoute = "dashboard";
     [ObservableProperty] private string _licenseText = "Checking license…";
 
     public string NetworkMode => _diagnostics.NetworkMode;
@@ -77,6 +78,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _ => ("Restaurant", "Operational workspace"),
         };
 
-        CurrentPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+        var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+        CurrentPage = page;
+        CurrentRoute = route;
     }
 }
