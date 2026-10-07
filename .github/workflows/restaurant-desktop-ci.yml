@@ -8,10 +8,12 @@ on:
     paths:
       - 'desktop/**'
       - '.github/workflows/restaurant-desktop-ci.yml'
+      - 'tools/generate_restaurant_icons.py'
   pull_request:
     paths:
       - 'desktop/**'
       - '.github/workflows/restaurant-desktop-ci.yml'
+      - 'tools/generate_restaurant_icons.py'
 
 jobs:
   build-test:
