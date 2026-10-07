@@ -125,6 +125,31 @@ class LicenseFoundationTest extends TestCase
         $this->assertArrayNotHasKey('private_key', $response->json());
     }
 
+    public function test_public_key_is_derived_from_private_signing_key_when_configured_public_key_is_stale(): void
+    {
+        $signingKeypair = sodium_crypto_sign_keypair();
+        $staleKeypair = sodium_crypto_sign_keypair();
+
+        $signingSecret = sodium_crypto_sign_secretkey($signingKeypair);
+        $expectedPublic = sodium_crypto_sign_publickey($signingKeypair);
+
+        config([
+            'license.signing.private_key' => base64_encode($signingSecret),
+            'license.signing.public_key' => base64_encode(sodium_crypto_sign_publickey($staleKeypair)),
+        ]);
+
+        $signing = app(LicenseSigningService::class);
+        $signed = $signing->sign([
+            'message' => 'سلام/کابل & <table>',
+        ]);
+
+        $this->assertSame(
+            rtrim(strtr(base64_encode($expectedPublic), '+/', '-_'), '='),
+            $signing->publicKeyEncoded(),
+        );
+        $this->assertTrue($signing->verify($signed['payload'], $signed['signature']));
+    }
+
     public function test_lease_refresh_requires_device_secret_not_raw_license_key(): void
     {
         [$business, , $domain] = $this->createActiveBusiness();
