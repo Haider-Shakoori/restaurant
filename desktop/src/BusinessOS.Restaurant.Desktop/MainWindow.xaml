@@ -1,20 +1,229 @@
-<Window x:Class="BusinessOS.Restaurant.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="BusinessOS — Restaurant" Width="1600" Height="920" MinWidth="1180" MinHeight="720" WindowStartupLocation="CenterScreen" Background="#F4F7FB">
-<Window.Resources>
-<Style x:Key="NavButton" TargetType="Button"><Setter Property="Height" Value="44"/><Setter Property="Margin" Value="0,2"/><Setter Property="Padding" Value="14,0"/><Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Foreground" Value="#496B91"/><Setter Property="FontSize" Value="14"/></Style>
-<Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="White"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="18"/></Style>
-</Window.Resources>
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="286"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<Border Background="White" BorderBrush="#E5ECF5" BorderThickness="0,0,1,0"><DockPanel Margin="14">
-<StackPanel DockPanel.Dock="Top" Margin="6,6,6,18"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="54"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Border Width="50" Height="50" CornerRadius="14" Background="#0B82F6"><TextBlock Text="B" Foreground="White" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Grid.Column="1" Margin="11,2,0,0"><TextBlock Text="BusinessOS" FontSize="20" FontWeight="Bold"/><TextBlock Text="Restaurant" FontSize="20" FontWeight="Bold" Foreground="#0B82F6" Margin="0,-3,0,0"/></StackPanel></Grid><TextBlock Text="Serve Faster  ·  Manage Smarter" Foreground="#64748B" FontSize="11.5" Margin="2,8,0,0"/></StackPanel>
-<StackPanel DockPanel.Dock="Bottom" Margin="8"><TextBlock Text="BusinessOS Restaurant" FontWeight="SemiBold"/><TextBlock Text="Local-first · Built for Afghanistan" Foreground="#94A3B8" FontSize="10.5"/></StackPanel>
-<ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
-<TextBlock Text="OPERATIONS" Foreground="#94A3B8" FontWeight="SemiBold" FontSize="10" Margin="14,0,0,6"/>
-<Button Style="{StaticResource NavButton}" Content="⌂   Dashboard" Command="{Binding NavigateCommand}" CommandParameter="dashboard"/><Button Style="{StaticResource NavButton}" Content="▣   POS &amp; Orders" Command="{Binding NavigateCommand}" CommandParameter="pos"/><Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor" Command="{Binding NavigateCommand}" CommandParameter="tables"/><Button Style="{StaticResource NavButton}" Content="☷   Kitchen / KOT" Command="{Binding NavigateCommand}" CommandParameter="kitchen"/><Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products" Command="{Binding NavigateCommand}" CommandParameter="menu"/>
-<TextBlock Text="MANAGEMENT" Foreground="#94A3B8" FontWeight="SemiBold" FontSize="10" Margin="14,18,0,6"/>
-<Button Style="{StaticResource NavButton}" Content="▤   Inventory" Command="{Binding NavigateCommand}" CommandParameter="inventory"/><Button Style="{StaticResource NavButton}" Content="▥   Purchases" Command="{Binding NavigateCommand}" CommandParameter="purchases"/><Button Style="{StaticResource NavButton}" Content="$   Expenses" Command="{Binding NavigateCommand}" CommandParameter="expenses"/><Button Style="{StaticResource NavButton}" Content="◉   Daily Closing" Command="{Binding NavigateCommand}" CommandParameter="closing"/><Button Style="{StaticResource NavButton}" Content="▥   Reports &amp; Accounting" Command="{Binding NavigateCommand}" CommandParameter="reports"/>
-<TextBlock Text="SYSTEM" Foreground="#94A3B8" FontWeight="SemiBold" FontSize="10" Margin="14,18,0,6"/><Button Style="{StaticResource NavButton}" Content="♙   Users &amp; Roles" Command="{Binding NavigateCommand}" CommandParameter="users"/><Button Style="{StaticResource NavButton}" Content="⚙   Settings" Command="{Binding NavigateCommand}" CommandParameter="settings"/>
-</StackPanel></ScrollViewer></DockPanel></Border>
-<Grid Grid.Column="1"><Grid.RowDefinitions><RowDefinition Height="76"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<Border Background="White" BorderBrush="#E5ECF5" BorderThickness="0,0,0,1" Padding="28,0"><Grid><StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding PageTitle}" FontSize="22" FontWeight="Bold"/><TextBlock Text="{Binding PageSubtitle}" Foreground="#64748B" Margin="0,3,0,0"/></StackPanel><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Border Background="#ECFDF5" CornerRadius="12" Padding="12,7"><TextBlock Text="{Binding NetworkMode, StringFormat=●  {0}}" Foreground="#169B62" FontWeight="SemiBold"/></Border><Button Margin="10,0,0,0" Padding="16,7" Content="Refresh" Command="{Binding RefreshCommand}"/></StackPanel></Grid></Border>
-<ContentControl Grid.Row="1" Content="{Binding CurrentPage}" Margin="26"/>
-</Grid></Grid></Window>
+<Window x:Class="BusinessOS.Restaurant.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BusinessOS — Restaurant"
+        Width="1600" Height="920"
+        MinWidth="1180" MinHeight="720"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppBackgroundBrush}"
+        SnapsToDevicePixels="True"
+        UseLayoutRounding="True">
+    <Window.Resources>
+        <Style x:Key="NavButton" TargetType="Button">
+            <Setter Property="Height" Value="44" />
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="Medium" />
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource BrandPrimaryBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="TopBarGhostButton" TargetType="Button">
+            <Setter Property="Background" Value="#72FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="13,7" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Image Source="Assets/RestaurantGlassBackground.jpg"
+               Stretch="UniformToFill"
+               Effect="{DynamicResource BackgroundBlurEffect}" />
+        <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
+
+        <Grid Margin="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="286" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Background="{DynamicResource SidebarBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="24">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="28"
+                                      ShadowDepth="7"
+                                      Opacity="0.18"
+                                      Color="#071827" />
+                </Border.Effect>
+                <DockPanel Margin="14">
+                    <StackPanel DockPanel.Dock="Top" Margin="6,8,6,18">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="58" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Width="52" Height="52" CornerRadius="16"
+                                    Background="{DynamicResource BrandPrimaryBrush}">
+                                <TextBlock Text="B"
+                                           Foreground="White"
+                                           FontSize="26"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                            </Border>
+                            <StackPanel Grid.Column="1" Margin="11,2,0,0">
+                                <TextBlock Text="BusinessOS"
+                                           FontSize="20"
+                                           FontWeight="Bold" />
+                                <TextBlock Text="Restaurant"
+                                           FontSize="20"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource BrandPrimaryBrush}"
+                                           Margin="0,-3,0,0" />
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="Serve Faster  ·  Manage Smarter"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   FontSize="11.5"
+                                   Margin="2,9,0,0" />
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Bottom" Margin="8,12,8,6">
+                        <Border Background="{DynamicResource SuccessSoftBrush}"
+                                CornerRadius="12"
+                                Padding="10,8"
+                                Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="LICENSE"
+                                           FontSize="9.5"
+                                           FontWeight="Bold"
+                                           Foreground="{DynamicResource SuccessBrush}" />
+                                <TextBlock Text="{Binding LicenseText}"
+                                           FontSize="11.5"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="BusinessOS Restaurant" FontWeight="SemiBold" />
+                        <TextBlock Text="Local-first · Built for Afghanistan"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   FontSize="10.5" />
+                    </StackPanel>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="OPERATIONS"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontWeight="SemiBold"
+                                       FontSize="10"
+                                       Margin="14,0,0,6" />
+                            <Button Style="{StaticResource NavButton}" Content="⌂   Dashboard"
+                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard" />
+                            <Button Style="{StaticResource NavButton}" Content="▣   POS &amp; Orders"
+                                    Command="{Binding NavigateCommand}" CommandParameter="pos" />
+                            <Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor"
+                                    Command="{Binding NavigateCommand}" CommandParameter="tables" />
+                            <Button Style="{StaticResource NavButton}" Content="☷   Kitchen / KOT"
+                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen" />
+                            <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
+                                    Command="{Binding NavigateCommand}" CommandParameter="menu" />
+
+                            <TextBlock Text="MANAGEMENT"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontWeight="SemiBold"
+                                       FontSize="10"
+                                       Margin="14,18,0,6" />
+                            <Button Style="{StaticResource NavButton}" Content="▤   Inventory"
+                                    Command="{Binding NavigateCommand}" CommandParameter="inventory" />
+                            <Button Style="{StaticResource NavButton}" Content="▥   Purchases"
+                                    Command="{Binding NavigateCommand}" CommandParameter="purchases" />
+                            <Button Style="{StaticResource NavButton}" Content="$   Expenses"
+                                    Command="{Binding NavigateCommand}" CommandParameter="expenses" />
+                            <Button Style="{StaticResource NavButton}" Content="◉   Daily Closing"
+                                    Command="{Binding NavigateCommand}" CommandParameter="closing" />
+                            <Button Style="{StaticResource NavButton}" Content="▥   Reports &amp; Accounting"
+                                    Command="{Binding NavigateCommand}" CommandParameter="reports" />
+
+                            <TextBlock Text="SYSTEM"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       FontWeight="SemiBold"
+                                       FontSize="10"
+                                       Margin="14,18,0,6" />
+                            <Button Style="{StaticResource NavButton}" Content="♙   Users &amp; Roles"
+                                    Command="{Binding NavigateCommand}" CommandParameter="users" />
+                            <Button Style="{StaticResource NavButton}" Content="⚙   Settings"
+                                    Command="{Binding NavigateCommand}" CommandParameter="settings" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="78" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0"
+                        Background="{DynamicResource TopBarBrush}"
+                        BorderBrush="{DynamicResource CardBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="22"
+                        Padding="28,0">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="24"
+                                          ShadowDepth="5"
+                                          Opacity="0.14"
+                                          Color="#071827" />
+                    </Border.Effect>
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding PageTitle}"
+                                       FontSize="22"
+                                       FontWeight="Bold" />
+                            <TextBlock Text="{Binding PageSubtitle}"
+                                       Foreground="{DynamicResource TextMutedBrush}"
+                                       Margin="0,3,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center">
+                            <Border Background="{DynamicResource SuccessSoftBrush}"
+                                    CornerRadius="12"
+                                    Padding="12,7">
+                                <TextBlock Text="{Binding NetworkMode, StringFormat=●  {0}}"
+                                           Foreground="{DynamicResource SuccessBrush}"
+                                           FontWeight="SemiBold" />
+                            </Border>
+                            <Button Margin="10,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="{Binding ThemeButtonText}"
+                                    Command="{Binding ToggleThemeCommand}" />
+                            <Button Margin="8,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="↻  Refresh"
+                                    Command="{Binding RefreshCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Border Grid.Row="2"
+                        Background="{DynamicResource PageBackgroundBrush}"
+                        BorderBrush="{DynamicResource CardBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="22"
+                        Padding="24">
+                    <ContentControl Content="{Binding CurrentPage}" />
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

@@ -108,6 +108,7 @@ def save_desktop(root: Path) -> None:
     icon.save(target / "BusinessOS.Restaurant.png", format="PNG")
 
 
+
 def save_android(mobile: Path) -> None:
     sizes = {
         "mipmap-mdpi": 48,
