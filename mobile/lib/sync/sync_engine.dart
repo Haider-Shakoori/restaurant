@@ -33,7 +33,10 @@ class SyncEngine {
     session = await _resolveActiveChannel(session);
     final refreshed = await _refreshLeaseIfNeeded(session);
     final data = await _api.syncBootstrap(refreshed);
-    await _store.applyBootstrap(data);
+    await _store.applyBootstrap(
+      data,
+      cursorScope: refreshed.activeChannel.name,
+    );
   }
 
   Future<void> syncNow() async {
@@ -164,7 +167,8 @@ class SyncEngine {
   }
 
   Future<void> _pull(SessionCredentials session) async {
-    var cursor = await _store.syncCursor();
+    final cursorScope = session.activeChannel.name;
+    var cursor = await _store.syncCursor(scope: cursorScope);
 
     for (var page = 0; page < 10; page++) {
       final response = await _api.pull(
@@ -172,7 +176,10 @@ class SyncEngine {
         cursor: cursor,
         limit: 100,
       );
-      await _store.applyPull(response);
+      await _store.applyPull(
+        response,
+        cursorScope: cursorScope,
+      );
 
       cursor = (response['cursor'] as num?)?.toInt() ?? cursor;
       final hasMore = response['has_more'] == true;
