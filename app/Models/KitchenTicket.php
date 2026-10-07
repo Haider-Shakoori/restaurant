@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'order_id',
+    'kot_round_id',
     'kitchen_station_id',
     'submitted_by_user_id',
     'ticket_number',
@@ -48,6 +49,11 @@ class KitchenTicket extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function round(): BelongsTo
+    {
+        return $this->belongsTo(KotRound::class, 'kot_round_id');
     }
 
     public function station(): BelongsTo
