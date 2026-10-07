@@ -16,6 +16,37 @@ class OrderService
         private readonly KitchenService $kitchen,
     ) {}
 
+    public function take(TenantUser $actor, array $data): Order
+    {
+        return DB::connection('tenant')->transaction(function () use ($actor, $data): Order {
+            $order = $this->open($actor, [
+                'client_order_id' => $data['client_order_id'] ?? null,
+                'dining_table_id' => $data['dining_table_id'],
+                'guest_count' => $data['guest_count'] ?? 1,
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            foreach ($data['lines'] as $line) {
+                $this->addItem($order, $actor, [
+                    'client_line_id' => $line['client_line_id'] ?? null,
+                    'menu_item_id' => $line['menu_item_id'],
+                    'quantity' => $line['quantity'],
+                    'notes' => $line['notes'] ?? null,
+                ]);
+            }
+
+            if (($data['submit_action'] ?? 'kitchen') === 'kitchen') {
+                return $this->submit($order, $actor);
+            }
+
+            return $order->fresh()->load([
+                'table.diningArea',
+                'waiter',
+                'items',
+            ]);
+        });
+    }
+
     public function open(TenantUser $waiter, array $data): Order
     {
         return DB::connection('tenant')->transaction(function () use ($waiter, $data): Order {

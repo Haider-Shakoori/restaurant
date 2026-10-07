@@ -42,6 +42,7 @@ use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Controllers\Tenant\TenantWebOrderController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
@@ -82,6 +83,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
 
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
                 Route::get('/orders', [TenantPortalController::class, 'orders'])->name('tenant.web.orders');
+                Route::post('/orders/take', [TenantWebOrderController::class, 'store'])->name('tenant.web.orders.take');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {

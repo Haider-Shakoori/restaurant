@@ -8,9 +8,15 @@ use App\Enums\LicenseStatus;
 use App\Enums\ProvisioningState;
 use App\Models\Business;
 use App\Models\DeviceActivation;
+use App\Models\DiningArea;
+use App\Models\DiningTable;
 use App\Models\InventoryBalance;
 use App\Models\InventoryItem;
+use App\Models\KitchenTicket;
 use App\Models\LicenseKey;
+use App\Models\MenuCategory;
+use App\Models\MenuItem;
+use App\Models\Order;
 use App\Models\Plan;
 use App\Models\PurchaseOrder;
 use App\Models\RestaurantBranch;
@@ -81,6 +87,102 @@ class TenantWebPortalTest extends TestCase
             ->assertSee('Dashboard')
             ->assertSee('Open orders')
             ->assertDontSee('tenant_id');
+    }
+
+    public function test_owner_can_take_order_and_send_it_to_kitchen_from_orders_page(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+
+        tenancy()->initialize($tenant);
+
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Owner',
+            'email' => 'orders-owner@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+
+        $branch = RestaurantBranch::query()->create([
+            'code' => 'MAIN',
+            'name' => 'Main Branch',
+            'is_active' => true,
+        ]);
+
+        $area = DiningArea::query()->create([
+            'branch_id' => $branch->id,
+            'name' => 'Main Hall',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $table = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-01',
+            'name' => 'Table 1',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        $category = MenuCategory::query()->create([
+            'name' => 'Main Course',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $item = MenuItem::query()->create([
+            'menu_category_id' => $category->id,
+            'sku' => 'FOOD-001',
+            'name' => 'Kabuli Pulao',
+            'price' => '250.00',
+            'is_available' => true,
+            'sort_order' => 1,
+        ]);
+
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'orders-owner@example.test',
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $this->get("http://{$domain}/orders")
+            ->assertOk()
+            ->assertSee('New Order / Take Order')
+            ->assertSee('Kabuli Pulao')
+            ->assertSee('Table 1');
+
+        $this->post("http://{$domain}/orders/take", [
+            'dining_table_id' => $table->id,
+            'guest_count' => 3,
+            'notes' => 'Family table',
+            'submit_action' => 'kitchen',
+            'lines' => [[
+                'menu_item_id' => $item->id,
+                'quantity' => 2,
+                'notes' => 'No chili',
+            ]],
+        ])
+            ->assertRedirect('/orders')
+            ->assertSessionHas('status', 'Order submitted to Kitchen successfully.');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $order = Order::query()->with(['items', 'kitchenTickets.items'])->sole();
+
+            $this->assertSame(Order::STATUS_SUBMITTED, $order->status);
+            $this->assertSame('500.00', $order->total);
+            $this->assertSame(3, $order->guest_count);
+            $this->assertSame('No chili', $order->items->first()->notes);
+            $this->assertSame(DiningTable::STATUS_OCCUPIED, $table->fresh()->status);
+            $this->assertSame(1, KitchenTicket::query()->count());
+            $this->assertSame('Kabuli Pulao', $order->kitchenTickets->first()->items->first()->item_name);
+        } finally {
+            tenancy()->end();
+        }
     }
 
     public function test_owner_can_create_purchase_order_from_purchasing_page(): void
