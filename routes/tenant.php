@@ -28,6 +28,7 @@ use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
 use App\Http\Controllers\Tenant\RecipeController;
+use App\Http\Controllers\Tenant\RestaurantSettingsController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
 use App\Http\Controllers\Tenant\StockMovementController;
@@ -116,6 +117,8 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                 Route::get('/settings', [TenantPortalController::class, 'settings'])->name('tenant.web.settings');
                 Route::post('/settings/devices/{deviceActivation}/revoke', [TenantDeviceController::class, 'revoke'])
                     ->name('tenant.web.devices.revoke');
+                Route::post('/settings/restaurant', [RestaurantSettingsController::class, 'update'])
+                    ->name('tenant.web.settings.restaurant.update');
 
                 Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
