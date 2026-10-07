@@ -15,7 +15,7 @@ class LocalDatabase implements SyncStore {
     final root = await getDatabasesPath();
     final database = await openDatabase(
       p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -85,6 +85,8 @@ class LocalDatabase implements SyncStore {
             submitted_at TEXT,
             served_at TEXT,
             closed_at TEXT,
+            kot_rounds_json TEXT NOT NULL DEFAULT '[]',
+            kitchen_tickets_json TEXT NOT NULL DEFAULT '[]',
             updated_at TEXT NOT NULL
           )
         ''');
@@ -195,6 +197,14 @@ class LocalDatabase implements SyncStore {
               is_active INTEGER NOT NULL DEFAULT 1
             )
           ''');
+        }
+        if (oldVersion < 6) {
+          await db.execute(
+            "ALTER TABLE orders ADD COLUMN kot_rounds_json TEXT NOT NULL DEFAULT '[]'",
+          );
+          await db.execute(
+            "ALTER TABLE orders ADD COLUMN kitchen_tickets_json TEXT NOT NULL DEFAULT '[]'",
+          );
         }
       },
     );
@@ -942,6 +952,12 @@ class LocalDatabase implements SyncStore {
       'submitted_at': order['submitted_at']?.toString(),
       'served_at': order['served_at']?.toString(),
       'closed_at': order['closed_at']?.toString(),
+      'kot_rounds_json': jsonEncode(
+        order['kot_rounds'] as List<Object?>? ?? const <Object?>[],
+      ),
+      'kitchen_tickets_json': jsonEncode(
+        order['kitchen_tickets'] as List<Object?>? ?? const <Object?>[],
+      ),
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
 
