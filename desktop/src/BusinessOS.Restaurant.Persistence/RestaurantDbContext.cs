@@ -238,7 +238,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
         {
             entity.ToTable("kitchen_ticket_items");
             entity.HasKey(value => value.Id);
-            entity.HasIndex(value => value.OrderItemId).IsUnique();
+            entity.HasIndex(value => value.OrderItemId);
             entity.HasIndex(value => value.KitchenTicketId);
         });
 
