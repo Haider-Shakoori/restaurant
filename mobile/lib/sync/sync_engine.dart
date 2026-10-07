@@ -194,21 +194,44 @@ class SyncEngine {
         localUrl: session.localBaseUrl,
         cloudUrl: session.cloudBaseUrl,
       );
-      if (target.tenantId != (session.tenantId ?? target.tenantId)) {
-        throw const ApiException(
-          code: 'tenant_mismatch',
-          message: 'The selected Restaurant endpoint belongs to another tenant.',
-        );
+      var selected = target;
+      final expectedTenant = session.tenantId;
+
+      if (expectedTenant != null && target.tenantId != expectedTenant) {
+        if (target.channel == ConnectionChannel.local &&
+            session.cloudBaseUrl != null &&
+            session.cloudBaseUrl!.isNotEmpty) {
+          final cloud = await resolver.resolve(
+            mode: ConnectionMode.cloud,
+            localUrl: session.localBaseUrl,
+            cloudUrl: session.cloudBaseUrl,
+          );
+
+          if (cloud.tenantId != expectedTenant) {
+            throw const ApiException(
+              code: 'tenant_mismatch',
+              message: 'The Restaurant cloud endpoint belongs to another tenant.',
+            );
+          }
+
+          selected = cloud;
+        } else {
+          throw const ApiException(
+            code: 'tenant_mismatch',
+            message: 'The selected Restaurant endpoint belongs to another tenant.',
+          );
+        }
       }
+
       final switched = session.copyWith(
-        baseUrl: target.baseUrl,
-        activeChannel: target.channel,
+        baseUrl: selected.baseUrl,
+        activeChannel: selected.channel,
       );
       await _credentials.saveActiveConnection(
-        baseUrl: target.baseUrl,
-        activeChannel: target.channel,
+        baseUrl: selected.baseUrl,
+        activeChannel: selected.channel,
       );
-      await _store.setSystemState('active_connection', target.channel.name);
+      await _store.setSystemState('active_connection', selected.channel.name);
       return switched;
     } on ApiException {
       await _store.setSystemState('active_connection', 'offline');
