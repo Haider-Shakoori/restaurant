@@ -1,6 +1,10 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -23,7 +27,7 @@ internal static class RestaurantOperationalPages
             "expenses" => await ExpensesAsync(),
             "closing" => await OperationalActionViews.ClosingAsync(),
             "reports" => Reports(diagnostics),
-            "settings" => Settings(diagnostics),
+            "settings" => await SettingsAsync(diagnostics),
             _ => Placeholder(route),
         };
     }
@@ -33,37 +37,101 @@ internal static class RestaurantOperationalPages
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
+
         var from = DateTimeOffset.UtcNow.Date;
         var to = from.AddDays(1);
         var openOrders = await db.Orders.CountAsync(x => x.Status != "closed");
         var activeTables = await db.DiningTables.CountAsync(x => x.IsActive && x.Status != "available");
-        var activeKot = await db.KitchenTickets.CountAsync(x => x.Status == "queued" || x.Status == "preparing" || x.Status == "ready");
+        var activeKot = await db.KitchenTickets.CountAsync(x =>
+            x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
         var sales = (await db.Bills.AsNoTracking()
                 .Select(x => new { x.IssuedAt, x.Total })
                 .ToListAsync())
             .Where(x => x.IssuedAt >= from && x.IssuedAt < to)
             .Sum(x => x.Total);
 
-        var panel = Stack();
-        panel.Children.Add(Hero(
-            "Restaurant command center",
-            "A polished local-first overview for cashier, floor and kitchen operations.",
-            diagnostics.NetworkMode,
-            diagnostics.LeaseStatus));
-        panel.Children.Add(Cards(
-            ("TODAY'S SALES", $"AFN {sales:N2}"),
-            ("OPEN ORDERS", openOrders.ToString()),
-            ("ACTIVE TABLES", activeTables.ToString()),
-            ("KITCHEN TICKETS", activeKot.ToString())));
-        panel.Children.Add(Cards(
-            ("NETWORK MODE", diagnostics.NetworkMode),
-            ("WAITER DEVICES", diagnostics.TerminalSummary),
-            ("LICENSE / OFFLINE", diagnostics.LeaseStatus)));
-        panel.Children.Add(Card(
-            "Live operations",
-            diagnostics.StatusMessage,
-            double.NaN));
-        return Scroll(panel);
+        var root = new StackPanel();
+
+        root.Children.Add(DashboardCards(
+            ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
+            ("▣", "OPEN ORDERS", openOrders.ToString(), "Orders currently in progress", Color.FromRgb(14, 165, 233)),
+            ("▦", "ACTIVE TABLES", activeTables.ToString(), "Occupied dining tables", Color.FromRgb(245, 158, 11)),
+            ("☷", "KITCHEN / KOT", activeKot.ToString(), "Active production tickets", Color.FromRgb(236, 72, 153)),
+            ("◉", "NETWORK MODE", diagnostics.NetworkMode, "Current sync route", Color.FromRgb(124, 58, 237))));
+
+        var overviewGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
+        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var operations = DashboardPanel(
+            "Restaurant Overview",
+            "Live operational snapshot",
+            BuildOperationsOverview(sales, openOrders, activeTables, activeKot));
+        Grid.SetColumn(operations, 0);
+        overviewGrid.Children.Add(operations);
+
+        var right = new StackPanel();
+        right.Children.Add(DashboardPanel(
+            "License & Connectivity",
+            diagnostics.LeaseStatus,
+            BuildStatusRows(
+                ("Network", diagnostics.NetworkMode),
+                ("Waiter devices", diagnostics.TerminalSummary),
+                ("Local-first", "Available"))));
+        right.Children.Add(DashboardPanel(
+            "Quick Status",
+            "Today at a glance",
+            BuildStatusRows(
+                ("Orders", openOrders.ToString()),
+                ("Tables", activeTables.ToString()),
+                ("Kitchen", activeKot.ToString()))));
+        Grid.SetColumn(right, 2);
+        overviewGrid.Children.Add(right);
+
+        root.Children.Add(overviewGrid);
+
+        var lowerGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+        lowerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        lowerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        lowerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var floorPanel = DashboardPanel(
+            "Floor & Orders",
+            "Service activity",
+            BuildFeatureSummary(
+                "▦",
+                activeTables == 0 ? "Dining floor is clear" : $"{activeTables} active table(s)",
+                openOrders == 0 ? "No open orders right now." : $"{openOrders} order(s) are still open.",
+                Color.FromRgb(14, 165, 233)));
+        lowerGrid.Children.Add(floorPanel);
+
+        var kitchenPanel = DashboardPanel(
+            "Kitchen Production",
+            "KOT execution",
+            BuildFeatureSummary(
+                "☷",
+                activeKot == 0 ? "Kitchen queue is clear" : $"{activeKot} active KOT ticket(s)",
+                activeKot == 0
+                    ? "New KOT rounds will appear here as orders are sent."
+                    : "Queue, preparing and ready tickets are being tracked locally.",
+                Color.FromRgb(245, 158, 11)));
+        Grid.SetColumn(kitchenPanel, 2);
+        lowerGrid.Children.Add(kitchenPanel);
+
+        root.Children.Add(lowerGrid);
+        root.Children.Add(DashboardPanel(
+            "Live Operations",
+            "Desktop, LAN and offline health",
+            new TextBlock
+            {
+                Text = diagnostics.StatusMessage,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12.5,
+                Margin = new Thickness(2, 2, 2, 2),
+            }));
+
+        return Scroll(root);
     }
 
     private static async Task<FrameworkElement> TablesAsync()
@@ -324,17 +392,263 @@ internal static class RestaurantOperationalPages
     {
         var panel = Stack();
         panel.DataContext = diagnostics.Reports;
-        panel.Children.Add(Card("Reports & accounting", "Use the existing local reporting service. Financial data stays available on the desktop during internet outages."));
-        var button = new Button { Content = "Run report", Width = 140, Height = 38, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 14, 0, 0) };
-        button.SetBinding(Button.CommandProperty, new Binding("RefreshReportsCommand"));
-        panel.Children.Add(button);
+        panel.Children.Add(Card(
+            "Reports & accounting",
+            "Financial and kitchen performance data stay local-first. Kitchen metrics use KOT/item timestamps and the same warning/late thresholds configured in Restaurant Settings."));
+
+        var filters = new WrapPanel { Margin = new Thickness(0, 12, 0, 12) };
+        var branch = new TextBox { Width = 180, Height = 34, Margin = new Thickness(0, 4, 8, 6) };
+        branch.SetBinding(TextBox.TextProperty, new Binding(nameof(ReportsViewModel.BranchId))
+        {
+            Mode = BindingMode.TwoWay,
+            UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+        });
+        var from = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
+        from.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.From)) { Mode = BindingMode.TwoWay });
+        var to = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
+        to.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.To)) { Mode = BindingMode.TwoWay });
+        var button = new Button { Content = "Run report", Width = 140, Height = 38, Margin = new Thickness(0, 2, 0, 0) };
+        button.SetBinding(Button.CommandProperty, new Binding(nameof(ReportsViewModel.RefreshReportsCommand)));
+        filters.Children.Add(branch);
+        filters.Children.Add(from);
+        filters.Children.Add(to);
+        filters.Children.Add(button);
+        panel.Children.Add(filters);
+
+        var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 16) };
+        foreach (var metric in new[]
+        {
+            ("KOT ROUNDS", nameof(ReportsViewModel.KitchenRounds)),
+            ("AVG KITCHEN", nameof(ReportsViewModel.KitchenAverage)),
+            ("LATE ITEMS", nameof(ReportsViewModel.KitchenLateItems)),
+            ("RUSH ITEMS", nameof(ReportsViewModel.KitchenRushItems)),
+        })
+        {
+            var stack = new StackPanel();
+            var label = new TextBlock
+            {
+                Text = metric.Item1,
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+            };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            var value = new TextBlock
+            {
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 4, 0, 0),
+            };
+            value.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            value.SetBinding(TextBlock.TextProperty, new Binding(metric.Item2));
+            stack.Children.Add(label);
+            stack.Children.Add(value);
+
+            var metricCard = new Border
+            {
+                Child = stack,
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 10, 0),
+                CornerRadius = new CornerRadius(12),
+                BorderThickness = new Thickness(1),
+            };
+            metricCard.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+            metricCard.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+            metrics.Children.Add(metricCard);
+        }
+        panel.Children.Add(metrics);
+
+        var kitchenGrid = GridFor(diagnostics.Reports.KitchenStations);
+        kitchenGrid.MinHeight = 240;
+        kitchenGrid.Columns.Add(Column("Station", nameof(ReportKitchenStationRow.Station), 180));
+        kitchenGrid.Columns.Add(Column("Items", nameof(ReportKitchenStationRow.Items), 80));
+        kitchenGrid.Columns.Add(Column("Active", nameof(ReportKitchenStationRow.ActiveItems), 80));
+        kitchenGrid.Columns.Add(Column("Rush", nameof(ReportKitchenStationRow.RushItems), 80));
+        kitchenGrid.Columns.Add(Column("Late", nameof(ReportKitchenStationRow.LateItems), 80));
+        kitchenGrid.Columns.Add(Column("Queue min", nameof(ReportKitchenStationRow.AverageQueueMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Prep min", nameof(ReportKitchenStationRow.AveragePreparationMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Total min", nameof(ReportKitchenStationRow.AverageTotalMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Utilization %", nameof(ReportKitchenStationRow.UtilizationPercent), 110));
+        panel.Children.Add(Section(
+            "Kitchen performance",
+            "Stations are ordered by total preparation time so bottlenecks surface first.",
+            kitchenGrid));
+
         return Scroll(panel);
     }
 
-    private static FrameworkElement Settings(LanDiagnosticsViewModel diagnostics)
+    private static async Task<FrameworkElement> SettingsAsync(LanDiagnosticsViewModel diagnostics)
     {
         var panel = Stack();
         panel.DataContext = diagnostics;
+
+        var workflow = new DesktopRestaurantWorkflowService();
+        var workflowSettings = await workflow.RestaurantSettingsAsync();
+
+        var workflowPanel = new StackPanel();
+        workflowPanel.Children.Add(new TextBlock
+        {
+            Text = "Kitchen workflow",
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+        });
+
+        var workflowHelp = new TextBlock
+        {
+            Text = "Queue and Preparing are independent. Turning one off never changes the other. New KOT rounds snapshot these values so historical tickets keep the workflow they were created with.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 12),
+        };
+        workflowHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        workflowPanel.Children.Add(workflowHelp);
+
+        var queue = new CheckBox
+        {
+            Content = "Kitchen Queue",
+            IsChecked = workflowSettings.KitchenQueueEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var preparing = new CheckBox
+        {
+            Content = "Preparing stage",
+            IsChecked = workflowSettings.PreparingStageEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var expo = new CheckBox
+        {
+            Content = "Expo stage",
+            IsChecked = workflowSettings.ExpoEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var courses = new CheckBox
+        {
+            Content = "Course firing",
+            IsChecked = workflowSettings.CoursesEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var sound = new CheckBox
+        {
+            Content = "KOT notification sound",
+            IsChecked = workflowSettings.KotSoundEnabled,
+            Margin = new Thickness(0, 5, 0, 5),
+        };
+        var managerVoid = new CheckBox
+        {
+            Content = "Require manager approval for post-KOT void/cancel",
+            IsChecked = workflowSettings.RequireManagerApprovalForPostKotVoid,
+            Margin = new Thickness(0, 5, 0, 10),
+        };
+        var negativeStockPolicy = new ComboBox
+        {
+            ItemsSource = new[] { "block", "warn", "allow" },
+            SelectedItem = workflowSettings.NegativeStockPolicy,
+            Width = 160,
+            Height = 34,
+            Margin = new Thickness(0, 4, 0, 10),
+        };
+
+        workflowPanel.Children.Add(queue);
+        workflowPanel.Children.Add(preparing);
+        workflowPanel.Children.Add(expo);
+        workflowPanel.Children.Add(courses);
+        workflowPanel.Children.Add(sound);
+        workflowPanel.Children.Add(managerVoid);
+        workflowPanel.Children.Add(new TextBlock
+        {
+            Text = "Negative stock policy",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 8, 0, 0),
+        });
+        workflowPanel.Children.Add(negativeStockPolicy);
+
+        var thresholds = new WrapPanel();
+        var warning = new TextBox
+        {
+            Text = workflowSettings.KitchenWarningMinutes.ToString(),
+            Width = 90,
+            Height = 34,
+            Margin = new Thickness(0, 4, 12, 6),
+        };
+        var late = new TextBox
+        {
+            Text = workflowSettings.KitchenLateMinutes.ToString(),
+            Width = 90,
+            Height = 34,
+            Margin = new Thickness(0, 4, 12, 6),
+        };
+        thresholds.Children.Add(new TextBlock
+        {
+            Text = "Warning min",
+            Margin = new Thickness(0, 12, 6, 0),
+        });
+        thresholds.Children.Add(warning);
+        thresholds.Children.Add(new TextBlock
+        {
+            Text = "Late min",
+            Margin = new Thickness(0, 12, 6, 0),
+        });
+        thresholds.Children.Add(late);
+        workflowPanel.Children.Add(thresholds);
+
+        var workflowActions = new WrapPanel();
+        var saveWorkflow = new Button
+        {
+            Content = "Save restaurant workflow",
+            MinWidth = 190,
+            Height = 38,
+            Margin = new Thickness(0, 4, 10, 0),
+        };
+        var workflowStatus = new TextBlock
+        {
+            Margin = new Thickness(4, 13, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        workflowStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        workflowActions.Children.Add(saveWorkflow);
+        workflowActions.Children.Add(workflowStatus);
+        workflowPanel.Children.Add(workflowActions);
+
+        saveWorkflow.Click += async (_, _) =>
+        {
+            try
+            {
+                if (!int.TryParse(warning.Text, out var warningMinutes))
+                    throw new InvalidOperationException("Enter a valid warning threshold.");
+                if (!int.TryParse(late.Text, out var lateMinutes))
+                    throw new InvalidOperationException("Enter a valid late threshold.");
+
+                saveWorkflow.IsEnabled = false;
+                var updated = await workflow.UpdateRestaurantSettingsAsync(
+                    new RestaurantWorkflowSettingsUpdate(
+                        queue.IsChecked == true,
+                        preparing.IsChecked == true,
+                        expo.IsChecked == true,
+                        courses.IsChecked == true,
+                        sound.IsChecked == true,
+                        warningMinutes,
+                        lateMinutes,
+                        managerVoid.IsChecked == true,
+                        negativeStockPolicy.SelectedItem?.ToString() ?? "block"));
+
+                workflowStatus.Text =
+                    $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
+                    $"Preparing {(updated.PreparingStageEnabled ? "ON" : "OFF")} · " +
+                    $"Expo {(updated.ExpoEnabled ? "ON" : "OFF")} · " +
+                    $"Negative stock {updated.NegativeStockPolicy.ToUpperInvariant()}.";
+            }
+            catch (Exception ex)
+            {
+                workflowStatus.Text = ex.Message;
+            }
+            finally
+            {
+                saveWorkflow.IsEnabled = true;
+            }
+        };
+
+        panel.Children.Add(Section(
+            "Restaurant workflow settings",
+            "These settings drive the Desktop KOT/KDS state machine and are included in LAN bootstrap/settings APIs for cross-client alignment.",
+            workflowPanel));
 
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
@@ -505,6 +819,335 @@ internal static class RestaurantOperationalPages
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
         return border;
+    }
+
+    private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail, Color Accent)[] values)
+    {
+        var wrap = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
+        foreach (var value in values)
+            wrap.Children.Add(DashboardCard(value.Icon, value.Label, value.Value, value.Detail, value.Accent));
+
+        return new Border
+        {
+            Child = wrap,
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+    }
+
+    private static Border DashboardCard(string icon, string title, string value, string detail, Color accent)
+    {
+        var accentBrush = new SolidColorBrush(accent);
+        var soft = Color.FromArgb(52, accent.R, accent.G, accent.B);
+        var softBrush = new SolidColorBrush(soft);
+
+        var iconText = new TextBlock
+        {
+            Text = icon,
+            Foreground = Brushes.White,
+            FontSize = 24,
+            FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var iconSurface = new Border
+        {
+            Width = 58,
+            Height = 58,
+            CornerRadius = new CornerRadius(15),
+            Background = accentBrush,
+            Child = iconText,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var titleText = new TextBlock
+        {
+            Text = title,
+            FontSize = 11,
+            FontWeight = FontWeights.SemiBold,
+        };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var valueText = new TextBlock
+        {
+            Text = value,
+            FontSize = 22,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.NoWrap,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        valueText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var detailText = new TextBlock
+        {
+            Text = detail,
+            FontSize = 10.5,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        detailText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+        var copy = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+        copy.Children.Add(titleText);
+        copy.Children.Add(valueText);
+        copy.Children.Add(detailText);
+
+        var content = new Grid { Margin = new Thickness(14, 13, 14, 13) };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.Children.Add(iconSurface);
+        Grid.SetColumn(copy, 1);
+        content.Children.Add(copy);
+
+        var decoration = new Canvas
+        {
+            IsHitTestVisible = false,
+            Opacity = 0.72,
+            ClipToBounds = true,
+        };
+        var waveOne = new Ellipse
+        {
+            Width = 165,
+            Height = 72,
+            Fill = softBrush,
+            Stroke = new SolidColorBrush(Color.FromArgb(70, accent.R, accent.G, accent.B)),
+            StrokeThickness = 1.2,
+        };
+        Canvas.SetRight(waveOne, -34);
+        Canvas.SetBottom(waveOne, -29);
+        decoration.Children.Add(waveOne);
+
+        var waveTwo = new Ellipse
+        {
+            Width = 132,
+            Height = 56,
+            Fill = Brushes.Transparent,
+            Stroke = new SolidColorBrush(Color.FromArgb(90, accent.R, accent.G, accent.B)),
+            StrokeThickness = 1.1,
+        };
+        Canvas.SetRight(waveTwo, -10);
+        Canvas.SetBottom(waveTwo, -30);
+        decoration.Children.Add(waveTwo);
+
+        var layer = new Grid();
+        layer.Children.Add(decoration);
+        layer.Children.Add(content);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(18),
+            Margin = new Thickness(0, 0, 10, 10),
+            Width = 238,
+            Height = 112,
+            BorderThickness = new Thickness(1),
+            ClipToBounds = true,
+            Child = layer,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 18,
+            ShadowDepth = 3,
+            Opacity = 0.12,
+            Color = Color.FromRgb(20, 38, 61),
+        };
+        return border;
+    }
+
+    private static Border DashboardPanel(string title, string subtitle, UIElement content)
+    {
+        var titleText = new TextBlock
+        {
+            Text = title,
+            FontSize = 16,
+            FontWeight = FontWeights.Bold,
+        };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var subtitleText = new TextBlock
+        {
+            Text = subtitle,
+            FontSize = 10.5,
+            Margin = new Thickness(0, 2, 0, 12),
+        };
+        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+        var stack = new StackPanel();
+        stack.Children.Add(titleText);
+        stack.Children.Add(subtitleText);
+        stack.Children.Add(content);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 0, 0, 10),
+            BorderThickness = new Thickness(1),
+            Child = stack,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 18,
+            ShadowDepth = 3,
+            Opacity = 0.10,
+            Color = Color.FromRgb(20, 38, 61),
+        };
+        return border;
+    }
+
+    private static UIElement BuildOperationsOverview(decimal sales, int orders, int tables, int kitchen)
+    {
+        var grid = new Grid { MinHeight = 178 };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        var metrics = new UniformGrid
+        {
+            Columns = 4,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        metrics.Children.Add(MiniMetric("Sales", $"AFN {sales:N0}", Color.FromRgb(34, 197, 94)));
+        metrics.Children.Add(MiniMetric("Orders", orders.ToString(), Color.FromRgb(14, 165, 233)));
+        metrics.Children.Add(MiniMetric("Tables", tables.ToString(), Color.FromRgb(245, 158, 11)));
+        metrics.Children.Add(MiniMetric("Kitchen", kitchen.ToString(), Color.FromRgb(236, 72, 153)));
+        grid.Children.Add(metrics);
+
+        var chart = new Grid { Margin = new Thickness(4, 6, 4, 0) };
+        for (var i = 0; i < 5; i++)
+        {
+            chart.RowDefinitions.Add(new RowDefinition());
+            var line = new Border
+            {
+                Height = 1,
+                Opacity = 0.32,
+                VerticalAlignment = VerticalAlignment.Top,
+            };
+            line.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
+            Grid.SetRow(line, i);
+            chart.Children.Add(line);
+        }
+
+        var baseline = new Polyline
+        {
+            Stroke = new SolidColorBrush(Color.FromRgb(59, 130, 246)),
+            StrokeThickness = 2.2,
+            StrokeLineJoin = PenLineJoin.Round,
+            Points = new PointCollection
+            {
+                new(0, 104), new(70, 100), new(140, 101), new(210, 94),
+                new(280, 92), new(350, 82), new(420, 86), new(490, 70),
+                new(560, 74), new(630, 58), new(700, 61)
+            },
+            Stretch = Stretch.Fill,
+            Margin = new Thickness(0, 8, 0, 10),
+        };
+        chart.Children.Add(baseline);
+        Grid.SetRow(chart, 1);
+        grid.Children.Add(chart);
+
+        return grid;
+    }
+
+    private static Border MiniMetric(string label, string value, Color accent)
+    {
+        var labelText = new TextBlock { Text = label, FontSize = 10.5 };
+        labelText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        var valueText = new TextBlock
+        {
+            Text = value,
+            FontSize = 17,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 3, 0, 0),
+        };
+        valueText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var stack = new StackPanel();
+        stack.Children.Add(labelText);
+        stack.Children.Add(valueText);
+
+        return new Border
+        {
+            BorderBrush = new SolidColorBrush(Color.FromArgb(100, accent.R, accent.G, accent.B)),
+            BorderThickness = new Thickness(0, 0, 0, 3),
+            Padding = new Thickness(10, 8, 10, 8),
+            Margin = new Thickness(0, 0, 10, 0),
+            Child = stack,
+        };
+    }
+
+    private static UIElement BuildStatusRows(params (string Label, string Value)[] rows)
+    {
+        var stack = new StackPanel();
+        foreach (var row in rows)
+        {
+            var grid = new Grid { Margin = new Thickness(0, 3, 0, 6) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var label = new TextBlock { Text = row.Label, FontSize = 11 };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            var value = new TextBlock
+            {
+                Text = row.Value,
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(12, 0, 0, 0),
+            };
+            value.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+            grid.Children.Add(label);
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(value);
+            stack.Children.Add(grid);
+        }
+
+        return stack;
+    }
+
+    private static UIElement BuildFeatureSummary(string icon, string headline, string detail, Color accent)
+    {
+        var iconText = new TextBlock
+        {
+            Text = icon,
+            FontSize = 23,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(accent),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        var headlineText = new TextBlock
+        {
+            Text = headline,
+            FontSize = 15,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        headlineText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+        var detailText = new TextBlock
+        {
+            Text = detail,
+            FontSize = 11,
+            Margin = new Thickness(0, 5, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        detailText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+        var copy = new StackPanel { Margin = new Thickness(13, 0, 0, 0) };
+        copy.Children.Add(headlineText);
+        copy.Children.Add(detailText);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.Children.Add(iconText);
+        Grid.SetColumn(copy, 1);
+        grid.Children.Add(copy);
+        return grid;
     }
 
     private static Border Cards(params (string Label, string Value)[] values)

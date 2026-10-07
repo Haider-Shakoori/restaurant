@@ -22,6 +22,9 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalOrderItem> OrderItems => Set<LocalOrderItem>();
     public DbSet<LocalMutation> Mutations => Set<LocalMutation>();
     public DbSet<LocalChange> Changes => Set<LocalChange>();
+    public DbSet<LocalRestaurantSetting> RestaurantSettings => Set<LocalRestaurantSetting>();
+    public DbSet<LocalKotRound> KotRounds => Set<LocalKotRound>();
+    public DbSet<LocalKotCounter> KotCounters => Set<LocalKotCounter>();
     public DbSet<LocalKitchenTicket> KitchenTickets => Set<LocalKitchenTicket>();
     public DbSet<LocalKitchenTicketItem> KitchenTicketItems => Set<LocalKitchenTicketItem>();
     public DbSet<LocalKitchenPrinterBinding> KitchenPrinterBindings => Set<LocalKitchenPrinterBinding>();
@@ -46,6 +49,8 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalRecipeItem> RecipeItems => Set<LocalRecipeItem>();
     public DbSet<LocalInventoryConsumption> InventoryConsumptions => Set<LocalInventoryConsumption>();
     public DbSet<LocalInventoryConsumptionLine> InventoryConsumptionLines => Set<LocalInventoryConsumptionLine>();
+    public DbSet<LocalInventoryReservation> InventoryReservations => Set<LocalInventoryReservation>();
+    public DbSet<LocalInventoryReservationLine> InventoryReservationLines => Set<LocalInventoryReservationLine>();
     public DbSet<LocalPurchaseOrder> PurchaseOrders => Set<LocalPurchaseOrder>();
     public DbSet<LocalPurchaseOrderLine> PurchaseOrderLines => Set<LocalPurchaseOrderLine>();
     public DbSet<LocalGoodsReceipt> GoodsReceipts => Set<LocalGoodsReceipt>();
@@ -165,6 +170,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => value.ClientOrderId).IsUnique();
             entity.HasIndex(value => new { value.DiningTableId, value.Status });
+            entity.HasIndex(value => new { value.BranchId, value.Status });
             entity.HasIndex(value => new { value.WaiterId, value.Status });
             entity.Property(value => value.Subtotal).HasPrecision(18, 2);
             entity.Property(value => value.Total).HasPrecision(18, 2);
@@ -194,12 +200,37 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasIndex(value => new { value.EntityType, value.EntityId });
             entity.HasIndex(value => value.OwnerUserId);
         });
+        modelBuilder.Entity<LocalRestaurantSetting>(entity =>
+        {
+            entity.ToTable("restaurant_settings");
+            entity.HasKey(value => value.Key);
+            entity.HasIndex(value => value.UpdatedAtUtc);
+        });
+
+        modelBuilder.Entity<LocalKotRound>(entity =>
+        {
+            entity.ToTable("kot_rounds");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.OrderId, value.RoundNumber }).IsUnique();
+            entity.HasIndex(value => new { value.OrderId, value.MutationId }).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.BusinessDate, value.DisplayNumber }).IsUnique();
+            entity.HasIndex(value => value.KotNumber);
+            entity.HasIndex(value => value.SentAt);
+        });
+
+        modelBuilder.Entity<LocalKotCounter>(entity =>
+        {
+            entity.ToTable("kot_counters");
+            entity.HasKey(value => new { value.BranchId, value.BusinessDate });
+        });
+
         modelBuilder.Entity<LocalKitchenTicket>(entity =>
         {
             entity.ToTable("kitchen_tickets");
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => value.TicketNumber).IsUnique();
-            entity.HasIndex(value => new { value.OrderId, value.KitchenStationId }).IsUnique();
+            entity.HasIndex(value => new { value.KotRoundId, value.KitchenStationId }).IsUnique();
+            entity.HasIndex(value => new { value.OrderId, value.RoundNumber });
             entity.HasIndex(value => new { value.KitchenStationId, value.Status });
         });
 
@@ -207,7 +238,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
         {
             entity.ToTable("kitchen_ticket_items");
             entity.HasKey(value => value.Id);
-            entity.HasIndex(value => value.OrderItemId).IsUnique();
+            entity.HasIndex(value => value.OrderItemId);
             entity.HasIndex(value => value.KitchenTicketId);
         });
 
@@ -411,7 +442,9 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
         {
             entity.ToTable("inventory_consumptions");
             entity.HasKey(value => value.Id);
-            entity.HasIndex(value => value.OrderId).IsUnique();
+            entity.HasIndex(value => value.ProductionKey).IsUnique();
+            entity.HasIndex(value => value.OrderId);
+            entity.HasIndex(value => value.KitchenTicketItemId);
             entity.HasIndex(value => new { value.BranchId, value.ConsumedAt });
         });
 
@@ -420,6 +453,24 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.ToTable("inventory_consumption_lines");
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => new { value.InventoryConsumptionId, value.OrderItemId, value.InventoryItemId }).IsUnique();
+            entity.Property(value => value.QuantityBase).HasPrecision(18, 4);
+        });
+
+        modelBuilder.Entity<LocalInventoryReservation>(entity =>
+        {
+            entity.ToTable("inventory_reservations");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => value.KitchenTicketItemId).IsUnique();
+            entity.HasIndex(value => new { value.BranchId, value.Status });
+            entity.HasIndex(value => value.OrderId);
+        });
+
+        modelBuilder.Entity<LocalInventoryReservationLine>(entity =>
+        {
+            entity.ToTable("inventory_reservation_lines");
+            entity.HasKey(value => value.Id);
+            entity.HasIndex(value => new { value.InventoryReservationId, value.InventoryItemId }).IsUnique();
+            entity.HasIndex(value => value.InventoryItemId);
             entity.Property(value => value.QuantityBase).HasPrecision(18, 4);
         });
 

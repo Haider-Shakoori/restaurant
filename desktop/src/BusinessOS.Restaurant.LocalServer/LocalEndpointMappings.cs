@@ -357,10 +357,10 @@ public static class LocalEndpointMappings
                     statusCode: StatusCodes.Status401Unauthorized);
             }
 
-            if (principal.UserRole is not ("owner" or "manager" or "kitchen"))
+            if (principal.UserRole is not ("owner" or "manager" or "kitchen" or "expo" or "runner"))
             {
                 return Results.Json(
-                    new { code = "forbidden", message = "This user cannot operate the kitchen display." },
+                    new { code = "forbidden", message = "This user cannot view the kitchen display." },
                     statusCode: StatusCodes.Status403Forbidden);
             }
 
@@ -429,6 +429,216 @@ public static class LocalEndpointMappings
             {
                 var data = await kitchen.ReadyAsync(ticketId, principal, token);
                 return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/start", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.StartItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/ready", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.ReadyItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/expo-pass", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Expo authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.PassExpoItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/refire", async (
+            string itemId,
+            LocalKitchenRefireRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.RefireItemAsync(
+                    itemId,
+                    body.ClientRefireId,
+                    body.Reason,
+                    principal,
+                    token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/restaurant/settings", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalRestaurantSettingsService settings,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Restaurant authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            var data = await settings.GetAsync(token);
+            return Results.Ok(new { data = LocalRestaurantSettingsService.ToPayload(data) });
+        });
+
+        app.MapPut("/api/v1/restaurant/settings", async (
+            RestaurantWorkflowSettingsUpdate body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalRestaurantSettingsService settings,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Restaurant management authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var updated = await settings.UpdateAsync(body, principal, token);
+                return Results.Ok(new { data = LocalRestaurantSettingsService.ToPayload(updated) });
             }
             catch (LocalSyncConflictException conflict)
             {
@@ -710,6 +920,46 @@ public static class LocalEndpointMappings
             try
             {
                 return Results.Ok(new { data = await cashier.TransferOrderAsync(orderId, body.TargetTableId, principal, token) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return CashierConflict(conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/orders/{sourceOrderId}/split", async (
+            string sourceOrderId,
+            LocalSplitOrderRequest body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalCashierService cashier,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Cashier or manager authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                return Results.Ok(new
+                {
+                    data = await cashier.SplitUnsentItemsAsync(
+                        sourceOrderId,
+                        body.TargetTableId,
+                        body.OrderItemIds,
+                        principal,
+                        token),
+                });
             }
             catch (LocalSyncConflictException conflict)
             {
@@ -1403,6 +1653,28 @@ public static class LocalEndpointMappings
             if (principal is null) return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
             if (!CanViewReports(principal)) return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
             return Results.Ok(new { data = await reports.TopItemsAsync(branch_id, from, to, limit ?? 10, token) });
+        });
+
+        app.MapGet("/api/v1/reports/kitchen", async (
+            string branch_id,
+            DateOnly from,
+            DateOnly to,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalReportingService reports,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null)
+                return Results.Json(new { code = "unauthenticated" }, statusCode: StatusCodes.Status401Unauthorized);
+            if (!CanViewReports(principal))
+                return Results.Json(new { code = "forbidden" }, statusCode: StatusCodes.Status403Forbidden);
+
+            return Results.Ok(new
+            {
+                data = await reports.KitchenPerformanceAsync(branch_id, from, to, token),
+            });
         });
 
         app.MapGet("/api/v1/reports/closings", async (string branch_id, DateOnly from, DateOnly to, HttpRequest request, LocalServerOptions options, LocalTerminalAuthenticator authenticator, LocalReportingService reports, CancellationToken token) =>

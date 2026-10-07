@@ -240,7 +240,9 @@ public sealed class CloudReconciliationService
             return;
         }
 
-        var localId = await ResolveLocalIdAsync(db, change, cancellationToken);
+        var localId = string.Equals(change.EntityType, "restaurant_settings", StringComparison.Ordinal)
+            ? "workflow"
+            : await ResolveLocalIdAsync(db, change, cancellationToken);
 
         if (localId is not null)
         {
@@ -314,6 +316,9 @@ public sealed class CloudReconciliationService
                 break;
             case "dining_table":
                 await ApplyDiningTableAsync(db, change.EntityId, payload, cancellationToken);
+                break;
+            case "restaurant_settings":
+                await ApplyRestaurantSettingsAsync(db, payload, cancellationToken);
                 break;
         }
     }
@@ -1235,6 +1240,77 @@ public sealed class CloudReconciliationService
         closing.ReopenedAt = Date(payload, "reopened_at");
     }
 
+    private static async Task ApplyRestaurantSettingsAsync(
+        RestaurantDbContext db,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        var defaults = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["kitchen_queue_enabled"] = Bool(payload, "kitchen_queue_enabled", true) ? "true" : "false",
+            ["preparing_stage_enabled"] = Bool(payload, "preparing_stage_enabled", true) ? "true" : "false",
+            ["expo_enabled"] = Bool(payload, "expo_enabled", false) ? "true" : "false",
+            ["courses_enabled"] = Bool(payload, "courses_enabled", false) ? "true" : "false",
+            ["kot_sound_enabled"] = Bool(payload, "kot_sound_enabled", true) ? "true" : "false",
+            ["kitchen_warning_minutes"] = Math.Clamp(Int(payload, "kitchen_warning_minutes", 10), 1, 240).ToString(),
+            ["kitchen_late_minutes"] = Math.Clamp(Int(payload, "kitchen_late_minutes", 20), 1, 480).ToString(),
+            ["require_manager_approval_post_kot_void"] =
+                Bool(
+                    payload,
+                    "require_manager_approval_post_kot_void",
+                    Bool(payload, "require_manager_approval_for_post_kot_void", false))
+                    ? "true"
+                    : "false",
+            ["negative_stock_policy"] = NormalizeNegativeStockPolicy(
+                String(payload, "negative_stock_policy") ?? "block"),
+        };
+
+        var warning = int.Parse(defaults["kitchen_warning_minutes"]);
+        var late = int.Parse(defaults["kitchen_late_minutes"]);
+        if (late < warning)
+        {
+            defaults["kitchen_late_minutes"] = warning.ToString();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var pair in defaults)
+        {
+            var row = await db.RestaurantSettings
+                .SingleOrDefaultAsync(value => value.Key == pair.Key, cancellationToken);
+
+            if (row is null)
+            {
+                db.RestaurantSettings.Add(new LocalRestaurantSetting
+                {
+                    Key = pair.Key,
+                    Value = pair.Value,
+                    Source = "cloud",
+                    UpdatedAtUtc = now,
+                });
+            }
+            else
+            {
+                row.Value = pair.Value;
+                row.Source = "cloud";
+                row.UpdatedAtUtc = now;
+            }
+        }
+
+        AddLanChange(db, "restaurant_settings", "workflow", "upsert", new
+        {
+            kitchen_queue_enabled = defaults["kitchen_queue_enabled"] == "true",
+            preparing_stage_enabled = defaults["preparing_stage_enabled"] == "true",
+            expo_enabled = defaults["expo_enabled"] == "true",
+            courses_enabled = defaults["courses_enabled"] == "true",
+            kot_sound_enabled = defaults["kot_sound_enabled"] == "true",
+            kitchen_warning_minutes = int.Parse(defaults["kitchen_warning_minutes"]),
+            kitchen_late_minutes = int.Parse(defaults["kitchen_late_minutes"]),
+            require_manager_approval_post_kot_void =
+                defaults["require_manager_approval_post_kot_void"] == "true",
+            negative_stock_policy = defaults["negative_stock_policy"],
+        });
+    }
+
     private async Task<string?> ResolveLocalIdAsync(
         RestaurantDbContext db,
         CloudPullChange change,
@@ -1333,6 +1409,14 @@ public sealed class CloudReconciliationService
             Status = "open",
             CreatedAtUtc = DateTimeOffset.UtcNow,
         });
+    }
+
+    private static string NormalizeNegativeStockPolicy(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "block" or "warn" or "allow"
+            ? normalized
+            : "block";
     }
 
     private static string? String(JsonElement element, string name)

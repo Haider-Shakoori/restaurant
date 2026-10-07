@@ -14,6 +14,7 @@ public sealed class DesktopRestaurantWorkflowService
     private readonly LocalCashierService _cashier;
     private readonly LocalOperationsControlService _operations;
     private readonly LocalExpenseService _expenses;
+    private readonly LocalRestaurantSettingsService _settings;
 
     public DesktopRestaurantWorkflowService()
     {
@@ -21,6 +22,7 @@ public sealed class DesktopRestaurantWorkflowService
         _cashier = new LocalCashierService(_factory);
         _operations = new LocalOperationsControlService(_factory);
         _expenses = new LocalExpenseService(_factory);
+        _settings = new LocalRestaurantSettingsService(_factory);
         _sync = new LocalSyncService(_factory, new OperationalSnapshotStore(_factory), _kitchen);
     }
 
@@ -39,12 +41,25 @@ public sealed class DesktopRestaurantWorkflowService
     }
 
     public async Task<string> OpenOrderAsync(string tableId, int guestCount, string? notes = null, CancellationToken token = default)
+        => await OpenOrderAsync("dine_in", tableId, string.Empty, null, guestCount, notes, token);
+
+    public async Task<string> OpenOrderAsync(
+        string serviceType,
+        string? tableId,
+        string branchId,
+        string? serviceReference,
+        int guestCount,
+        string? notes = null,
+        CancellationToken token = default)
     {
         var clientOrderId = $"DESK-{Guid.CreateVersion7():N}";
         var payload = JsonSerializer.SerializeToElement(new
         {
             client_order_id = clientOrderId,
             dining_table_id = tableId,
+            branch_id = branchId,
+            service_type = serviceType,
+            service_reference = serviceReference,
             guest_count = guestCount,
             notes
         });
@@ -53,22 +68,139 @@ public sealed class DesktopRestaurantWorkflowService
     }
 
     public async Task AddItemAsync(string clientOrderId, string menuItemId, int quantity, string? notes = null, CancellationToken token = default)
+        => await AddItemAsync(
+            clientOrderId,
+            menuItemId,
+            quantity,
+            notes,
+            seatNumber: null,
+            courseNumber: null,
+            courseName: null,
+            held: false,
+            priority: "normal",
+            allergyInstructions: null,
+            kitchenInstructions: null,
+            modifierOptionIds: null,
+            token);
+
+    public async Task AddItemAsync(
+        string clientOrderId,
+        string menuItemId,
+        int quantity,
+        string? notes,
+        int? seatNumber,
+        int? courseNumber,
+        string? courseName,
+        bool held,
+        string priority,
+        string? allergyInstructions,
+        string? kitchenInstructions,
+        IReadOnlyList<string>? modifierOptionIds,
+        CancellationToken token = default)
+        => _ = await AddItemDetailedAsync(
+            clientOrderId,
+            menuItemId,
+            quantity,
+            notes,
+            seatNumber,
+            courseNumber,
+            courseName,
+            held,
+            priority,
+            allergyInstructions,
+            kitchenInstructions,
+            modifierOptionIds,
+            token);
+
+    public async Task SubmitOrderAsync(string clientOrderId, CancellationToken token = default)
+        => await SendKotAsync(clientOrderId, token);
+
+    public async Task<string> AddItemDetailedAsync(
+        string clientOrderId,
+        string menuItemId,
+        int quantity,
+        string? notes,
+        int? seatNumber,
+        int? courseNumber,
+        string? courseName,
+        bool held,
+        string priority,
+        string? allergyInstructions,
+        string? kitchenInstructions,
+        IReadOnlyList<string>? modifierOptionIds,
+        CancellationToken token = default)
+    {
+        var clientLineId = $"LINE-{Guid.CreateVersion7():N}";
+        var modifiers = (modifierOptionIds ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => new { option_id = value })
+            .ToArray();
+
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            client_line_id = clientLineId,
+            menu_item_id = menuItemId,
+            quantity,
+            notes,
+            seat_number = seatNumber,
+            course_number = courseNumber,
+            course_name = courseName,
+            held,
+            priority,
+            allergy_instructions = allergyInstructions,
+            kitchen_instructions = kitchenInstructions,
+            modifiers,
+        });
+        await PushSingleAsync("order.item.add", payload, token);
+        return clientLineId;
+    }
+
+    public async Task SendKotAsync(string clientOrderId, CancellationToken token = default)
+    {
+        var payload = JsonSerializer.SerializeToElement(new { client_order_id = clientOrderId });
+        await PushSingleAsync("order.kot.send", payload, token);
+    }
+
+    public async Task FireCourseAsync(
+        string clientOrderId,
+        int courseNumber,
+        CancellationToken token = default)
     {
         var payload = JsonSerializer.SerializeToElement(new
         {
             client_order_id = clientOrderId,
-            client_line_id = $"LINE-{Guid.CreateVersion7():N}",
-            menu_item_id = menuItemId,
-            quantity,
-            notes
+            course_number = courseNumber,
         });
-        await PushSingleAsync("order.item.add", payload, token);
+        await PushSingleAsync("course.fire", payload, token);
     }
 
-    public async Task SubmitOrderAsync(string clientOrderId, CancellationToken token = default)
+    public async Task VoidOrderItemAsync(
+        string clientOrderId,
+        string clientLineId,
+        string reason,
+        CancellationToken token = default)
     {
-        var payload = JsonSerializer.SerializeToElement(new { client_order_id = clientOrderId });
-        await PushSingleAsync("order.submit", payload, token);
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            client_line_id = clientLineId,
+            reason,
+        });
+        await PushSingleAsync("order.item.void", payload, token);
+    }
+
+    public async Task CancelOrderAsync(
+        string clientOrderId,
+        string reason,
+        CancellationToken token = default)
+    {
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            reason,
+        });
+        await PushSingleAsync("order.cancel", payload, token);
     }
 
     public async Task StartKitchenTicketAsync(string ticketId, CancellationToken token = default)
@@ -76,6 +208,90 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task MarkKitchenTicketReadyAsync(string ticketId, CancellationToken token = default)
         => _ = await _kitchen.ReadyAsync(ticketId, await CurrentPrincipalAsync(token), token);
+
+    public async Task StartKitchenItemAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.StartItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task MarkKitchenItemReadyAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.ReadyItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task PassExpoItemAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.PassExpoItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task RecallKitchenItemAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RecallItemAsync(
+            itemId,
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task RecordKitchenWasteAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RecordWasteAsync(
+            itemId,
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task RefireKitchenItemAsync(
+        string itemId,
+        string reason,
+        CancellationToken token = default)
+        => _ = await _kitchen.RefireItemAsync(
+            itemId,
+            $"DESK-REFIRE-{Guid.CreateVersion7():N}",
+            reason,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task<object> TransferOrderAsync(
+        string orderId,
+        string targetTableId,
+        CancellationToken token = default)
+        => await _cashier.TransferOrderAsync(orderId, targetTableId, await CurrentPrincipalAsync(token), token);
+
+    public async Task<object> MoveUnsentItemsAsync(
+        string sourceOrderId,
+        string targetOrderId,
+        IReadOnlyList<string> orderItemIds,
+        CancellationToken token = default)
+        => await _cashier.MoveUnsentItemsAsync(
+            sourceOrderId,
+            targetOrderId,
+            orderItemIds,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task<object> SplitUnsentItemsAsync(
+        string sourceOrderId,
+        string targetTableId,
+        IReadOnlyList<string> orderItemIds,
+        CancellationToken token = default)
+        => await _cashier.SplitUnsentItemsAsync(
+            sourceOrderId,
+            targetTableId,
+            orderItemIds,
+            await CurrentPrincipalAsync(token),
+            token);
+
+    public async Task<object> MergeDraftOrdersAsync(
+        string targetOrderId,
+        string sourceOrderId,
+        CancellationToken token = default)
+        => await _cashier.MergeDraftOrdersAsync(targetOrderId, sourceOrderId, await CurrentPrincipalAsync(token), token);
+
+    public Task<RestaurantWorkflowSettings> RestaurantSettingsAsync(CancellationToken token = default)
+        => _settings.GetAsync(token);
+
+    public async Task<RestaurantWorkflowSettings> UpdateRestaurantSettingsAsync(
+        RestaurantWorkflowSettingsUpdate update,
+        CancellationToken token = default)
+        => await _settings.UpdateAsync(update, await CurrentPrincipalAsync(token), token);
 
 
     public async Task<object> OpenCashierSessionAsync(string branchId, decimal openingCash, CancellationToken token = default)

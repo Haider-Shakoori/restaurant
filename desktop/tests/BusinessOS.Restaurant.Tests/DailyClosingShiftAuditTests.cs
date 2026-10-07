@@ -87,6 +87,7 @@ public sealed class DailyClosingShiftAuditTests
 
             foreach (var ticketId in ticketIds)
             {
+                await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
                 await kitchen.ReadyAsync(ticketId, Kitchen(), CancellationToken.None);
             }
 

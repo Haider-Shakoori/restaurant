@@ -50,6 +50,9 @@ public sealed class LocalDatabaseFactory
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureOrderingSchemaAsync(db, cancellationToken);
         await EnsureMenuImageColumnAsync(cancellationToken);
+        await EnsureKotRealignmentSchemaAsync(cancellationToken);
+        await BackfillOrderServiceContextAsync(cancellationToken);
+        await BackfillLegacyKotRoundsAsync(cancellationToken);
     }
 
     private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
@@ -84,6 +87,386 @@ public sealed class LocalDatabaseFactory
         await using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE menu_items ADD COLUMN ImageUrl TEXT NULL;";
         await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task EnsureKotRealignmentSchemaAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        // Existing Desktop databases created before KOT realignment do not have
+        // kot_rounds. Ensure the base table exists before attempting additive
+        // ALTER TABLE upgrades below.
+        await using (var bootstrap = connection.CreateCommand())
+        {
+            bootstrap.CommandText = """
+                CREATE TABLE IF NOT EXISTS kot_rounds (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    OrderId TEXT NOT NULL,
+                    BranchId TEXT NULL,
+                    RoundNumber INTEGER NOT NULL,
+                    DisplayNumber INTEGER NOT NULL DEFAULT 0,
+                    BusinessDate TEXT NULL,
+                    KotNumber TEXT NOT NULL,
+                    MutationId TEXT NOT NULL,
+                    Priority TEXT NOT NULL DEFAULT 'normal',
+                    SubmittedByUserId INTEGER NOT NULL,
+                    QueueEnabled INTEGER NOT NULL,
+                    PreparingEnabled INTEGER NOT NULL,
+                    ExpoEnabled INTEGER NOT NULL,
+                    CoursesEnabled INTEGER NOT NULL,
+                    SentAt TEXT NOT NULL
+                );
+                """;
+            await bootstrap.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var columns = new (string Table, string Column, string Definition)[]
+        {
+            ("order_items", "KotRoundId", "TEXT NULL"),
+            ("order_items", "RoundNumber", "INTEGER NULL"),
+            ("order_items", "SeatNumber", "INTEGER NULL"),
+            ("order_items", "CourseNumber", "INTEGER NULL"),
+            ("order_items", "CourseName", "TEXT NULL"),
+            ("order_items", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("order_items", "ModifiersJson", "TEXT NULL"),
+            ("order_items", "AllergyInstructions", "TEXT NULL"),
+            ("order_items", "KitchenInstructions", "TEXT NULL"),
+            ("order_items", "RefireOfOrderItemId", "TEXT NULL"),
+            ("order_items", "VoidedAt", "TEXT NULL"),
+            ("order_items", "VoidReason", "TEXT NULL"),
+            ("kitchen_tickets", "KotRoundId", "TEXT NULL"),
+            ("kitchen_tickets", "RoundNumber", "INTEGER NOT NULL DEFAULT 1"),
+            ("kitchen_tickets", "KotNumber", "TEXT NULL"),
+            ("kitchen_tickets", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("kitchen_ticket_items", "SeatNumber", "INTEGER NULL"),
+            ("kitchen_ticket_items", "CourseNumber", "INTEGER NULL"),
+            ("kitchen_ticket_items", "CourseName", "TEXT NULL"),
+            ("kitchen_ticket_items", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("kitchen_ticket_items", "ModifiersJson", "TEXT NULL"),
+            ("kitchen_ticket_items", "AllergyInstructions", "TEXT NULL"),
+            ("kitchen_ticket_items", "KitchenInstructions", "TEXT NULL"),
+            ("kitchen_ticket_items", "StartedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "ReadyAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "CompletedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "VoidedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "VoidReason", "TEXT NULL"),
+            ("kitchen_ticket_items", "RefireOfKitchenItemId", "TEXT NULL"),
+            ("kitchen_ticket_items", "RefireReason", "TEXT NULL"),
+            ("kitchen_ticket_items", "RecalledAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "RecallReason", "TEXT NULL"),
+            ("kitchen_ticket_items", "RecalledByUserId", "INTEGER NULL"),
+            ("kitchen_ticket_items", "WastedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "WasteReason", "TEXT NULL"),
+            ("kitchen_ticket_items", "WastedByUserId", "INTEGER NULL"),
+            ("inventory_consumptions", "ProductionKey", "TEXT NULL"),
+            ("inventory_consumptions", "OrderItemId", "TEXT NULL"),
+            ("inventory_consumptions", "KitchenTicketItemId", "TEXT NULL"),
+            ("inventory_consumptions", "InventoryReservationId", "TEXT NULL"),
+            ("kot_rounds", "BranchId", "TEXT NULL"),
+            ("kot_rounds", "DisplayNumber", "INTEGER NOT NULL DEFAULT 0"),
+            ("kot_rounds", "BusinessDate", "TEXT NULL"),
+            ("kot_rounds", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("orders", "BranchId", "TEXT NULL"),
+            ("orders", "ServiceType", "TEXT NOT NULL DEFAULT 'dine_in'"),
+            ("orders", "ServiceReference", "TEXT NULL"),
+        };
+
+        foreach (var column in columns)
+        {
+            if (await ColumnExistsAsync(connection, column.Table, column.Column, cancellationToken))
+            {
+                continue;
+            }
+
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {column.Table} ADD COLUMN {column.Column} {column.Definition};";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using var schema = connection.CreateCommand();
+        schema.CommandText = """
+            CREATE TABLE IF NOT EXISTS restaurant_settings (
+                Key TEXT NOT NULL PRIMARY KEY,
+                Value TEXT NOT NULL,
+                Source TEXT NOT NULL DEFAULT 'local',
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_restaurant_settings_UpdatedAtUtc
+                ON restaurant_settings (UpdatedAtUtc);
+
+            CREATE TABLE IF NOT EXISTS kot_rounds (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                BranchId TEXT NULL,
+                RoundNumber INTEGER NOT NULL,
+                DisplayNumber INTEGER NOT NULL DEFAULT 0,
+                BusinessDate TEXT NULL,
+                KotNumber TEXT NOT NULL,
+                MutationId TEXT NOT NULL,
+                Priority TEXT NOT NULL DEFAULT 'normal',
+                SubmittedByUserId INTEGER NOT NULL,
+                QueueEnabled INTEGER NOT NULL,
+                PreparingEnabled INTEGER NOT NULL,
+                ExpoEnabled INTEGER NOT NULL,
+                CoursesEnabled INTEGER NOT NULL,
+                SentAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_OrderId_RoundNumber
+                ON kot_rounds (OrderId, RoundNumber);
+            DROP INDEX IF EXISTS IX_kot_rounds_MutationId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_OrderId_MutationId
+                ON kot_rounds (OrderId, MutationId);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_Branch_BusinessDate_DisplayNumber
+                ON kot_rounds (BranchId, BusinessDate, DisplayNumber);
+            CREATE INDEX IF NOT EXISTS IX_kot_rounds_KotNumber
+                ON kot_rounds (KotNumber);
+            CREATE INDEX IF NOT EXISTS IX_kot_rounds_SentAt
+                ON kot_rounds (SentAt);
+
+            CREATE TABLE IF NOT EXISTS kot_counters (
+                BranchId TEXT NOT NULL,
+                BusinessDate TEXT NOT NULL,
+                LastNumber INTEGER NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL,
+                PRIMARY KEY (BranchId, BusinessDate)
+            );
+
+            CREATE TABLE IF NOT EXISTS inventory_reservations (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                OrderItemId TEXT NOT NULL,
+                KitchenTicketItemId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                CreatedByUserId INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                ReservedAt TEXT NOT NULL,
+                CommittedAt TEXT NULL,
+                ReleasedAt TEXT NULL,
+                ReleaseReason TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_reservations_KitchenTicketItemId
+                ON inventory_reservations (KitchenTicketItemId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservations_BranchId_Status
+                ON inventory_reservations (BranchId, Status);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservations_OrderId
+                ON inventory_reservations (OrderId);
+
+            CREATE TABLE IF NOT EXISTS inventory_reservation_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                InventoryReservationId TEXT NOT NULL,
+                RecipeId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                QuantityBase TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_reservation_lines_Reservation_Item
+                ON inventory_reservation_lines (InventoryReservationId, InventoryItemId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservation_lines_InventoryItemId
+                ON inventory_reservation_lines (InventoryItemId);
+
+            CREATE INDEX IF NOT EXISTS IX_orders_BranchId_Status
+                ON orders (BranchId, Status);
+
+            DROP INDEX IF EXISTS IX_inventory_consumptions_OrderId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_consumptions_ProductionKey
+                ON inventory_consumptions (ProductionKey);
+            CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_OrderId
+                ON inventory_consumptions (OrderId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_KitchenTicketItemId
+                ON inventory_consumptions (KitchenTicketItemId);
+
+            DROP INDEX IF EXISTS IX_kitchen_ticket_items_OrderItemId;
+            CREATE INDEX IF NOT EXISTS IX_kitchen_ticket_items_OrderItemId
+                ON kitchen_ticket_items (OrderItemId);
+
+            DROP INDEX IF EXISTS IX_kitchen_tickets_OrderId_KitchenStationId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_KotRoundId_KitchenStationId
+                ON kitchen_tickets (KotRoundId, KitchenStationId);
+            CREATE INDEX IF NOT EXISTS IX_kitchen_tickets_OrderId_RoundNumber
+                ON kitchen_tickets (OrderId, RoundNumber);
+            """;
+        await schema.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task BackfillOrderServiceContextAsync(CancellationToken cancellationToken)
+    {
+        await using var db = Create();
+        var orders = await db.Orders
+            .Where(value => value.BranchId == null || value.BranchId == "")
+            .ToArrayAsync(cancellationToken);
+
+        foreach (var order in orders)
+        {
+            if (string.IsNullOrWhiteSpace(order.DiningTableId))
+            {
+                continue;
+            }
+
+            var table = await db.DiningTables.SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            if (table is null)
+            {
+                continue;
+            }
+
+            var area = await db.DiningAreas.SingleOrDefaultAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            if (area is null)
+            {
+                continue;
+            }
+
+            order.BranchId = area.BranchId;
+            if (string.IsNullOrWhiteSpace(order.ServiceType))
+            {
+                order.ServiceType = "dine_in";
+            }
+        }
+
+        if (orders.Length > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task BackfillLegacyKotRoundsAsync(CancellationToken cancellationToken)
+    {
+        await using var db = Create();
+
+        var legacyTickets = (await db.KitchenTickets
+                .Where(value => value.KotRoundId == null)
+                .ToArrayAsync(cancellationToken))
+            .OrderBy(value => value.QueuedAt)
+            .ToArray();
+
+        if (legacyTickets.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var group in legacyTickets.GroupBy(value => value.OrderId, StringComparer.Ordinal))
+        {
+            var order = await db.Orders.SingleOrDefaultAsync(
+                value => value.Id == group.Key,
+                cancellationToken);
+            if (order is null)
+            {
+                continue;
+            }
+
+            var table = await db.DiningTables.SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            if (table is null)
+            {
+                continue;
+            }
+
+            var area = await db.DiningAreas.SingleOrDefaultAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            if (area is null)
+            {
+                continue;
+            }
+
+            var sentAt = group.Min(value => value.QueuedAt);
+            var businessDate = DateOnly.FromDateTime(sentAt.LocalDateTime);
+            var counter = await db.KotCounters.SingleOrDefaultAsync(
+                value => value.BranchId == area.BranchId && value.BusinessDate == businessDate,
+                cancellationToken);
+
+            var existingMax = await db.KotRounds
+                .Where(value => value.BranchId == area.BranchId && value.BusinessDate == businessDate)
+                .Select(value => (int?)value.DisplayNumber)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            if (counter is null)
+            {
+                counter = new LocalKotCounter
+                {
+                    BranchId = area.BranchId,
+                    BusinessDate = businessDate,
+                    LastNumber = existingMax,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                db.KotCounters.Add(counter);
+            }
+            else if (counter.LastNumber < existingMax)
+            {
+                counter.LastNumber = existingMax;
+            }
+
+            counter.LastNumber += 1;
+            counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            var kotNumber = $"KOT-{counter.LastNumber:0000}";
+            var round = new LocalKotRound
+            {
+                Id = Guid.CreateVersion7().ToString("N"),
+                OrderId = order.Id,
+                BranchId = area.BranchId,
+                RoundNumber = 1,
+                DisplayNumber = counter.LastNumber,
+                BusinessDate = businessDate,
+                KotNumber = kotNumber,
+                MutationId = $"legacy:{order.Id}",
+                SubmittedByUserId = group.First().SubmittedByUserId,
+                QueueEnabled = true,
+                PreparingEnabled = true,
+                ExpoEnabled = false,
+                CoursesEnabled = false,
+                SentAt = sentAt,
+            };
+            db.KotRounds.Add(round);
+
+            var ticketIds = group.Select(value => value.Id).ToArray();
+            foreach (var ticket in group)
+            {
+                ticket.KotRoundId = round.Id;
+                ticket.RoundNumber = 1;
+                ticket.KotNumber ??= kotNumber;
+            }
+
+            var kitchenItems = await db.KitchenTicketItems
+                .Where(value => ticketIds.Contains(value.KitchenTicketId))
+                .ToArrayAsync(cancellationToken);
+            var orderItemIds = kitchenItems.Select(value => value.OrderItemId).Distinct().ToArray();
+            var orderItems = await db.OrderItems
+                .Where(value => orderItemIds.Contains(value.Id))
+                .ToArrayAsync(cancellationToken);
+
+            foreach (var orderItem in orderItems)
+            {
+                orderItem.KotRoundId ??= round.Id;
+                orderItem.RoundNumber ??= 1;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({table});";
+
+        await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task EnsureOrderingSchemaAsync(
@@ -224,7 +607,6 @@ public sealed class LocalDatabaseFactory
                 UpdatedAtUtc TEXT NOT NULL
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_TicketNumber ON kitchen_tickets (TicketNumber);
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_OrderId_KitchenStationId ON kitchen_tickets (OrderId, KitchenStationId);
             CREATE INDEX IF NOT EXISTS IX_kitchen_tickets_KitchenStationId_Status ON kitchen_tickets (KitchenStationId, Status);
 
             CREATE TABLE IF NOT EXISTS kitchen_ticket_items (
@@ -236,7 +618,6 @@ public sealed class LocalDatabaseFactory
                 Notes TEXT NULL,
                 Status TEXT NOT NULL
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_ticket_items_OrderItemId ON kitchen_ticket_items (OrderItemId);
             CREATE INDEX IF NOT EXISTS IX_kitchen_ticket_items_KitchenTicketId ON kitchen_ticket_items (KitchenTicketId);
 
             CREATE TABLE IF NOT EXISTS kitchen_printer_bindings (

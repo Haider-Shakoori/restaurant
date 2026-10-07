@@ -61,6 +61,7 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
         builder.Services.AddSingleton<LocalTerminalManagementService>();
         builder.Services.AddSingleton<LocalReportingService>();
         builder.Services.AddSingleton<LocalTerminalAuthenticator>();
+        builder.Services.AddSingleton<LocalRestaurantSettingsService>();
         builder.Services.AddSingleton<LocalKitchenService>();
         builder.Services.AddSingleton<LocalInventoryService>();
         builder.Services.AddSingleton<LocalCashierService>();

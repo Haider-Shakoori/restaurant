@@ -104,7 +104,7 @@ public sealed class LocalInventoryService
             });
 
         await db.SaveChangesAsync(cancellationToken);
-        return ItemSnapshot(item, null);
+        return ItemSnapshot(item, null, null);
     }
 
     public async Task<object[]> ItemsAsync(
@@ -124,6 +124,7 @@ public sealed class LocalInventoryService
             .ToArrayAsync(cancellationToken);
 
         Dictionary<string, LocalInventoryBalance> balances = [];
+        Dictionary<string, decimal> reserved = [];
 
         if (!string.IsNullOrWhiteSpace(branchId))
         {
@@ -131,25 +132,45 @@ public sealed class LocalInventoryService
                 .Where(value => value.BranchId == branchId)
                 .AsNoTracking()
                 .ToDictionaryAsync(value => value.InventoryItemId, StringComparer.Ordinal, cancellationToken);
+
+            var reservationRows = await (
+                from line in db.InventoryReservationLines.AsNoTracking()
+                join reservation in db.InventoryReservations.AsNoTracking()
+                    on line.InventoryReservationId equals reservation.Id
+                where reservation.BranchId == branchId && reservation.Status == "reserved"
+                select new { line.InventoryItemId, line.QuantityBase })
+                .ToArrayAsync(cancellationToken);
+
+            reserved = reservationRows
+                .GroupBy(value => value.InventoryItemId, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => Quantity(group.Sum(value => value.QuantityBase)),
+                    StringComparer.Ordinal);
         }
 
         return items
             .Select(item =>
             {
                 balances.TryGetValue(item.Id, out var balance);
+                reserved.TryGetValue(item.Id, out var reservedQuantity);
                 var quantity = balance?.Quantity ?? 0m;
+                var available = Quantity(quantity - reservedQuantity);
                 return new
                 {
                     item,
                     quantity,
+                    reserved = reservedQuantity,
+                    available,
                     low = !string.IsNullOrWhiteSpace(branchId) &&
-                          Quantity(quantity) <= Quantity(item.ReorderLevel),
+                          available <= Quantity(item.ReorderLevel),
                 };
             })
             .Where(value => !lowStockOnly || value.low)
             .Select(value => ItemSnapshot(
                 value.item,
-                string.IsNullOrWhiteSpace(branchId) ? null : value.quantity))
+                string.IsNullOrWhiteSpace(branchId) ? null : value.quantity,
+                string.IsNullOrWhiteSpace(branchId) ? null : value.reserved))
             .ToArray();
     }
 
@@ -522,114 +543,338 @@ public sealed class LocalInventoryService
         return result.ToArray();
     }
 
-    public async Task ConsumeOrderAsync(
+    public async Task<LocalInventoryReservation?> ReserveKitchenItemAsync(
         RestaurantDbContext db,
-        LocalOrder order,
+        LocalKitchenTicketItem kitchenItem,
         LocalTerminalPrincipal actor,
         CancellationToken cancellationToken)
     {
-        if (await db.InventoryConsumptions.AnyAsync(value => value.OrderId == order.Id, cancellationToken))
+        var existing = db.InventoryReservations.Local.FirstOrDefault(
+            value => value.KitchenTicketItemId == kitchenItem.Id)
+            ?? await db.InventoryReservations.SingleOrDefaultAsync(
+                value => value.KitchenTicketItemId == kitchenItem.Id,
+                cancellationToken);
+
+        if (existing is not null)
         {
-            return;
+            return existing;
         }
 
-        if (order.Status is not ("ready" or "served"))
+        var orderItem = await db.OrderItems.SingleAsync(
+            value => value.Id == kitchenItem.OrderItemId,
+            cancellationToken);
+        var ticket = await db.KitchenTickets.SingleAsync(
+            value => value.Id == kitchenItem.KitchenTicketId,
+            cancellationToken);
+        var order = await db.Orders.SingleAsync(
+            value => value.Id == ticket.OrderId,
+            cancellationToken);
+        var branchId = order.BranchId;
+        if (string.IsNullOrWhiteSpace(branchId))
         {
-            throw new LocalSyncConflictException(
-                "order_state_conflict",
-                "Inventory can only be consumed for a ready or served order.");
+            if (string.IsNullOrWhiteSpace(order.DiningTableId))
+            {
+                throw new LocalSyncConflictException(
+                    "dependency_missing",
+                    "Order branch context is unavailable for inventory reservation.");
+            }
+
+            var table = await db.DiningTables.SingleAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            var area = await db.DiningAreas.SingleAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            branchId = area.BranchId;
+            order.BranchId = branchId;
         }
 
-        var table = await db.DiningTables.SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var area = await db.DiningAreas.SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
-        var branchId = area.BranchId;
-        var orderItems = await db.OrderItems.Where(value => value.OrderId == order.Id).ToArrayAsync(cancellationToken);
-        var menuItemIds = orderItems.Select(value => value.MenuItemId).Distinct(StringComparer.Ordinal).ToArray();
-
-        var recipes = await db.Recipes
+        var recipe = await db.Recipes
             .Where(value =>
                 value.BranchId == branchId &&
-                value.IsActive &&
-                menuItemIds.Contains(value.MenuItemId))
-            .ToArrayAsync(cancellationToken);
-        var recipesByMenu = recipes.ToDictionary(value => value.MenuItemId, StringComparer.Ordinal);
+                value.MenuItemId == orderItem.MenuItemId &&
+                value.IsActive)
+            .OrderByDescending(value => value.Version)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        var consumption = new LocalInventoryConsumption
+        if (recipe is null)
+        {
+            return null;
+        }
+
+        var components = await db.RecipeItems
+            .Where(value => value.RecipeId == recipe.Id)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
+        if (components.Length == 0)
+        {
+            return null;
+        }
+
+        await EnforceNegativeStockPolicyAsync(
+            db,
+            branchId,
+            components.Select(component => new StockRequirement(
+                component.InventoryItemId,
+                Quantity(component.QuantityBase * kitchenItem.Quantity))),
+            actor,
+            "reservation",
+            kitchenItem.Id,
+            cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        var reservation = new LocalInventoryReservation
         {
             Id = Guid.CreateVersion7().ToString("N"),
             OrderId = order.Id,
+            OrderItemId = orderItem.Id,
+            KitchenTicketItemId = kitchenItem.Id,
             BranchId = branchId,
-            ConsumedByUserId = actor.UserId,
-            ConsumedAt = DateTimeOffset.UtcNow,
+            CreatedByUserId = actor.UserId,
+            Status = "reserved",
+            ReservedAt = now,
         };
-        db.InventoryConsumptions.Add(consumption);
+        db.InventoryReservations.Add(reservation);
 
-        decimal totalCost = 0m;
-
-        foreach (var orderItem in orderItems)
+        foreach (var component in components)
         {
-            if (!recipesByMenu.TryGetValue(orderItem.MenuItemId, out var recipe))
+            db.InventoryReservationLines.Add(new LocalInventoryReservationLine
             {
-                continue;
-            }
-
-            var components = await db.RecipeItems
-                .Where(value => value.RecipeId == recipe.Id)
-                .ToArrayAsync(cancellationToken);
-
-            foreach (var component in components)
-            {
-                var item = await RequireInventoryItemAsync(db, component.InventoryItemId, cancellationToken);
-                var quantity = Quantity(component.QuantityBase * orderItem.Quantity);
-                var valuation = await GetOrCreateValuationAsync(db, branchId, item.Id, cancellationToken);
-                var cost = Money(valuation.AverageUnitCost * quantity);
-                totalCost = Money(totalCost + cost);
-
-                valuation.Quantity = Quantity(valuation.Quantity - quantity);
-                valuation.Value = Money(valuation.Value - cost);
-
-                var movement = await RecordMovementAsync(
-                    db,
-                    branchId,
-                    item,
-                    actor,
-                    "consumption",
-                    -quantity,
-                    "order",
-                    order.Id,
-                    $"order-consumption:{order.Id}:{orderItem.Id}:{item.Id}",
-                    orderItem.Id,
-                    null,
-                    "Automatic recipe consumption for served order.",
-                    cancellationToken);
-
-                db.InventoryConsumptionLines.Add(new LocalInventoryConsumptionLine
-                {
-                    Id = Guid.CreateVersion7().ToString("N"),
-                    InventoryConsumptionId = consumption.Id,
-                    OrderItemId = orderItem.Id,
-                    RecipeId = recipe.Id,
-                    InventoryItemId = item.Id,
-                    StockMovementId = movement.Id,
-                    QuantityBase = quantity,
-                });
-            }
+                Id = Guid.CreateVersion7().ToString("N"),
+                InventoryReservationId = reservation.Id,
+                RecipeId = recipe.Id,
+                InventoryItemId = component.InventoryItemId,
+                QuantityBase = Quantity(component.QuantityBase * kitchenItem.Quantity),
+            });
         }
 
         LocalOperationsControlService.AddAudit(
             db,
             actor,
             "inventory",
-            "inventory.order_consumed",
+            "inventory.production_reserved",
             branchId,
+            "inventory_reservation",
+            reservation.Id,
+            new
+            {
+                order_id = order.Id,
+                order_item_id = orderItem.Id,
+                kitchen_ticket_item_id = kitchenItem.Id,
+                quantity = kitchenItem.Quantity,
+            });
+
+        await db.SaveChangesAsync(cancellationToken);
+        return reservation;
+    }
+
+    public async Task<LocalInventoryConsumption?> CommitKitchenItemAsync(
+        RestaurantDbContext db,
+        LocalKitchenTicketItem kitchenItem,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        var existingConsumption = db.InventoryConsumptions.Local.FirstOrDefault(
+            value => value.ProductionKey == kitchenItem.Id)
+            ?? await db.InventoryConsumptions.SingleOrDefaultAsync(
+                value => value.ProductionKey == kitchenItem.Id,
+                cancellationToken);
+
+        if (existingConsumption is not null)
+        {
+            return existingConsumption;
+        }
+
+        var reservation = await ReserveKitchenItemAsync(db, kitchenItem, actor, cancellationToken);
+        if (reservation is null)
+        {
+            return null;
+        }
+
+        if (reservation.Status == "released")
+        {
+            throw new LocalSyncConflictException(
+                "inventory_reservation_released",
+                "This production reservation was already released.");
+        }
+
+        var lines = await db.InventoryReservationLines
+            .Where(value => value.InventoryReservationId == reservation.Id)
+            .ToArrayAsync(cancellationToken);
+        if (lines.Length == 0)
+        {
+            return null;
+        }
+
+        await EnforceNegativeStockPolicyAsync(
+            db,
+            reservation.BranchId,
+            lines.Select(line => new StockRequirement(
+                line.InventoryItemId,
+                Quantity(line.QuantityBase))),
+            actor,
+            "consumption",
+            kitchenItem.Id,
+            cancellationToken,
+            includeCurrentReservation: false);
+
+        var consumption = new LocalInventoryConsumption
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            OrderId = reservation.OrderId,
+            BranchId = reservation.BranchId,
+            ProductionKey = kitchenItem.Id,
+            OrderItemId = reservation.OrderItemId,
+            KitchenTicketItemId = kitchenItem.Id,
+            InventoryReservationId = reservation.Id,
+            ConsumedByUserId = actor.UserId,
+            ConsumedAt = DateTimeOffset.UtcNow,
+        };
+        db.InventoryConsumptions.Add(consumption);
+
+        decimal totalCost = 0m;
+        foreach (var line in lines)
+        {
+            var item = await RequireInventoryItemAsync(db, line.InventoryItemId, cancellationToken);
+            var quantity = Quantity(line.QuantityBase);
+            var valuation = await GetOrCreateValuationAsync(
+                db,
+                reservation.BranchId,
+                item.Id,
+                cancellationToken);
+            var cost = Money(valuation.AverageUnitCost * quantity);
+            totalCost = Money(totalCost + cost);
+
+            valuation.Quantity = Quantity(valuation.Quantity - quantity);
+            valuation.Value = Money(valuation.Value - cost);
+
+            var movement = await RecordMovementAsync(
+                db,
+                reservation.BranchId,
+                item,
+                actor,
+                "consumption",
+                -quantity,
+                "kitchen_production",
+                kitchenItem.Id,
+                $"production-consumption:{kitchenItem.Id}:{item.Id}",
+                reservation.OrderItemId,
+                null,
+                "Recipe consumption committed for kitchen production.",
+                cancellationToken);
+
+            db.InventoryConsumptionLines.Add(new LocalInventoryConsumptionLine
+            {
+                Id = Guid.CreateVersion7().ToString("N"),
+                InventoryConsumptionId = consumption.Id,
+                OrderItemId = reservation.OrderItemId,
+                RecipeId = line.RecipeId,
+                InventoryItemId = item.Id,
+                StockMovementId = movement.Id,
+                QuantityBase = quantity,
+            });
+        }
+
+        reservation.Status = "committed";
+        reservation.CommittedAt = DateTimeOffset.UtcNow;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "inventory",
+            "inventory.production_consumed",
+            reservation.BranchId,
             "inventory_consumption",
             consumption.Id,
             new
             {
                 consumption_id = consumption.Id,
-                order_id = order.Id,
+                order_id = reservation.OrderId,
+                order_item_id = reservation.OrderItemId,
+                kitchen_ticket_item_id = kitchenItem.Id,
+                inventory_reservation_id = reservation.Id,
                 estimated_cost = totalCost,
             });
+
+        await db.SaveChangesAsync(cancellationToken);
+        return consumption;
+    }
+
+    public async Task ReleaseKitchenItemReservationAsync(
+        RestaurantDbContext db,
+        LocalKitchenTicketItem kitchenItem,
+        LocalTerminalPrincipal actor,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var reservation = db.InventoryReservations.Local.FirstOrDefault(
+            value => value.KitchenTicketItemId == kitchenItem.Id)
+            ?? await db.InventoryReservations.SingleOrDefaultAsync(
+                value => value.KitchenTicketItemId == kitchenItem.Id,
+                cancellationToken);
+
+        if (reservation is null || reservation.Status == "released")
+        {
+            return;
+        }
+
+        if (reservation.Status == "committed")
+        {
+            throw new LocalSyncConflictException(
+                "inventory_already_consumed",
+                "Committed production inventory cannot be returned by releasing a reservation.");
+        }
+
+        reservation.Status = "released";
+        reservation.ReleasedAt = DateTimeOffset.UtcNow;
+        reservation.ReleaseReason = EmptyToNull(reason);
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "inventory",
+            "inventory.reservation_released",
+            reservation.BranchId,
+            "inventory_reservation",
+            reservation.Id,
+            new
+            {
+                order_id = reservation.OrderId,
+                order_item_id = reservation.OrderItemId,
+                kitchen_ticket_item_id = kitchenItem.Id,
+                reason,
+            });
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task ConsumeOrderAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        if (order.Status is not ("ready" or "served"))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Inventory can only be finalized for a ready or served order.");
+        }
+
+        var ticketIds = await db.KitchenTickets
+            .Where(value => value.OrderId == order.Id)
+            .Select(value => value.Id)
+            .ToArrayAsync(cancellationToken);
+        var productionItems = await db.KitchenTicketItems
+            .Where(value =>
+                ticketIds.Contains(value.KitchenTicketId) &&
+                (value.Status == "ready" || value.Status == "completed"))
+            .ToArrayAsync(cancellationToken);
+
+        foreach (var kitchenItem in productionItems)
+        {
+            await CommitKitchenItemAsync(db, kitchenItem, actor, cancellationToken);
+        }
     }
 
     public async Task<object> CreatePurchaseOrderAsync(
@@ -1037,6 +1282,93 @@ public sealed class LocalInventoryService
         return movement;
     }
 
+    private static async Task EnforceNegativeStockPolicyAsync(
+        RestaurantDbContext db,
+        string branchId,
+        IEnumerable<StockRequirement> requirements,
+        LocalTerminalPrincipal actor,
+        string stage,
+        string kitchenTicketItemId,
+        CancellationToken cancellationToken,
+        bool includeCurrentReservation = true)
+    {
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var policy = settings.NegativeStockPolicy;
+        var grouped = requirements
+            .GroupBy(value => value.InventoryItemId, StringComparer.Ordinal)
+            .Select(group => new StockRequirement(
+                group.Key,
+                Quantity(group.Sum(value => value.Quantity))))
+            .ToArray();
+
+        foreach (var requirement in grouped)
+        {
+            var item = await RequireInventoryItemAsync(db, requirement.InventoryItemId, cancellationToken);
+            var balance = db.InventoryBalances.Local.FirstOrDefault(
+                value => value.BranchId == branchId && value.InventoryItemId == item.Id)
+                ?? await db.InventoryBalances.AsNoTracking().SingleOrDefaultAsync(
+                    value => value.BranchId == branchId && value.InventoryItemId == item.Id,
+                    cancellationToken);
+
+            var onHand = Quantity(balance?.Quantity ?? 0m);
+            decimal alreadyReserved = 0m;
+
+            if (includeCurrentReservation)
+            {
+                var reservationRows = await (
+                    from line in db.InventoryReservationLines.AsNoTracking()
+                    join reservation in db.InventoryReservations.AsNoTracking()
+                        on line.InventoryReservationId equals reservation.Id
+                    where reservation.BranchId == branchId &&
+                          reservation.Status == "reserved" &&
+                          line.InventoryItemId == item.Id
+                    select line.QuantityBase)
+                    .ToArrayAsync(cancellationToken);
+
+                alreadyReserved = Quantity(reservationRows.Sum());
+            }
+
+            var projected = Quantity(onHand - alreadyReserved - requirement.Quantity);
+            if (projected >= 0m || policy == "allow")
+            {
+                continue;
+            }
+
+            var details = new
+            {
+                branch_id = branchId,
+                inventory_item_id = item.Id,
+                inventory_item_name = item.Name,
+                kitchen_ticket_item_id = kitchenTicketItemId,
+                stage,
+                negative_stock_policy = policy,
+                on_hand = onHand,
+                reserved = alreadyReserved,
+                required = requirement.Quantity,
+                projected_available = projected,
+            };
+
+            if (policy == "block")
+            {
+                throw new LocalSyncConflictException(
+                    "negative_stock_blocked",
+                    $"{item.Name} does not have enough available stock for kitchen {stage}.");
+            }
+
+            LocalOperationsControlService.AddAudit(
+                db,
+                actor,
+                "inventory",
+                "inventory.negative_stock_warning",
+                branchId,
+                "inventory_item",
+                item.Id,
+                details);
+        }
+    }
+
+    private sealed record StockRequirement(string InventoryItemId, decimal Quantity);
+
     private static async Task<LocalInventoryValuation> GetOrCreateValuationAsync(
         RestaurantDbContext db,
         string branchId,
@@ -1087,7 +1419,10 @@ public sealed class LocalInventoryService
         }
     }
 
-    private static object ItemSnapshot(LocalInventoryItem item, decimal? quantity) => new
+    private static object ItemSnapshot(
+        LocalInventoryItem item,
+        decimal? quantity,
+        decimal? reservedQuantity) => new
     {
         id = item.Id,
         sku = item.Sku,
@@ -1097,8 +1432,13 @@ public sealed class LocalInventoryService
         purchase_to_base_factor = item.PurchaseToBaseFactor.ToString("0.######"),
         reorder_level = item.ReorderLevel.ToString("0.0000"),
         quantity = quantity?.ToString("0.0000"),
+        on_hand = quantity?.ToString("0.0000"),
+        reserved = reservedQuantity?.ToString("0.0000"),
+        available = quantity.HasValue
+            ? Quantity(quantity.Value - (reservedQuantity ?? 0m)).ToString("0.0000")
+            : null,
         low_stock = quantity.HasValue
-            ? Quantity(quantity.Value) <= Quantity(item.ReorderLevel)
+            ? Quantity(quantity.Value - (reservedQuantity ?? 0m)) <= Quantity(item.ReorderLevel)
             : (bool?)null,
         is_active = item.IsActive,
     };
