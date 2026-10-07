@@ -26,7 +26,8 @@ class LicenseService
     /**
      * @return array{license: LicenseKey, raw_key: string}
      */
-    public function generate(Business $business, AdminUser $admin): array {
+    public function generate(Business $business, AdminUser $admin): array
+    {
         $business->refresh();
 
         $access = $this->subscriptions->access($business);
@@ -77,7 +78,8 @@ class LicenseService
         );
     }
 
-    public function revoke(LicenseKey $license, AdminUser $admin, string $reason = 'License revoked.'): void {
+    public function revoke(LicenseKey $license, AdminUser $admin, string $reason = 'License revoked.'): void
+    {
         DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($license, $admin, $reason): void {
                 if ($license->status === LicenseStatus::Revoked) {
@@ -376,7 +378,8 @@ class LicenseService
         return $this->issueLease($device->fresh(['licenseKey', 'business']));
     }
 
-    public function revokeDevice(DeviceActivation $device, AdminUser $admin): void {
+    public function revokeDevice(DeviceActivation $device, AdminUser $admin): void
+    {
         if ($device->status === DeviceStatus::Revoked) {
             return;
         }
@@ -432,7 +435,8 @@ class LicenseService
     /**
      * @return array<string, mixed>
      */
-    public function issueLease(DeviceActivation $device): array {
+    public function issueLease(DeviceActivation $device): array
+    {
         $business = $device->business()->firstOrFail();
         $access = $this->subscriptions->access($business);
 
@@ -570,7 +574,8 @@ class LicenseService
         return $default > 0 ? $default : null;
     }
 
-    private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void {
+    private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void
+    {
         $licenses = $business->licenseKeys()
             ->where('status', LicenseStatus::Active)
             ->get();
