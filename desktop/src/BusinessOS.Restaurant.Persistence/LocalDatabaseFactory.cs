@@ -51,6 +51,7 @@ public sealed class LocalDatabaseFactory
         await EnsureOrderingSchemaAsync(db, cancellationToken);
         await EnsureMenuImageColumnAsync(cancellationToken);
         await EnsureKotRealignmentSchemaAsync(cancellationToken);
+        await BackfillOrderServiceContextAsync(cancellationToken);
         await BackfillLegacyKotRoundsAsync(cancellationToken);
     }
 
@@ -131,6 +132,9 @@ public sealed class LocalDatabaseFactory
             ("kot_rounds", "BranchId", "TEXT NULL"),
             ("kot_rounds", "DisplayNumber", "INTEGER NOT NULL DEFAULT 0"),
             ("kot_rounds", "BusinessDate", "TEXT NULL"),
+            ("orders", "BranchId", "TEXT NULL"),
+            ("orders", "ServiceType", "TEXT NOT NULL DEFAULT 'dine_in'"),
+            ("orders", "ServiceReference", "TEXT NULL"),
         };
 
         foreach (var column in columns)
@@ -224,6 +228,9 @@ public sealed class LocalDatabaseFactory
             CREATE INDEX IF NOT EXISTS IX_inventory_reservation_lines_InventoryItemId
                 ON inventory_reservation_lines (InventoryItemId);
 
+            CREATE INDEX IF NOT EXISTS IX_orders_BranchId_Status
+                ON orders (BranchId, Status);
+
             DROP INDEX IF EXISTS IX_inventory_consumptions_OrderId;
             CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_consumptions_ProductionKey
                 ON inventory_consumptions (ProductionKey);
@@ -239,6 +246,49 @@ public sealed class LocalDatabaseFactory
                 ON kitchen_tickets (OrderId, RoundNumber);
             """;
         await schema.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task BackfillOrderServiceContextAsync(CancellationToken cancellationToken)
+    {
+        await using var db = Create();
+        var orders = await db.Orders
+            .Where(value => value.BranchId == null || value.BranchId == "")
+            .ToArrayAsync(cancellationToken);
+
+        foreach (var order in orders)
+        {
+            if (string.IsNullOrWhiteSpace(order.DiningTableId))
+            {
+                continue;
+            }
+
+            var table = await db.DiningTables.SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            if (table is null)
+            {
+                continue;
+            }
+
+            var area = await db.DiningAreas.SingleOrDefaultAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            if (area is null)
+            {
+                continue;
+            }
+
+            order.BranchId = area.BranchId;
+            if (string.IsNullOrWhiteSpace(order.ServiceType))
+            {
+                order.ServiceType = "dine_in";
+            }
+        }
+
+        if (orders.Length > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private async Task BackfillLegacyKotRoundsAsync(CancellationToken cancellationToken)
