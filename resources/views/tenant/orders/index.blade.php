@@ -31,6 +31,7 @@
                 $item = $menuOptions->firstWhere('id', $line['menu_item_id'] ?? null);
 
                 return [
+                    'client_line_id' => $line['client_line_id'] ?? '',
                     'menu_item_id' => $line['menu_item_id'] ?? '',
                     'name' => $item['name'] ?? 'Menu item',
                     'price' => (float) ($item['price'] ?? 0),
@@ -48,6 +49,10 @@
             })
             ->values();
 
+        $activeOrderOptions = $orders
+            ->whereIn('status', ['draft', 'submitted', 'preparing', 'ready', 'served'])
+            ->values();
+
         $openTakeOrder = $errors->has('dining_table_id')
             || $errors->has('guest_count')
             || $errors->has('lines')
@@ -58,6 +63,7 @@
         x-data="{
             showTakeOrder: @js($openTakeOrder),
             serviceType: @js(old('service_type', 'dine_in')),
+            existingOrderId: @js(old('existing_order_id', '')),
             items: @js($menuOptions),
             lines: @js($oldLines),
             addItem(item) {
@@ -69,6 +75,9 @@
                 }
 
                 this.lines.push({
+                    client_line_id: (window.crypto && window.crypto.randomUUID)
+                        ? window.crypto.randomUUID()
+                        : String(Date.now()) + '-' + Math.random().toString(16).slice(2),
                     menu_item_id: item.id,
                     name: item.name,
                     price: Number(item.price),
@@ -156,8 +165,31 @@
             <div x-show="showTakeOrder" x-cloak class="border-b border-slate-200 bg-slate-50/70 p-5 sm:p-6">
                 <form method="POST" action="/orders/take" class="space-y-6">
                     @csrf
+                    <input type="hidden" name="client_mutation_id" value="{{ old('client_mutation_id', (string) \Illuminate\Support\Str::uuid()) }}">
 
-                    <div class="grid gap-4 lg:grid-cols-4">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                        <label>
+                            <span class="text-sm font-black text-slate-800">Order target</span>
+                            <select name="existing_order_id" x-model="existingOrderId"
+                                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                                <option value="">Create a new order</option>
+                                @foreach ($activeOrderOptions as $activeOrder)
+                                    <option value="{{ $activeOrder->id }}">
+                                        Add another KOT to
+                                        {{ $activeOrder->table?->name
+                                            ?? $activeOrder->service_reference
+                                            ?? ucfirst(str_replace('_', ' ', $activeOrder->service_type ?? 'order')) }}
+                                        · {{ ucfirst($activeOrder->status) }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="mt-2 text-xs text-slate-500">
+                                Select an active order to add only new items and send a later KOT round without resending earlier production.
+                            </p>
+                        </label>
+                    </div>
+
+                    <div x-show="!existingOrderId" class="grid gap-4 lg:grid-cols-4">
                         <label>
                             <span class="text-sm font-bold text-slate-700">Service type</span>
                             <select x-model="serviceType" name="service_type" required
@@ -263,6 +295,7 @@
 
                                 <template x-for="(line, index) in lines" :key="line.menu_item_id">
                                     <div class="rounded-xl border border-slate-200 p-3">
+                                        <input type="hidden" :name="'lines[' + index + '][client_line_id]'" :value="line.client_line_id">
                                         <input type="hidden" :name="'lines[' + index + '][menu_item_id]'" :value="line.menu_item_id">
 
                                         <div class="flex items-start justify-between gap-3">
