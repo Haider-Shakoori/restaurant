@@ -29,6 +29,12 @@ class WaiterPairingService
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
         $expiresAt = now()->addMinutes(max(1, (int) config('license.pairing_token_minutes', 5)));
 
+        $desktopKey = $this->desktopKey((string) $desktop->id);
+        $previousToken = Cache::pull($desktopKey);
+        if (is_string($previousToken) && $previousToken !== '') {
+            Cache::forget($this->cacheKey($previousToken));
+        }
+
         Cache::put(
             $this->cacheKey($token),
             [
@@ -40,6 +46,8 @@ class WaiterPairingService
             ],
             $expiresAt,
         );
+
+        Cache::put($desktopKey, $token, $expiresAt);
 
         return [
             'token' => $token,
@@ -80,5 +88,10 @@ class WaiterPairingService
     private function cacheKey(string $token): string
     {
         return self::CACHE_PREFIX.hash('sha256', trim($token));
+    }
+
+    private function desktopKey(string $deviceId): string
+    {
+        return self::CACHE_PREFIX.'desktop:'.hash('sha256', $deviceId);
     }
 }
