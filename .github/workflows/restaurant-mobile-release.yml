@@ -40,6 +40,12 @@ jobs:
       - name: Configure Android permissions and LAN HTTP
         run: dart run tool/configure_android.dart
 
+      - name: Generate premium Restaurant launcher icon
+        working-directory: .
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 tools/generate_restaurant_icons.py --repo-root . --mobile
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -83,6 +89,12 @@ jobs:
 
       - name: Configure iOS QR camera disclosure
         run: dart run tool/configure_ios.dart
+
+      - name: Generate premium Restaurant launcher icon
+        working-directory: .
+        run: |
+          python3 -m pip install --disable-pip-version-check pillow
+          python3 tools/generate_restaurant_icons.py --repo-root . --mobile
 
       - name: Install dependencies
         run: flutter pub get
