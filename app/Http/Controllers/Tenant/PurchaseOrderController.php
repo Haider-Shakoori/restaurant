@@ -11,6 +11,7 @@ use App\Models\Supplier;
 use App\Models\TenantUser;
 use App\Services\Tenant\ProcurementService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 
 class PurchaseOrderController extends Controller
@@ -38,7 +39,7 @@ class PurchaseOrderController extends Controller
     public function store(
         StorePurchaseOrderRequest $request,
         ProcurementService $procurement,
-    ): JsonResponse {
+    ): JsonResponse|RedirectResponse {
         /** @var TenantUser $user */
         $user = $request->user();
 
@@ -49,13 +50,20 @@ class PurchaseOrderController extends Controller
             $request->string('supplier_id')->toString()
         );
 
+        $purchaseOrder = $procurement->createPurchaseOrder(
+            $branch,
+            $supplier,
+            $user,
+            $request->validated(),
+        );
+
+        if (! $request->expectsJson()) {
+            return redirect('/purchasing')
+                ->with('status', 'Purchase order '.$purchaseOrder->po_number.' created successfully.');
+        }
+
         return response()->json([
-            'data' => $procurement->createPurchaseOrder(
-                $branch,
-                $supplier,
-                $user,
-                $request->validated(),
-            ),
+            'data' => $purchaseOrder,
         ], 201);
     }
 
