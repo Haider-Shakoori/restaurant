@@ -29,6 +29,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   int _pending = 0;
   int _conflicts = 0;
   String? _syncError;
+  String? _connectionStatus;
   SessionCredentials? _session;
   bool _syncing = false;
 
@@ -46,6 +47,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       db.pendingCount(),
       db.conflictCount(),
       db.systemState('last_sync_error'),
+      db.systemState('active_connection'),
       widget.dependencies.credentials.readSession(),
     ]);
 
@@ -63,7 +65,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       _pending = values[2]! as int;
       _conflicts = values[3]! as int;
       _syncError = values[4] as String?;
-      _session = values[5] as SessionCredentials?;
+      _connectionStatus = values[5] as String?;
+      _session = values[6] as SessionCredentials?;
     });
   }
 
@@ -186,18 +189,26 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                 if (session != null)
                   Chip(
                     avatar: Icon(
-                      session.activeChannel == ConnectionChannel.local
-                          ? Icons.lan_outlined
-                          : Icons.cloud_outlined,
+                      _syncing
+                          ? Icons.sync
+                          : _connectionStatus == 'offline'
+                              ? Icons.cloud_off_outlined
+                              : session.activeChannel == ConnectionChannel.local
+                                  ? Icons.lan_outlined
+                                  : Icons.cloud_outlined,
                       size: 18,
                     ),
                     label: Text(
-                      (session.connectionMode == ConnectionMode.automatic
-                              ? s.automatic + ' · '
-                              : '') +
-                          (session.activeChannel == ConnectionChannel.local
-                              ? s.connectedLocal
-                              : s.connectedCloud),
+                      _syncing
+                          ? 'Syncing'
+                          : _connectionStatus == 'offline'
+                              ? 'Offline · queued locally'
+                              : (session.connectionMode == ConnectionMode.automatic
+                                      ? s.automatic + ' · '
+                                      : '') +
+                                  (session.activeChannel == ConnectionChannel.local
+                                      ? s.connectedLocal
+                                      : s.connectedCloud),
                     ),
                   ),
                 Chip(
