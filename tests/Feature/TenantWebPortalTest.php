@@ -165,7 +165,7 @@ class TenantWebPortalTest extends TestCase
         $this->get("http://{$domain}/purchasing")
             ->assertOk()
             ->assertSee('Receive PO')
-            ->assertSee('Receive & Add to Inventory');
+            ->assertSee('Receive & Add to Inventory', false);
 
         $this->post("http://{$domain}/purchasing/orders/{$purchaseOrderId}/receive", [
             'client_receipt_id' => 'WEB-GRN-001',
