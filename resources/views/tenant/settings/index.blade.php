@@ -67,6 +67,99 @@
         </div>
     </section>
 
+    <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+                <h2 class="font-black">Kitchen workflow</h2>
+                <p class="mt-1 max-w-3xl text-sm text-slate-500">
+                    Queue and Preparing are independent switches. New KOT rounds use the current settings; historical kitchen work remains unchanged.
+                </p>
+            </div>
+            <span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Shared with Web, Mobile & Desktop</span>
+        </div>
+
+        <form method="POST" action="/settings/restaurant" class="mt-5 space-y-5">
+            @csrf
+            <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                @foreach ([
+                    'kitchen_queue_enabled' => ['Queue', 'New KOT production may enter QUEUED before becoming production-active.'],
+                    'preparing_stage_enabled' => ['Preparing', 'Kitchen staff explicitly start production before marking it ready.'],
+                    'expo_enabled' => ['Expo', 'Aggregate station readiness before food is served.'],
+                    'courses_enabled' => ['Courses', 'Allow held/fired starter, main and dessert sequencing.'],
+                ] as $key => [$label, $help])
+                    <label class="rounded-xl border border-slate-200 p-4">
+                        <input type="hidden" name="{{ $key }}" value="0">
+                        <div class="flex items-start gap-3">
+                            <input
+                                type="checkbox"
+                                name="{{ $key }}"
+                                value="1"
+                                @checked(old($key, $restaurantSettings[$key]) == true)
+                                class="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            >
+                            <div>
+                                <p class="font-black text-slate-900">{{ $label }}</p>
+                                <p class="mt-1 text-xs leading-5 text-slate-500">{{ $help }}</p>
+                            </div>
+                        </div>
+                    </label>
+                @endforeach
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-4">
+                <label>
+                    <span class="text-sm font-bold text-slate-700">Kitchen warning (minutes)</span>
+                    <input name="kitchen_warning_minutes" type="number" min="1" max="240" required
+                           value="{{ old('kitchen_warning_minutes', $restaurantSettings['kitchen_warning_minutes']) }}"
+                           class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+                <label>
+                    <span class="text-sm font-bold text-slate-700">Kitchen late (minutes)</span>
+                    <input name="kitchen_late_minutes" type="number" min="1" max="480" required
+                           value="{{ old('kitchen_late_minutes', $restaurantSettings['kitchen_late_minutes']) }}"
+                           class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
+                </label>
+                <label>
+                    <span class="text-sm font-bold text-slate-700">Negative stock policy</span>
+                    <select name="negative_stock_policy" class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
+                        @foreach (['block' => 'Block', 'warn' => 'Warn', 'allow' => 'Allow'] as $value => $label)
+                            <option value="{{ $value }}" @selected(old('negative_stock_policy', $restaurantSettings['negative_stock_policy']) === $value)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </label>
+                <div class="space-y-3">
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 p-3">
+                        <input type="hidden" name="kot_sound_enabled" value="0">
+                        <input type="checkbox" name="kot_sound_enabled" value="1" @checked(old('kot_sound_enabled', $restaurantSettings['kot_sound_enabled']) == true)
+                               class="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                        <span><span class="block text-sm font-black">KOT sound</span><span class="text-xs text-slate-500">Allow KDS clients to play new-KOT alerts.</span></span>
+                    </label>
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 p-3">
+                        <input type="hidden" name="require_manager_approval_post_kot_void" value="0">
+                        <input type="checkbox" name="require_manager_approval_post_kot_void" value="1" @checked(old('require_manager_approval_post_kot_void', $restaurantSettings['require_manager_approval_post_kot_void']) == true)
+                               class="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500">
+                        <span><span class="block text-sm font-black">Manager approval for post-KOT void</span><span class="text-xs text-slate-500">Require approval before dispatched production is voided.</span></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+                <strong>Current mode:</strong>
+                @if ($restaurantSettings['kitchen_queue_enabled'] && $restaurantSettings['preparing_stage_enabled'])
+                    Queue → Preparing → Ready
+                @elseif ($restaurantSettings['kitchen_queue_enabled'])
+                    Queue → Ready
+                @elseif ($restaurantSettings['preparing_stage_enabled'])
+                    Active → Preparing → Ready
+                @else
+                    Active → Ready
+                @endif
+            </div>
+
+            <button class="rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white">Save kitchen workflow</button>
+        </form>
+    </section>
+
     <div class="grid gap-6 xl:grid-cols-3">
         <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 class="font-black">Add branch</h2>
