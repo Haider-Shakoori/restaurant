@@ -5,6 +5,7 @@ namespace App\Services\Tenant;
 use App\Models\InventoryBalance;
 use App\Models\InventoryConsumption;
 use App\Models\InventoryItem;
+use App\Models\KitchenTicket;
 use App\Models\Order;
 use App\Models\Recipe;
 use App\Models\RestaurantBranch;
@@ -157,16 +158,12 @@ class InventoryService
     public function consumeOrder(Order $order, TenantUser $actor): InventoryConsumption
     {
         return DB::connection('tenant')->transaction(function () use ($order, $actor): InventoryConsumption {
-            $existing = InventoryConsumption::query()
-                ->where('order_id', $order->getKey())
-                ->first();
-
-            if ($existing) {
-                return $existing->load(['lines.stockMovement.item']);
-            }
-
             $order = Order::query()
-                ->with(['table.diningArea.branch', 'items'])
+                ->with([
+                    'table.diningArea.branch',
+                    'items',
+                    'kitchenTickets.items.orderItem',
+                ])
                 ->lockForUpdate()
                 ->findOrFail($order->getKey());
 
@@ -187,17 +184,26 @@ class InventoryService
                 ->get()
                 ->keyBy('menu_item_id');
 
-            $consumption = InventoryConsumption::query()->create([
-                'order_id' => $order->id,
-                'branch_id' => $branch->id,
-                'consumed_by_user_id' => $actor->getKey(),
-                'consumed_at' => now(),
-            ]);
+            $consumption = InventoryConsumption::query()->firstOrCreate(
+                ['order_id' => $order->id],
+                [
+                    'branch_id' => $branch->id,
+                    'consumed_by_user_id' => $actor->getKey(),
+                    'consumed_at' => now(),
+                ],
+            );
 
-            $costMinor = 0;
+            $ticketItems = $order->kitchenTickets
+                ->flatMap->items
+                ->filter(fn ($ticketItem): bool => in_array($ticketItem->status, [
+                    KitchenTicket::STATUS_READY,
+                    KitchenTicket::STATUS_COMPLETED,
+                ], true));
 
-            foreach ($order->items as $orderItem) {
-                if (! $orderItem->menu_item_id) {
+            foreach ($ticketItems as $ticketItem) {
+                $orderItem = $ticketItem->orderItem;
+
+                if (! $orderItem?->menu_item_id) {
                     continue;
                 }
 
@@ -207,10 +213,21 @@ class InventoryService
                     continue;
                 }
 
+                $ticketItemCostMinor = 0;
+
                 foreach ($recipe->items as $recipeItem) {
+                    $alreadyConsumed = $consumption->lines()
+                        ->where('kitchen_ticket_item_id', $ticketItem->id)
+                        ->where('inventory_item_id', $recipeItem->inventory_item_id)
+                        ->exists();
+
+                    if ($alreadyConsumed) {
+                        continue;
+                    }
+
                     $quantity = Quantity::multiply(
                         (string) $recipeItem->quantity_base,
-                        (string) $orderItem->quantity,
+                        (string) $ticketItem->quantity,
                     );
 
                     $ingredientCost = $this->valuation->consume(
@@ -218,7 +235,7 @@ class InventoryService
                         $recipeItem->inventoryItem,
                         $quantity,
                     );
-                    $costMinor += Money::toMinor($ingredientCost);
+                    $ticketItemCostMinor += Money::toMinor($ingredientCost);
 
                     $movement = $this->recordMovement(
                         $branch,
@@ -226,30 +243,54 @@ class InventoryService
                         $actor,
                         StockMovement::TYPE_CONSUMPTION,
                         Quantity::subtract('0', $quantity),
-                        'order',
-                        $order->id,
-                        'order-consumption:'.$order->id.':'.$orderItem->id.':'.$recipeItem->inventory_item_id,
+                        'kitchen_ticket_item',
+                        $ticketItem->id,
+                        'kot-consumption:'.$ticketItem->id.':'.$recipeItem->inventory_item_id,
                         $orderItem->id,
-                        notes: 'Automatic recipe consumption for served order.',
+                        notes: 'Automatic recipe consumption for prepared kitchen item.',
                     );
 
                     $consumption->lines()->create([
                         'order_item_id' => $orderItem->id,
+                        'kitchen_ticket_item_id' => $ticketItem->id,
                         'recipe_id' => $recipe->id,
                         'inventory_item_id' => $recipeItem->inventory_item_id,
                         'stock_movement_id' => $movement->id,
                         'quantity_base' => $quantity,
                     ]);
                 }
+
+                if ($ticketItemCostMinor > 0) {
+                    $cost = Money::fromMinor($ticketItemCostMinor);
+
+                    $this->accounting->post(
+                        $consumption->branch_id,
+                        $actor,
+                        'inventory_consumption',
+                        $consumption->id,
+                        'ticket_item',
+                        'Recipe consumption for KOT item '.$ticketItem->id,
+                        now()->format('Y-m-d'),
+                        [
+                            [
+                                'account_id' => $this->accounting->systemAccount('cost_of_goods_sold')->id,
+                                'debit' => $cost,
+                                'counterparty_type' => 'order',
+                                'counterparty_id' => $order->id,
+                            ],
+                            [
+                                'account_id' => $this->accounting->systemAccount('inventory_asset')->id,
+                                'credit' => $cost,
+                                'counterparty_type' => 'order',
+                                'counterparty_id' => $order->id,
+                            ],
+                        ],
+                        'inventory-consumption:'.$consumption->id.':ticket-item:'.$ticketItem->id,
+                    );
+                }
             }
 
-            $this->accounting->postInventoryConsumption(
-                $consumption,
-                $actor,
-                Money::fromMinor($costMinor),
-            );
-
-            return $consumption->load(['lines.stockMovement.item']);
+            return $consumption->fresh()->load(['lines.stockMovement.item']);
         });
     }
 }
