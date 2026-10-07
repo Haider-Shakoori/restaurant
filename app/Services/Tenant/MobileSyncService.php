@@ -483,6 +483,7 @@ class MobileSyncService
             'source_client_order_id' => ['required', 'string', 'max:40'],
             'target_client_order_id' => ['required', 'string', 'max:40'],
             'client_line_id' => ['required', 'string', 'max:40'],
+            'target_client_line_id' => ['required', 'string', 'max:40'],
             'quantity' => ['required', 'integer', 'min:1'],
         ])->validate();
 
@@ -505,6 +506,7 @@ class MobileSyncService
             $target,
             $user,
             (int) $data['quantity'],
+            $data['target_client_line_id'],
         );
 
         return [
