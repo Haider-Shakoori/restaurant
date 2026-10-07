@@ -47,6 +47,18 @@ public sealed class LocalOrderItem
     public decimal LineTotal { get; set; }
     public string? Notes { get; set; }
     public required string Status { get; set; }
+    public string? KotRoundId { get; set; }
+    public int? RoundNumber { get; set; }
+    public int? SeatNumber { get; set; }
+    public int? CourseNumber { get; set; }
+    public string? CourseName { get; set; }
+    public string Priority { get; set; } = "normal";
+    public string? ModifiersJson { get; set; }
+    public string? AllergyInstructions { get; set; }
+    public string? KitchenInstructions { get; set; }
+    public string? RefireOfOrderItemId { get; set; }
+    public DateTimeOffset? VoidedAt { get; set; }
+    public string? VoidReason { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
 }
@@ -82,9 +94,13 @@ public sealed class LocalKitchenTicket
 {
     public required string Id { get; set; }
     public required string OrderId { get; set; }
+    public string? KotRoundId { get; set; }
+    public int RoundNumber { get; set; } = 1;
     public required string KitchenStationId { get; set; }
     public long SubmittedByUserId { get; set; }
     public required string TicketNumber { get; set; }
+    public string? KotNumber { get; set; }
+    public string Priority { get; set; } = "normal";
     public required string Status { get; set; }
     public DateTimeOffset QueuedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
@@ -103,6 +119,19 @@ public sealed class LocalKitchenTicketItem
     public int Quantity { get; set; }
     public string? Notes { get; set; }
     public required string Status { get; set; }
+    public int? SeatNumber { get; set; }
+    public int? CourseNumber { get; set; }
+    public string? CourseName { get; set; }
+    public string Priority { get; set; } = "normal";
+    public string? ModifiersJson { get; set; }
+    public string? AllergyInstructions { get; set; }
+    public string? KitchenInstructions { get; set; }
+    public DateTimeOffset? StartedAt { get; set; }
+    public DateTimeOffset? ReadyAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public DateTimeOffset? VoidedAt { get; set; }
+    public string? VoidReason { get; set; }
+    public string? RefireOfKitchenItemId { get; set; }
 }
 
 public sealed class LocalKitchenPrinterBinding
@@ -515,4 +544,36 @@ public sealed class LocalCloudConflict
     public required string Status { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
     public DateTimeOffset? ResolvedAtUtc { get; set; }
+}
+
+
+public sealed class LocalRestaurantSetting
+{
+    public required string Key { get; set; }
+    public required string Value { get; set; }
+    public string Source { get; set; } = "local";
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+public sealed class LocalKotRound
+{
+    public required string Id { get; set; }
+    public required string OrderId { get; set; }
+    public int RoundNumber { get; set; }
+    public required string KotNumber { get; set; }
+    public required string MutationId { get; set; }
+    public long SubmittedByUserId { get; set; }
+    public bool QueueEnabled { get; set; }
+    public bool PreparingEnabled { get; set; }
+    public bool ExpoEnabled { get; set; }
+    public bool CoursesEnabled { get; set; }
+    public DateTimeOffset SentAt { get; set; }
+}
+
+public sealed class LocalKotCounter
+{
+    public required string BranchId { get; set; }
+    public DateOnly BusinessDate { get; set; }
+    public int LastNumber { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
 }
