@@ -21,5 +21,24 @@ void main() {
     content = content.replaceFirst('</dict>', '$entry</dict>');
   }
 
+  if (!content.contains('<key>NSLocalNetworkUsageDescription</key>')) {
+    const entry = '''
+\t<key>NSLocalNetworkUsageDescription</key>
+\t<string>Connect directly to BusinessOS Restaurant Desktop over the restaurant Wi-Fi or LAN.</string>
+''';
+    content = content.replaceFirst('</dict>', '$entry</dict>');
+  }
+
+  if (!content.contains('<key>NSAllowsLocalNetworking</key>')) {
+    const entry = '''
+\t<key>NSAppTransportSecurity</key>
+\t<dict>
+\t\t<key>NSAllowsLocalNetworking</key>
+\t\t<true/>
+\t</dict>
+''';
+    content = content.replaceFirst('</dict>', '$entry</dict>');
+  }
+
   plist.writeAsStringSync(content);
 }
