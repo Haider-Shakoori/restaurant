@@ -354,6 +354,7 @@ class KitchenWorkflowTest extends TestCase
 
     public function test_expo_endpoint_is_derived_from_ready_production_items(): void
     {
+        $this->withoutMiddleware(\App\Http\Middleware\EnsureTenantSubscriptionActive::class);
         $tenant = $this->createTenant('restaurant-expo', 'expo.test');
         tenancy()->initialize($tenant);
 
