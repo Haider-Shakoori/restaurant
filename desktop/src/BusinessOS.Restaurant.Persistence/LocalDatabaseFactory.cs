@@ -123,6 +123,10 @@ public sealed class LocalDatabaseFactory
             ("kitchen_ticket_items", "VoidedAt", "TEXT NULL"),
             ("kitchen_ticket_items", "VoidReason", "TEXT NULL"),
             ("kitchen_ticket_items", "RefireOfKitchenItemId", "TEXT NULL"),
+            ("inventory_consumptions", "ProductionKey", "TEXT NULL"),
+            ("inventory_consumptions", "OrderItemId", "TEXT NULL"),
+            ("inventory_consumptions", "KitchenTicketItemId", "TEXT NULL"),
+            ("inventory_consumptions", "InventoryReservationId", "TEXT NULL"),
         };
 
         foreach (var column in columns)
@@ -177,6 +181,46 @@ public sealed class LocalDatabaseFactory
                 UpdatedAtUtc TEXT NOT NULL,
                 PRIMARY KEY (BranchId, BusinessDate)
             );
+
+            CREATE TABLE IF NOT EXISTS inventory_reservations (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                OrderItemId TEXT NOT NULL,
+                KitchenTicketItemId TEXT NOT NULL,
+                BranchId TEXT NOT NULL,
+                CreatedByUserId INTEGER NOT NULL,
+                Status TEXT NOT NULL,
+                ReservedAt TEXT NOT NULL,
+                CommittedAt TEXT NULL,
+                ReleasedAt TEXT NULL,
+                ReleaseReason TEXT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_reservations_KitchenTicketItemId
+                ON inventory_reservations (KitchenTicketItemId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservations_BranchId_Status
+                ON inventory_reservations (BranchId, Status);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservations_OrderId
+                ON inventory_reservations (OrderId);
+
+            CREATE TABLE IF NOT EXISTS inventory_reservation_lines (
+                Id TEXT NOT NULL PRIMARY KEY,
+                InventoryReservationId TEXT NOT NULL,
+                RecipeId TEXT NOT NULL,
+                InventoryItemId TEXT NOT NULL,
+                QuantityBase TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_reservation_lines_Reservation_Item
+                ON inventory_reservation_lines (InventoryReservationId, InventoryItemId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_reservation_lines_InventoryItemId
+                ON inventory_reservation_lines (InventoryItemId);
+
+            DROP INDEX IF EXISTS IX_inventory_consumptions_OrderId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_inventory_consumptions_ProductionKey
+                ON inventory_consumptions (ProductionKey);
+            CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_OrderId
+                ON inventory_consumptions (OrderId);
+            CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_KitchenTicketItemId
+                ON inventory_consumptions (KitchenTicketItemId);
 
             DROP INDEX IF EXISTS IX_kitchen_tickets_OrderId_KitchenStationId;
             CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_KotRoundId_KitchenStationId
