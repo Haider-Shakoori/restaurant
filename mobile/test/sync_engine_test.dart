@@ -62,7 +62,7 @@ void main() {
     await engine.syncNow();
 
     expect(store.accepted, <String>['M-1']);
-    expect(store.cursor, 15);
+    expect(store.cursors['cloud'], 15);
     expect(api.pullCursors, <int>[0, 12]);
     expect(store.states['last_sync_error'], '');
   });
@@ -138,7 +138,7 @@ void main() {
 
     await engine.syncNow();
 
-    expect(store.cursor, 1);
+    expect(store.cursors['cloud'], 1);
     expect(store.states['last_sync_error'], '');
   });
 
@@ -277,6 +277,60 @@ void main() {
     expect(store.states['active_connection'], 'local');
     expect(credentials.session?.activeChannel, ConnectionChannel.local);
     expect(credentials.session?.baseUrl, 'http://192.168.1.20:8787');
+  });
+
+  test('cloud cursor never suppresses LAN changes', () async {
+    final store = _MemorySyncStore(
+      pending: <OutboxMutation>[],
+      cursors: <String, int>{'cloud': 57, 'local': 3},
+    );
+    final credentials = _MemoryCredentials(
+      _session(
+        connectionMode: ConnectionMode.automatic,
+        activeChannel: ConnectionChannel.cloud,
+        baseUrl: 'https://restaurant.test',
+        localBaseUrl: 'http://192.168.1.20:8787',
+        cloudBaseUrl: 'https://restaurant.test',
+        tenantId: 'tenant-1',
+      ),
+    );
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 4,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final resolver = ConnectionResolver(
+      probe: _FakeProbe(<String, ServerHealth>{
+        'http://192.168.1.20:8787': const ServerHealth(
+          baseUrl: 'http://192.168.1.20:8787',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Desktop',
+        ),
+        'https://restaurant.test': const ServerHealth(
+          baseUrl: 'https://restaurant.test',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Cloud',
+        ),
+      }),
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: credentials,
+      leaseVerifier: const _AlwaysValidLease(),
+      connectionResolver: resolver,
+    );
+
+    await engine.syncNow();
+
+    expect(api.pullCursors, <int>[3]);
+    expect(store.cursors['local'], 4);
+    expect(store.cursors['cloud'], 57);
   });
 
   test('automatic mode rejects wrong-tenant LAN and uses tenant cloud', () async {
@@ -497,14 +551,16 @@ class _MemoryCredentials implements CredentialStore {
 class _MemorySyncStore implements SyncStore {
   _MemorySyncStore({
     required List<OutboxMutation> pending,
-  }) : _pending = pending;
+    Map<String, int>? cursors,
+  }) : _pending = pending,
+       cursors = <String, int>{...?cursors};
 
   final List<OutboxMutation> _pending;
   final List<String> accepted = <String>[];
   final List<String> conflicts = <String>[];
   final List<String> retries = <String>[];
   final Map<String, String> states = <String, String>{};
-  int cursor = 0;
+  final Map<String, int> cursors;
 
   @override
   Future<void> applyAcceptedResult(Map<String, Object?> result) async {
@@ -515,13 +571,21 @@ class _MemorySyncStore implements SyncStore {
   }
 
   @override
-  Future<void> applyBootstrap(Map<String, Object?> data) async {
-    cursor = (data['cursor'] as num?)?.toInt() ?? cursor;
+  Future<void> applyBootstrap(
+    Map<String, Object?> data, {
+    required String cursorScope,
+  }) async {
+    cursors[cursorScope] =
+        (data['cursor'] as num?)?.toInt() ?? (cursors[cursorScope] ?? 0);
   }
 
   @override
-  Future<void> applyPull(Map<String, Object?> data) async {
-    cursor = (data['cursor'] as num?)?.toInt() ?? cursor;
+  Future<void> applyPull(
+    Map<String, Object?> data, {
+    required String cursorScope,
+  }) async {
+    cursors[cursorScope] =
+        (data['cursor'] as num?)?.toInt() ?? (cursors[cursorScope] ?? 0);
   }
 
   @override
@@ -555,7 +619,8 @@ class _MemorySyncStore implements SyncStore {
   }
 
   @override
-  Future<int> syncCursor() async => cursor;
+  Future<int> syncCursor({required String scope}) async =>
+      cursors[scope] ?? 0;
 }
 
 class _FakeApi implements SyncApi {
