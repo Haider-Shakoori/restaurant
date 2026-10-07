@@ -49,8 +49,12 @@ public sealed class LocalExpenseService(LocalDatabaseFactory databaseFactory)
         if (!string.IsNullOrWhiteSpace(branchId)) q = q.Where(x => x.BranchId == branchId);
         if (from.HasValue) q = q.Where(x => x.ExpenseDate >= from.Value);
         if (to.HasValue) q = q.Where(x => x.ExpenseDate <= to.Value);
-        return (await q.OrderByDescending(x => x.ExpenseDate).ThenByDescending(x => x.RecordedAtUtc).Take(500).ToArrayAsync(cancellationToken))
-            .Select(Snapshot).ToArray();
+        return (await q.ToArrayAsync(cancellationToken))
+            .OrderByDescending(x => x.ExpenseDate)
+            .ThenByDescending(x => x.RecordedAtUtc)
+            .Take(500)
+            .Select(Snapshot)
+            .ToArray();
     }
 
     private static object Snapshot(LocalExpense x) => new { id=x.Id, branch_id=x.BranchId, category=x.Category,
