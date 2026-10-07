@@ -424,7 +424,7 @@ internal static class OperationalActionViews
         var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         operations.Children.Add(Header(
             "Table & order operations",
-            "Transfers keep the same order. Draft merge is intentionally conservative. Split moves only unsent pending/held lines so historical KOTs are never rewritten."));
+            "Transfers keep the same order. Merge can absorb an unsent source into an active target. Move/split only touches unsent pending/held lines, so historical KOT production is never rewritten."));
 
         var sourceOrderBox = Combo(activeOrders, "Display");
         var targetTableBox = Combo(availableTables, "Label");
@@ -449,13 +449,45 @@ internal static class OperationalActionViews
         var mergeSource = Combo(activeOrders, "Display");
         mergeTarget.Width = 300;
         mergeSource.Width = 300;
-        var merge = Button("Merge draft orders");
+        var merge = Button("Merge unsent source");
         operations.Children.Add(Label("Merge orders"));
         var mergeRow = new WrapPanel();
         mergeRow.Children.Add(mergeTarget);
         mergeRow.Children.Add(mergeSource);
         mergeRow.Children.Add(merge);
         operations.Children.Add(mergeRow);
+
+        var moveSource = Combo(activeOrders, "Display");
+        var moveTarget = Combo(activeOrders, "Display");
+        moveSource.Width = 300;
+        moveTarget.Width = 300;
+        var moveItems = new ListBox
+        {
+            SelectionMode = SelectionMode.Multiple,
+            Height = 140,
+            Margin = new Thickness(0, 4, 0, 8),
+            DisplayMemberPath = "Display",
+        };
+        var move = Button("Move selected items");
+        operations.Children.Add(Label("Move unsent items between existing orders"));
+        var moveHeader = new WrapPanel();
+        moveHeader.Children.Add(moveSource);
+        moveHeader.Children.Add(moveTarget);
+        operations.Children.Add(moveHeader);
+        operations.Children.Add(moveItems);
+        operations.Children.Add(move);
+
+        moveSource.SelectionChanged += (_, _) =>
+        {
+            if (moveSource.SelectedItem is TableOrderChoice order)
+            {
+                moveItems.ItemsSource = unsentLines.Where(x => x.OrderId == order.Id).ToList();
+            }
+            else
+            {
+                moveItems.ItemsSource = Array.Empty<TableSplitLineChoice>();
+            }
+        };
 
         var splitSource = Combo(activeOrders, "Display");
         var splitTarget = Combo(availableTables, "Label");
@@ -516,6 +548,28 @@ internal static class OperationalActionViews
 
                 await workflow.MergeDraftOrdersAsync(target.Id, source.Id);
                 operationStatus.Text = $"{source.ClientOrderId} merged into {target.ClientOrderId}.";
+            }
+            catch (Exception ex) { operationStatus.Text = ex.Message; }
+        };
+
+        move.Click += async (_, _) =>
+        {
+            try
+            {
+                if (moveSource.SelectedItem is not TableOrderChoice source)
+                    throw new InvalidOperationException("Select the source order.");
+                if (moveTarget.SelectedItem is not TableOrderChoice target)
+                    throw new InvalidOperationException("Select the target order.");
+
+                var ids = moveItems.SelectedItems
+                    .Cast<TableSplitLineChoice>()
+                    .Select(x => x.OrderItemId)
+                    .ToArray();
+                if (ids.Length == 0)
+                    throw new InvalidOperationException("Select one or more unsent lines.");
+
+                await workflow.MoveUnsentItemsAsync(source.Id, target.Id, ids);
+                operationStatus.Text = $"{ids.Length} unsent line(s) moved from {source.ClientOrderId} to {target.ClientOrderId}. KOT history stayed on the source order.";
             }
             catch (Exception ex) { operationStatus.Text = ex.Message; }
         };
