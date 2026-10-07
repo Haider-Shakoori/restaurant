@@ -2,7 +2,7 @@
 
 @section('title', 'License · '.$business->name)
 @section('heading', 'License & Devices')
-@section('subheading', $business->name.' · secure Android activation and signed offline lease control.')
+@section('subheading', $business->name.' · desktop activation, waiter mobile limits, and signed offline lease control.')
 
 @section('content')
     @if (session('generated_license_key'))
@@ -14,6 +14,26 @@
             <p class="mt-3 text-sm text-amber-900">The raw key is not stored and will not be displayed again.</p>
         </section>
     @endif
+
+    <section class="mb-6 grid gap-4 sm:grid-cols-3">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+            <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Waiter mobile allowance</div>
+            <div class="mt-2 text-2xl font-black text-slate-950">
+                {{ $mobileDeviceLimit === null ? 'Unlimited' : $mobileDeviceLimit }}
+            </div>
+            <div class="mt-1 text-sm text-slate-500">Android + iOS waiter apps per restaurant activation.</div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+            <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Active waiter mobiles</div>
+            <div class="mt-2 text-2xl font-black text-slate-950">{{ $activeMobileDevices }}</div>
+            <div class="mt-1 text-sm text-slate-500">Revoked devices do not consume the allowance.</div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white p-5">
+            <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Desktop vs mobile</div>
+            <div class="mt-2 text-lg font-black text-slate-950">Separate enforcement</div>
+            <div class="mt-1 text-sm text-slate-500">The Windows desktop does not consume a waiter-mobile slot.</div>
+        </div>
+    </section>
 
     <div class="grid gap-6 xl:grid-cols-[1fr_0.85fr]">
         <div class="space-y-6">
@@ -133,7 +153,7 @@
                     </div>
                 </dl>
                 <p class="mt-5 text-sm text-slate-500">
-                    The Android app verifies leases with the public key. The private signing key remains server-only.
+                    The waiter app and Windows desktop verify signed lease claims with the public key, including the mobile-device allowance. The private signing key remains server-only.
                 </p>
             </section>
 
