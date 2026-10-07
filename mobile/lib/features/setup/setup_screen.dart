@@ -34,6 +34,8 @@ class _SetupScreenState extends State<SetupScreen> {
   ConnectionMode _mode = ConnectionMode.automatic;
   bool _working = false;
   String? _error;
+  String? _pairingToken;
+  String? _pairingExpiresAt;
 
   @override
   void dispose() {
@@ -60,6 +62,8 @@ class _SetupScreenState extends State<SetupScreen> {
         _localServer.text = data['local_url']?.toString() ?? '';
         _cloudServer.text = data['cloud_url']?.toString() ?? '';
         _license.text = data['license_key']?.toString() ?? '';
+        _pairingToken = data['pairing_token']?.toString();
+        _pairingExpiresAt = data['pairing_expires_at']?.toString();
         _error = null;
       });
     } catch (_) {
@@ -83,6 +87,7 @@ class _SetupScreenState extends State<SetupScreen> {
         localUrl: _localServer.text,
         cloudUrl: _cloudServer.text,
         licenseKey: _license.text,
+        pairingToken: _pairingToken,
         email: _email.text,
         password: _password.text,
       );
@@ -211,15 +216,38 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ],
                       const SizedBox(height: 20),
-                      TextField(
-                        controller: _license,
-                        autocorrect: false,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: InputDecoration(
-                          labelText: s.licenseKey,
-                          border: const OutlineInputBorder(),
+                      if (_pairingToken != null && _pairingToken!.isNotEmpty)
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.verified_user_outlined),
+                            title: const Text('Desktop pairing ready'),
+                            subtitle: Text(
+                              _pairingExpiresAt == null
+                                  ? 'This one-time code will activate this waiter device. Sign in below with the waiter account.'
+                                  : 'One-time activation approved by Desktop. Expires: $_pairingExpiresAt',
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Use license key instead',
+                              icon: const Icon(Icons.close),
+                              onPressed: _working
+                                  ? null
+                                  : () => setState(() {
+                                      _pairingToken = null;
+                                      _pairingExpiresAt = null;
+                                    }),
+                            ),
+                          ),
+                        )
+                      else
+                        TextField(
+                          controller: _license,
+                          autocorrect: false,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: InputDecoration(
+                            labelText: s.licenseKey,
+                            border: const OutlineInputBorder(),
+                          ),
                         ),
-                      ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _email,
