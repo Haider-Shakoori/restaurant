@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'seat_number',
     'course_number',
     'course_name',
+    'course_state',
     'modifiers_snapshot',
     'allergy_instructions',
     'kitchen_instructions',
