@@ -402,7 +402,8 @@ class LicenseService
     public function revokeMobileDeviceForTenant(
         DeviceActivation $device,
         TenantUser $user,
-    ): void {
+    ): void
+    {
         if (! $this->isMobilePlatform((string) $device->platform)) {
             throw ValidationException::withMessages([
                 'device' => 'Only waiter mobile activations can be revoked from restaurant settings.',
