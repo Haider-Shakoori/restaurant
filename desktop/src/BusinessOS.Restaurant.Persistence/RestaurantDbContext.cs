@@ -170,6 +170,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
             entity.HasKey(value => value.Id);
             entity.HasIndex(value => value.ClientOrderId).IsUnique();
             entity.HasIndex(value => new { value.DiningTableId, value.Status });
+            entity.HasIndex(value => new { value.BranchId, value.Status });
             entity.HasIndex(value => new { value.WaiterId, value.Status });
             entity.Property(value => value.Subtotal).HasPrecision(18, 2);
             entity.Property(value => value.Total).HasPrecision(18, 2);
