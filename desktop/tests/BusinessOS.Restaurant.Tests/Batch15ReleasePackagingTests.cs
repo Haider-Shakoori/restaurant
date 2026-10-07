@@ -28,6 +28,29 @@ public sealed class Batch15ReleasePackagingTests
     }
 
     [Fact]
+    public void Installer_requires_or_reuses_machine_activation_and_carries_restaurant_branding()
+    {
+        var root=RepositoryRoot();
+        var installer=File.ReadAllText(Path.Combine(root,"desktop","installer","BusinessOS.Restaurant.iss"));
+        var background=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantInstallerBackground.png");
+        var appBackground=Path.Combine(root,"desktop","src","BusinessOS.Restaurant.Desktop","Assets","RestaurantGlassBackground.jpg");
+
+        Assert.Contains("https://restaurant.businessos.af",installer,StringComparison.Ordinal);
+        Assert.Contains("Start 7-Day Trial",installer,StringComparison.Ordinal);
+        Assert.Contains("--installer-license-status",installer,StringComparison.Ordinal);
+        Assert.Contains("--installer-activate-file",installer,StringComparison.Ordinal);
+        Assert.Contains("days_remaining",installer,StringComparison.Ordinal);
+        Assert.Contains("Already activated on this computer",installer,StringComparison.Ordinal);
+        Assert.Contains("WizardBackImageFile=",installer,StringComparison.Ordinal);
+        Assert.Contains("RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+
+        Assert.True(File.Exists(background));
+        Assert.True(new FileInfo(background).Length > 10_000);
+        Assert.True(File.Exists(appBackground));
+        Assert.True(new FileInfo(appBackground).Length > 10_000);
+    }
+
+    [Fact]
     public void Installer_has_no_destructive_uninstall_directives()
     {
         var installer=File.ReadAllText(Path.Combine(RepositoryRoot(),"desktop","installer","BusinessOS.Restaurant.iss"));
