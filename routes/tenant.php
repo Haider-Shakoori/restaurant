@@ -122,6 +122,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                 Route::post('/setup/table', [TenantPortalSetupController::class, 'table']);
                 Route::post('/setup/menu/category', [TenantPortalSetupController::class, 'category']);
                 Route::post('/setup/menu/item', [TenantPortalSetupController::class, 'menuItem']);
+                Route::post('/setup/menu/item/{menuItem}/image', [TenantPortalSetupController::class, 'menuItemImage']);
             });
 
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
