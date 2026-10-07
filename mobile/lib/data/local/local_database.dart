@@ -623,7 +623,13 @@ class LocalDatabase implements SyncStore {
         throw StateError('This order can no longer receive new items.');
       }
 
-      final unitPrice = menuItem['price']!.toString();
+      final modifierResolution = _resolveLocalModifiers(
+        menuItem,
+        modifiers,
+      );
+      final unitPrice = _fromMinor(
+        _toMinor(menuItem['price']!.toString()) + modifierResolution.$1,
+      );
       final lineTotal = _multiplyMoney(unitPrice, quantity);
 
       await txn.insert('order_items', <String, Object?>{
@@ -641,7 +647,7 @@ class LocalDatabase implements SyncStore {
         'course_number': courseNumber,
         'course_name': courseName,
         'course_state': holdForCourse ? 'held' : 'open',
-        'modifiers_snapshot_json': jsonEncode(modifiers),
+        'modifiers_snapshot_json': jsonEncode(modifierResolution.$2),
         'allergy_instructions': allergyInstructions,
         'kitchen_instructions': kitchenInstructions,
         'status': 'pending',
@@ -994,6 +1000,82 @@ class LocalDatabase implements SyncStore {
       return value == 0 ? 0 : 1;
     }
     return value.toString() == '0' ? 0 : 1;
+  }
+
+  (int, List<Map<String, Object?>>) _resolveLocalModifiers(
+    Map<String, Object?> menuItem,
+    List<Map<String, Object?>> selections,
+  ) {
+    final rawGroups = menuItem['modifier_groups_json']?.toString();
+    final groups = rawGroups == null || rawGroups.isEmpty
+        ? const <Object?>[]
+        : jsonDecode(rawGroups) as List<Object?>;
+    final selectedIds = selections
+        .map((selection) => selection['option_id']?.toString())
+        .whereType<String>()
+        .toSet();
+
+    var deltaMinor = 0;
+    final matched = <String>{};
+    final snapshot = <Map<String, Object?>>[];
+
+    for (final rawGroup in groups) {
+      final group = Map<String, Object?>.from(
+        rawGroup! as Map<Object?, Object?>,
+      );
+      final options = group['options'] as List<Object?>? ?? const <Object?>[];
+      final groupSelections = <Map<String, Object?>>[];
+
+      for (final rawOption in options) {
+        final option = Map<String, Object?>.from(
+          rawOption! as Map<Object?, Object?>,
+        );
+        final optionId = option['id']!.toString();
+
+        if (!selectedIds.contains(optionId)) {
+          continue;
+        }
+
+        matched.add(optionId);
+        deltaMinor += _toMinor(option['price_delta']?.toString() ?? '0.00');
+        groupSelections.add(<String, Object?>{
+          'option_id': optionId,
+          'option_name': option['name']!.toString(),
+          'price_delta': option['price_delta']?.toString() ?? '0.00',
+        });
+      }
+
+      final min = (group['min_selections'] as num?)?.toInt() ?? 0;
+      final max = (group['max_selections'] as num?)?.toInt() ?? 1;
+
+      if (groupSelections.length < min || groupSelections.length > max) {
+        throw StateError(
+          'Select between ' +
+              min.toString() +
+              ' and ' +
+              max.toString() +
+              ' option(s) for ' +
+              group['name']!.toString() +
+              '.',
+        );
+      }
+
+      if (groupSelections.isNotEmpty) {
+        snapshot.add(<String, Object?>{
+          'group_id': group['id']!.toString(),
+          'group_name': group['name']!.toString(),
+          'options': groupSelections,
+        });
+      }
+    }
+
+    if (matched.length != selectedIds.length) {
+      throw StateError(
+        'One or more selected modifiers are unavailable for this menu item.',
+      );
+    }
+
+    return (deltaMinor, snapshot);
   }
 
   String _multiplyMoney(String amount, int quantity) {
