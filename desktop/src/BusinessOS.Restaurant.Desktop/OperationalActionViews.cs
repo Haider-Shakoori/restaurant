@@ -685,7 +685,7 @@ internal static class OperationalActionViews
             var minutes = Math.Max(0, (int)Math.Floor(age.TotalMinutes));
             label.Text = $"{minutes:00}:{Math.Max(0, age.Seconds):00}";
 
-            var delayed = currentStatus is "queued" or "active" or "preparing" or "expo" &&
+            var delayed = (currentStatus is "queued" or "active" or "preparing" or "expo") &&
                           minutes >= settings.KitchenLateMinutes;
             state.Text = delayed
                 ? "DELAYED"
@@ -826,7 +826,7 @@ internal static class OperationalActionViews
                 Margin = new Thickness(0, 8, 8, 4),
                 ToolTip = "Reason for recall, waste or re-fire",
             };
-            if (canRecallWaste && row.Status is "ready" or "completed" or "expo")
+            if (canRecallWaste && (row.Status is "ready" or "completed" or "expo"))
             {
                 panel.Children.Add(actionReason);
             }
@@ -1008,7 +1008,7 @@ internal static class OperationalActionViews
         RenderBoard();
 
         if (settings.KotSoundEnabled &&
-            rows.Any(row => row.Status is "queued" or "active" &&
+            rows.Any(row => (row.Status is "queued" or "active") &&
                             DateTimeOffset.UtcNow - row.QueuedAt < TimeSpan.FromMinutes(1)))
         {
             SystemSounds.Exclamation.Play();
