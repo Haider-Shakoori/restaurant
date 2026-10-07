@@ -119,7 +119,6 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
-        bool $paired,
     ): array {
         $business->refresh();
 
@@ -219,6 +218,7 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
+        bool $paired,
     ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion, $paired): array {
