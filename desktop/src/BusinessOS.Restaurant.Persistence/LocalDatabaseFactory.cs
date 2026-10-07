@@ -50,6 +50,7 @@ public sealed class LocalDatabaseFactory
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureOrderingSchemaAsync(db, cancellationToken);
         await EnsureMenuImageColumnAsync(cancellationToken);
+        await EnsureKotRealignmentSchemaAsync(cancellationToken);
     }
 
     private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
@@ -84,6 +85,127 @@ public sealed class LocalDatabaseFactory
         await using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE menu_items ADD COLUMN ImageUrl TEXT NULL;";
         await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task EnsureKotRealignmentSchemaAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        var columns = new (string Table, string Column, string Definition)[]
+        {
+            ("order_items", "KotRoundId", "TEXT NULL"),
+            ("order_items", "RoundNumber", "INTEGER NULL"),
+            ("order_items", "SeatNumber", "INTEGER NULL"),
+            ("order_items", "CourseNumber", "INTEGER NULL"),
+            ("order_items", "CourseName", "TEXT NULL"),
+            ("order_items", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("order_items", "ModifiersJson", "TEXT NULL"),
+            ("order_items", "AllergyInstructions", "TEXT NULL"),
+            ("order_items", "KitchenInstructions", "TEXT NULL"),
+            ("order_items", "RefireOfOrderItemId", "TEXT NULL"),
+            ("order_items", "VoidedAt", "TEXT NULL"),
+            ("order_items", "VoidReason", "TEXT NULL"),
+            ("kitchen_tickets", "KotRoundId", "TEXT NULL"),
+            ("kitchen_tickets", "RoundNumber", "INTEGER NOT NULL DEFAULT 1"),
+            ("kitchen_tickets", "KotNumber", "TEXT NULL"),
+            ("kitchen_tickets", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("kitchen_ticket_items", "SeatNumber", "INTEGER NULL"),
+            ("kitchen_ticket_items", "CourseNumber", "INTEGER NULL"),
+            ("kitchen_ticket_items", "CourseName", "TEXT NULL"),
+            ("kitchen_ticket_items", "Priority", "TEXT NOT NULL DEFAULT 'normal'"),
+            ("kitchen_ticket_items", "ModifiersJson", "TEXT NULL"),
+            ("kitchen_ticket_items", "AllergyInstructions", "TEXT NULL"),
+            ("kitchen_ticket_items", "KitchenInstructions", "TEXT NULL"),
+            ("kitchen_ticket_items", "StartedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "ReadyAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "CompletedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "VoidedAt", "TEXT NULL"),
+            ("kitchen_ticket_items", "VoidReason", "TEXT NULL"),
+            ("kitchen_ticket_items", "RefireOfKitchenItemId", "TEXT NULL"),
+        };
+
+        foreach (var column in columns)
+        {
+            if (await ColumnExistsAsync(connection, column.Table, column.Column, cancellationToken))
+            {
+                continue;
+            }
+
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE {column.Table} ADD COLUMN {column.Column} {column.Definition};";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await using var schema = connection.CreateCommand();
+        schema.CommandText = """
+            CREATE TABLE IF NOT EXISTS restaurant_settings (
+                Key TEXT NOT NULL PRIMARY KEY,
+                Value TEXT NOT NULL,
+                Source TEXT NOT NULL DEFAULT 'local',
+                UpdatedAtUtc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_restaurant_settings_UpdatedAtUtc
+                ON restaurant_settings (UpdatedAtUtc);
+
+            CREATE TABLE IF NOT EXISTS kot_rounds (
+                Id TEXT NOT NULL PRIMARY KEY,
+                OrderId TEXT NOT NULL,
+                RoundNumber INTEGER NOT NULL,
+                KotNumber TEXT NOT NULL,
+                MutationId TEXT NOT NULL,
+                SubmittedByUserId INTEGER NOT NULL,
+                QueueEnabled INTEGER NOT NULL,
+                PreparingEnabled INTEGER NOT NULL,
+                ExpoEnabled INTEGER NOT NULL,
+                CoursesEnabled INTEGER NOT NULL,
+                SentAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_OrderId_RoundNumber
+                ON kot_rounds (OrderId, RoundNumber);
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kot_rounds_MutationId
+                ON kot_rounds (MutationId);
+            CREATE INDEX IF NOT EXISTS IX_kot_rounds_KotNumber
+                ON kot_rounds (KotNumber);
+            CREATE INDEX IF NOT EXISTS IX_kot_rounds_SentAt
+                ON kot_rounds (SentAt);
+
+            CREATE TABLE IF NOT EXISTS kot_counters (
+                BranchId TEXT NOT NULL,
+                BusinessDate TEXT NOT NULL,
+                LastNumber INTEGER NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL,
+                PRIMARY KEY (BranchId, BusinessDate)
+            );
+
+            DROP INDEX IF EXISTS IX_kitchen_tickets_OrderId_KitchenStationId;
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_KotRoundId_KitchenStationId
+                ON kitchen_tickets (KotRoundId, KitchenStationId);
+            CREATE INDEX IF NOT EXISTS IX_kitchen_tickets_OrderId_RoundNumber
+                ON kitchen_tickets (OrderId, RoundNumber);
+            """;
+        await schema.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = $"PRAGMA table_info({table});";
+
+        await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task EnsureOrderingSchemaAsync(
