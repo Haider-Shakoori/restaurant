@@ -13,8 +13,9 @@ class KitchenTicketController extends Controller
     {
         $tickets = KitchenTicket::query()
             ->with([
+                'round',
                 'station',
-                'items',
+                'items.events',
                 'order.table.diningArea.branch',
                 'order.waiter',
             ])
@@ -43,8 +44,10 @@ class KitchenTicketController extends Controller
     {
         return response()->json([
             'data' => $kitchenTicket->load([
+                'round',
                 'station.branch',
                 'items.orderItem',
+                'items.events.actor',
                 'events.actor',
                 'order.table.diningArea',
                 'order.waiter',
