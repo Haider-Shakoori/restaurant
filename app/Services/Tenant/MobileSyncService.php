@@ -179,7 +179,7 @@ class MobileSyncService
                 $payload,
                 $requestHash,
             ): array {
-                $accepted = $this->dispatchMutation($user, $operation, $payload);
+                $accepted = $this->dispatchMutation($user, $operation, $payload, $mutationId);
 
                 $response = [
                     'mutation_id' => $mutationId,
@@ -229,12 +229,12 @@ class MobileSyncService
         }
     }
 
-    private function dispatchMutation(TenantUser $user, string $operation, array $payload): array
+    private function dispatchMutation(TenantUser $user, string $operation, array $payload, string $mutationId): array
     {
         return match ($operation) {
             self::OP_ORDER_OPEN => $this->openOrder($user, $payload),
             self::OP_ORDER_ITEM_ADD => $this->addOrderItem($user, $payload),
-            self::OP_ORDER_SUBMIT => $this->submitOrder($user, $payload),
+            self::OP_ORDER_SUBMIT => $this->submitOrder($user, $payload, $mutationId),
             default => throw ValidationException::withMessages([
                 'operation' => 'Unsupported offline operation.',
             ]),
@@ -290,7 +290,7 @@ class MobileSyncService
         ];
     }
 
-    private function submitOrder(TenantUser $user, array $payload): array
+    private function submitOrder(TenantUser $user, array $payload, string $mutationId): array
     {
         $data = Validator::make($payload, [
             'client_order_id' => ['required', 'string', 'max:40'],
@@ -302,7 +302,7 @@ class MobileSyncService
 
         $this->authorizeOrder($user, $order);
 
-        $order = $this->orders->submit($order, $user);
+        $order = $this->orders->submit($order, $user, $mutationId);
 
         return [
             'entity_type' => 'order',
