@@ -1,7 +1,7 @@
 name: Restaurant Desktop CI
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-v2
   cancel-in-progress: true
 
 on:
@@ -51,7 +51,7 @@ jobs:
         working-directory: .
         shell: pwsh
         run: |
-          python -c "from PIL import Image; p=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; im=Image.open(p); im.verify(); print(f'Validated {p}')"
+          python -c "from PIL import Image; app=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; setup=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantInstallerBackground.png'; a=Image.open(app); a.verify(); s=Image.open(setup); assert s.format == 'PNG', f'Installer background must be PNG, got {s.format}'; s.verify(); print(f'Validated {app} and installer-safe PNG {setup}')"
 
       - name: Restore
         run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
@@ -137,6 +137,74 @@ jobs:
             Select-Object -First 1
           if (-not $setup) { throw "Branded Restaurant installer was not produced." }
           if ($setup.Length -lt 1MB) { throw "Restaurant installer is unexpectedly small." }
+
+      - name: Smoke-test branded installer startup
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $setup = Get-ChildItem "installer/output" -Filter "BusinessOS-Restaurant-Setup-*-win-x64.exe" |
+            Select-Object -First 1
+          if (-not $setup) { throw "Restaurant installer missing before runtime smoke test." }
+
+          # Inno Setup's bootstrap EXE launches the real wizard in a temporary
+          # child process. Inspect every matching Setup process so we validate
+          # the actual wizard/error dialog rather than only the bootstrapper.
+          $before = @(Get-Process | Select-Object -ExpandProperty Id)
+          $bootstrap = Start-Process -FilePath $setup.FullName -PassThru
+          try {
+            Start-Sleep -Seconds 8
+
+            $candidates = @(
+              Get-Process -ErrorAction SilentlyContinue |
+                Where-Object {
+                  ($before -notcontains $_.Id) -and
+                  (
+                    $_.Id -eq $bootstrap.Id -or
+                    $_.ProcessName -like "$($setup.BaseName)*" -or
+                    $_.ProcessName -like "BusinessOS-Restaurant-Setup*"
+                  )
+                }
+            )
+
+            if (-not $candidates) {
+              throw "Branded Restaurant installer did not leave a Setup process running."
+            }
+
+            $titles = @(
+              $candidates |
+                ForEach-Object {
+                  $_.Refresh()
+                  [PSCustomObject]@{
+                    Id = $_.Id
+                    ProcessName = $_.ProcessName
+                    Title = $_.MainWindowTitle
+                  }
+                }
+            )
+
+            $titles | Format-Table -AutoSize | Out-String | Write-Host
+            $visibleTitles = @($titles | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Title) })
+
+            if ($visibleTitles | Where-Object { $_.Title -match "(?i)^Error$|Bitmap image is not valid" }) {
+              throw "Installer runtime opened an error dialog instead of the setup wizard."
+            }
+
+            if (-not ($visibleTitles | Where-Object { $_.Title -match "(?i)BusinessOS Restaurant|Setup" })) {
+              throw "The Inno Setup child process did not expose the expected Restaurant setup window."
+            }
+          }
+          finally {
+            Get-Process -ErrorAction SilentlyContinue |
+              Where-Object {
+                ($before -notcontains $_.Id) -and
+                (
+                  $_.Id -eq $bootstrap.Id -or
+                  $_.ProcessName -like "$($setup.BaseName)*" -or
+                  $_.ProcessName -like "BusinessOS-Restaurant-Setup*"
+                )
+              } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4
