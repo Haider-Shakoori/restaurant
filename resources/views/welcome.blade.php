@@ -85,105 +85,105 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#020617">
+    <meta name="theme-color" content="#fffbeb">
     <title>BusinessOS Restaurant</title>
     <meta name="description" content="Restaurant operations for waiter ordering, kitchen/KOT, cashier, inventory, daily closing and offline synchronization.">
     @if (file_exists(public_path('build/manifest.json')) || file_exists(public_path('hot')))
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @endif
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+<body class="min-h-screen bg-stone-50 text-stone-900 antialiased">
     <div class="relative overflow-hidden">
-        <div class="pointer-events-none absolute inset-x-0 top-0 h-[38rem] bg-[radial-gradient(circle_at_20%_10%,rgba(52,211,153,0.14),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.10),transparent_28%)]"></div>
+        <div class="pointer-events-none absolute inset-x-0 top-0 h-[38rem] bg-[radial-gradient(circle_at_20%_10%,rgba(245,158,11,0.16),transparent_35%),radial-gradient(circle_at_80%_20%,rgba(251,146,60,0.10),transparent_28%)]"></div>
 
-        <header class="relative z-20 border-b border-white/5 bg-slate-950/85 backdrop-blur">
+        <header class="relative z-20 border-b border-stone-200 bg-stone-50/90 backdrop-blur">
             <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 py-4 sm:px-6 lg:px-8">
                 <a href="/?lang={{ $language }}" class="flex min-w-0 items-center gap-3">
-                    <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-400 text-lg font-black text-slate-950">B</span>
+                    <span class="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500 text-lg font-black text-stone-950">B</span>
                     <span>
-                        <span class="block text-xs font-black uppercase tracking-[0.18em] text-emerald-300">BusinessOS</span>
-                        <span class="block font-black text-white">Restaurant</span>
+                        <span class="block text-xs font-black uppercase tracking-[0.18em] text-amber-700">BusinessOS</span>
+                        <span class="block font-black text-stone-950">Restaurant</span>
                     </span>
                 </a>
 
-                <nav class="hidden items-center gap-7 text-sm font-semibold text-slate-300 lg:flex">
-                    <a href="#features" class="hover:text-white">{{ $t['features'] }}</a>
-                    <a href="#connectivity" class="hover:text-white">{{ $t['connectivity'] }}</a>
-                    <a href="#trial" class="hover:text-white">{{ $t['trial'] }}</a>
+                <nav class="hidden items-center gap-7 text-sm font-semibold text-stone-600 lg:flex">
+                    <a href="#features" class="hover:text-stone-950">{{ $t['features'] }}</a>
+                    <a href="#connectivity" class="hover:text-stone-950">{{ $t['connectivity'] }}</a>
+                    <a href="#trial" class="hover:text-stone-950">{{ $t['trial'] }}</a>
                 </nav>
 
                 <div class="flex items-center gap-2">
-                    <div class="hidden rounded-xl border border-slate-800 bg-slate-900/70 p-1 sm:flex" dir="ltr">
+                    <div class="hidden rounded-xl border border-stone-200 bg-white/90 p-1 sm:flex" dir="ltr">
                         @foreach (['en' => 'EN', 'fa' => 'دری', 'ps' => 'پښتو'] as $code => $label)
-                            <a href="/?lang={{ $code }}" class="rounded-lg px-2.5 py-1.5 text-xs font-black {{ $language === $code ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white' }}">{{ $label }}</a>
+                            <a href="/?lang={{ $code }}" class="rounded-lg px-2.5 py-1.5 text-xs font-black {{ $language === $code ? 'bg-amber-500 text-stone-950' : 'text-stone-500 hover:text-stone-950' }}">{{ $label }}</a>
                         @endforeach
                     </div>
-                    <a href="/platform/login" class="hidden rounded-xl px-3 py-2 text-sm font-bold text-slate-200 hover:bg-white/5 md:inline-flex">{{ $t['login'] }}</a>
-                    <a href="/start-trial" class="rounded-xl bg-emerald-400 px-3.5 py-2 text-sm font-black text-slate-950 hover:bg-emerald-300">{{ $t['trial'] }}</a>
+                    <a href="/platform/login" class="hidden rounded-xl px-3 py-2 text-sm font-bold text-stone-700 hover:bg-stone-100 md:inline-flex">{{ $t['login'] }}</a>
+                    <a href="/start-trial" class="rounded-xl bg-amber-500 px-3.5 py-2 text-sm font-black text-stone-950 hover:bg-amber-600">{{ $t['trial'] }}</a>
                 </div>
             </div>
             <div class="mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 pb-3 sm:hidden">
-                <div class="flex rounded-xl border border-slate-800 bg-slate-900/70 p-1" dir="ltr">
+                <div class="flex rounded-xl border border-stone-200 bg-white/90 p-1" dir="ltr">
                     @foreach (['en' => 'EN', 'fa' => 'دری', 'ps' => 'پښتو'] as $code => $label)
-                        <a href="/?lang={{ $code }}" class="rounded-lg px-2.5 py-1.5 text-xs font-black {{ $language === $code ? 'bg-slate-700 text-white' : 'text-slate-400' }}">{{ $label }}</a>
+                        <a href="/?lang={{ $code }}" class="rounded-lg px-2.5 py-1.5 text-xs font-black {{ $language === $code ? 'bg-amber-500 text-stone-950' : 'text-stone-500' }}">{{ $label }}</a>
                     @endforeach
                 </div>
-                <a href="/platform/login" class="rounded-xl border border-slate-800 px-3 py-2 text-xs font-black text-slate-200">{{ $t['login'] }}</a>
+                <a href="/platform/login" class="rounded-xl border border-stone-200 px-3 py-2 text-xs font-black text-stone-700">{{ $t['login'] }}</a>
             </div>
         </header>
 
         <main class="relative">
             <section class="mx-auto grid max-w-7xl gap-12 px-5 pb-20 pt-14 sm:px-6 sm:pt-20 lg:grid-cols-[1.08fr_0.92fr] lg:items-center lg:px-8 lg:pb-28 lg:pt-24">
                 <div>
-                    <div class="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-black text-emerald-200">
-                        <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+                    <div class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-100 px-3 py-1.5 text-xs font-black text-amber-800">
+                        <span class="h-2 w-2 rounded-full bg-amber-500"></span>
                         {{ $t['eyebrow'] }}
                     </div>
-                    <h1 class="mt-6 max-w-4xl text-4xl font-black leading-[1.04] tracking-[-0.04em] text-white sm:text-5xl lg:text-6xl">{{ $t['headline'] }}</h1>
-                    <p class="mt-6 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg sm:leading-8">{{ $t['intro'] }}</p>
+                    <h1 class="mt-6 max-w-4xl text-4xl font-black leading-[1.04] tracking-[-0.04em] text-stone-950 sm:text-5xl lg:text-6xl">{{ $t['headline'] }}</h1>
+                    <p class="mt-6 max-w-2xl text-base leading-7 text-stone-600 sm:text-lg sm:leading-8">{{ $t['intro'] }}</p>
 
                     <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-                        <a href="/start-trial" class="inline-flex items-center justify-center rounded-xl bg-emerald-400 px-5 py-3.5 text-sm font-black text-slate-950 shadow-xl shadow-emerald-500/10 hover:bg-emerald-300">{{ $t['start'] }}</a>
-                        <a href="#features" class="inline-flex items-center justify-center rounded-xl border border-slate-700 bg-slate-900/70 px-5 py-3.5 text-sm font-bold text-white hover:bg-slate-900">{{ $t['explore'] }}</a>
+                        <a href="/start-trial" class="inline-flex items-center justify-center rounded-xl bg-amber-500 px-5 py-3.5 text-sm font-black text-stone-950 shadow-xl shadow-amber-500/20 hover:bg-amber-600">{{ $t['start'] }}</a>
+                        <a href="#features" class="inline-flex items-center justify-center rounded-xl border border-stone-300 bg-white/90 px-5 py-3.5 text-sm font-bold text-stone-950 hover:bg-white">{{ $t['explore'] }}</a>
                     </div>
 
-                    <p class="mt-4 max-w-xl text-xs leading-5 text-slate-500">{{ $t['trial_note'] }}</p>
+                    <p class="mt-4 max-w-xl text-xs leading-5 text-stone-500">{{ $t['trial_note'] }}</p>
 
-                    <div class="mt-8 flex flex-wrap gap-2 text-xs font-bold text-slate-300">
-                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">AFN</span>
-                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">English · دری · پښتو</span>
-                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">Offline-first waiter app</span>
-                        <span class="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-2">Low-bandwidth optimized</span>
+                    <div class="mt-8 flex flex-wrap gap-2 text-xs font-bold text-stone-600">
+                        <span class="rounded-full border border-stone-200 bg-white/90 px-3 py-2">AFN</span>
+                        <span class="rounded-full border border-stone-200 bg-white/90 px-3 py-2">English · دری · پښتو</span>
+                        <span class="rounded-full border border-stone-200 bg-white/90 px-3 py-2">Offline-first waiter app</span>
+                        <span class="rounded-full border border-stone-200 bg-white/90 px-3 py-2">Low-bandwidth optimized</span>
                     </div>
                 </div>
 
                 <div class="relative mx-auto w-full max-w-xl">
-                    <div class="absolute -inset-4 rounded-[2rem] bg-emerald-400/5 blur-2xl"></div>
-                    <div class="relative overflow-hidden rounded-[1.75rem] border border-slate-800 bg-slate-900/95 shadow-2xl shadow-black/30">
-                        <div class="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+                    <div class="absolute -inset-4 rounded-[2rem] bg-amber-100/70 blur-2xl"></div>
+                    <div class="relative overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-2xl shadow-stone-900/10">
+                        <div class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
                             <div>
-                                <p class="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">{{ $t['flow'] }}</p>
-                                <p class="mt-1 text-sm font-semibold text-white">{{ $t['table'] }}</p>
+                                <p class="text-xs font-black uppercase tracking-[0.18em] text-amber-700">{{ $t['flow'] }}</p>
+                                <p class="mt-1 text-sm font-semibold text-stone-950">{{ $t['table'] }}</p>
                             </div>
-                            <span class="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-black text-emerald-300">{{ $t['offline'] }}</span>
+                            <span class="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-700">{{ $t['offline'] }}</span>
                         </div>
                         <div class="grid gap-4 p-5 sm:grid-cols-[1fr_11rem]">
                             <div class="space-y-3">
                                 @foreach ([['Chicken Karahi', '1 ×', '540 AFN'], ['Kabuli Pulao', '2 ×', '700 AFN'], ['Green Tea', '3 ×', '180 AFN']] as $item)
-                                    <div class="flex items-center justify-between gap-4 rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3">
-                                        <div><p class="text-sm font-black text-white">{{ $item[0] }}</p><p class="mt-1 text-xs text-slate-500">{{ $item[1] }}</p></div>
-                                        <span class="text-sm font-semibold text-slate-300">{{ $item[2] }}</span>
+                                    <div class="flex items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+                                        <div><p class="text-sm font-black text-stone-950">{{ $item[0] }}</p><p class="mt-1 text-xs text-stone-500">{{ $item[1] }}</p></div>
+                                        <span class="text-sm font-semibold text-stone-600">{{ $item[2] }}</span>
                                     </div>
                                 @endforeach
-                                <div class="flex items-center justify-between rounded-2xl bg-emerald-400 px-4 py-3 text-slate-950">
+                                <div class="flex items-center justify-between rounded-2xl bg-amber-500 px-4 py-3 text-stone-950">
                                     <span class="text-sm font-black">{{ $t['kitchen'] }}</span><span class="text-lg">✓</span>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-2 sm:grid-cols-1">
                                 @foreach ([['01', 'Waiter'], ['02', 'KOT'], ['03', 'Cashier'], ['04', 'Closing']] as $step)
-                                    <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
-                                        <p class="text-[10px] font-black tracking-[0.2em] text-emerald-300">{{ $step[0] }}</p>
-                                        <p class="mt-2 text-sm font-black text-white">{{ $step[1] }}</p>
+                                    <div class="rounded-2xl border border-stone-200 bg-stone-50 p-3">
+                                        <p class="text-[10px] font-black tracking-[0.2em] text-amber-700">{{ $step[0] }}</p>
+                                        <p class="mt-2 text-sm font-black text-stone-950">{{ $step[1] }}</p>
                                     </div>
                                 @endforeach
                             </div>
@@ -192,11 +192,11 @@
                 </div>
             </section>
 
-            <section id="features" class="border-y border-white/5 bg-slate-900/30">
+            <section id="features" class="border-y border-stone-200 bg-amber-50/60">
                 <div class="mx-auto max-w-7xl px-5 py-20 sm:px-6 lg:px-8 lg:py-24">
-                    <p class="text-sm font-black uppercase tracking-[0.18em] text-emerald-300">{{ $t['features'] }}</p>
-                    <h2 class="mt-3 text-3xl font-black tracking-tight text-white sm:text-4xl">{{ $t['feature_title'] }}</h2>
-                    <p class="mt-4 text-base text-slate-400">{{ $t['feature_text'] }}</p>
+                    <p class="text-sm font-black uppercase tracking-[0.18em] text-amber-700">{{ $t['features'] }}</p>
+                    <h2 class="mt-3 text-3xl font-black tracking-tight text-stone-950 sm:text-4xl">{{ $t['feature_title'] }}</h2>
+                    <p class="mt-4 text-base text-stone-500">{{ $t['feature_text'] }}</p>
 
                     <div class="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                         @foreach ([
@@ -207,9 +207,9 @@
                             ['Management & accounting', 'Expenses, journals, ledgers and operational reports in one workspace.'],
                             ['Multi-tenant SaaS', 'Restaurant isolation with BusinessOS subscription, licensing and platform controls.'],
                         ] as $feature)
-                            <article class="rounded-2xl border border-slate-800 bg-slate-950/70 p-6">
-                                <h3 class="text-lg font-black text-white">{{ $feature[0] }}</h3>
-                                <p class="mt-3 text-sm leading-6 text-slate-400">{{ $feature[1] }}</p>
+                            <article class="rounded-2xl border border-stone-200 bg-stone-50 p-6">
+                                <h3 class="text-lg font-black text-stone-950">{{ $feature[0] }}</h3>
+                                <p class="mt-3 text-sm leading-6 text-stone-500">{{ $feature[1] }}</p>
                             </article>
                         @endforeach
                     </div>
@@ -219,10 +219,10 @@
             <section id="connectivity" class="mx-auto max-w-7xl px-5 py-20 sm:px-6 lg:px-8 lg:py-24">
                 <div class="grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
                     <div>
-                        <p class="text-sm font-black uppercase tracking-[0.18em] text-emerald-300">{{ $t['connectivity'] }}</p>
-                        <h2 class="mt-3 text-3xl font-black tracking-tight text-white sm:text-4xl">{{ $t['connect_title'] }}</h2>
-                        <p class="mt-4 text-base leading-7 text-slate-400">{{ $t['connect_text'] }}</p>
-                        <div class="mt-6 rounded-2xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm leading-6 text-emerald-100">
+                        <p class="text-sm font-black uppercase tracking-[0.18em] text-amber-700">{{ $t['connectivity'] }}</p>
+                        <h2 class="mt-3 text-3xl font-black tracking-tight text-stone-950 sm:text-4xl">{{ $t['connect_title'] }}</h2>
+                        <p class="mt-4 text-base leading-7 text-stone-500">{{ $t['connect_text'] }}</p>
+                        <div class="mt-6 rounded-2xl border border-amber-200 bg-amber-100/70 p-4 text-sm leading-6 text-amber-900">
                             The waiter app keeps an offline outbox and synchronizes safely when connectivity returns.
                         </div>
                     </div>
@@ -233,34 +233,34 @@
                             ['02', 'Local LAN', 'Phones connect to the restaurant Apache/Laravel server on the same Wi‑Fi or LAN.', 'LAN / Wi‑Fi'],
                             ['03', 'Automatic', 'Prefer the local restaurant server when reachable and use cloud when needed.', 'Local-first'],
                         ] as $mode)
-                            <div class="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-5 sm:grid-cols-[3rem_1fr_auto] sm:items-center">
-                                <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 text-xs font-black text-emerald-300">{{ $mode[0] }}</span>
-                                <div><h3 class="font-black text-white">{{ $mode[1] }}</h3><p class="mt-1 text-sm leading-6 text-slate-400">{{ $mode[2] }}</p></div>
-                                <span class="w-fit rounded-full border border-slate-700 px-3 py-1 text-xs font-bold text-slate-300">{{ $mode[3] }}</span>
+                            <div class="grid gap-4 rounded-2xl border border-stone-200 bg-white p-5 sm:grid-cols-[3rem_1fr_auto] sm:items-center">
+                                <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-stone-100 text-xs font-black text-amber-700">{{ $mode[0] }}</span>
+                                <div><h3 class="font-black text-stone-950">{{ $mode[1] }}</h3><p class="mt-1 text-sm leading-6 text-stone-500">{{ $mode[2] }}</p></div>
+                                <span class="w-fit rounded-full border border-stone-300 px-3 py-1 text-xs font-bold text-stone-600">{{ $mode[3] }}</span>
                             </div>
                         @endforeach
                     </div>
                 </div>
             </section>
 
-            <section id="trial" class="border-t border-white/5 bg-slate-900/40">
+            <section id="trial" class="border-t border-stone-200 bg-stone-100/80">
                 <div class="mx-auto max-w-7xl px-5 py-20 sm:px-6 lg:px-8">
-                    <div class="rounded-[2rem] border border-emerald-400/20 bg-slate-900 p-7 sm:p-10 lg:flex lg:items-center lg:justify-between lg:gap-10">
+                    <div class="rounded-[2rem] border border-amber-200 bg-white p-7 sm:p-10 lg:flex lg:items-center lg:justify-between lg:gap-10">
                         <div class="max-w-2xl">
-                            <h2 class="text-3xl font-black tracking-tight text-white sm:text-4xl">{{ $t['cta_title'] }}</h2>
-                            <p class="mt-4 text-base leading-7 text-slate-300">{{ $t['cta_text'] }}</p>
+                            <h2 class="text-3xl font-black tracking-tight text-stone-950 sm:text-4xl">{{ $t['cta_title'] }}</h2>
+                            <p class="mt-4 text-base leading-7 text-stone-600">{{ $t['cta_text'] }}</p>
                         </div>
                         <div class="mt-7 flex shrink-0 flex-col gap-3 sm:flex-row lg:mt-0">
-                            <a href="/start-trial" class="inline-flex justify-center rounded-xl bg-emerald-400 px-5 py-3.5 text-sm font-black text-slate-950 hover:bg-emerald-300">{{ $t['request'] }}</a>
-                            <a href="/platform/login" class="inline-flex justify-center rounded-xl border border-slate-700 bg-slate-950/70 px-5 py-3.5 text-sm font-bold text-white hover:bg-slate-950">{{ $t['login'] }}</a>
+                            <a href="/start-trial" class="inline-flex justify-center rounded-xl bg-amber-500 px-5 py-3.5 text-sm font-black text-stone-950 hover:bg-amber-600">{{ $t['request'] }}</a>
+                            <a href="/platform/login" class="inline-flex justify-center rounded-xl border border-stone-300 bg-stone-50 px-5 py-3.5 text-sm font-bold text-stone-950 hover:bg-stone-50">{{ $t['login'] }}</a>
                         </div>
                     </div>
                 </div>
             </section>
         </main>
 
-        <footer class="border-t border-slate-900">
-            <div class="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-8 text-xs text-slate-500 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+        <footer class="border-t border-stone-200">
+            <div class="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-8 text-xs text-stone-500 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
                 <p>BusinessOS Restaurant · {{ $t['footer'] }}</p>
                 <p>© {{ now()->year }} BusinessOS.af</p>
             </div>
