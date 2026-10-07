@@ -40,6 +40,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
 
             Route::get('/restaurants', [BusinessController::class, 'index']);
             Route::get('/tenants', [TenantController::class, 'index']);
+            Route::get('/licenses', [LicenseController::class, 'index']);
 
             Route::middleware('can:manage-platform')->group(function (): void {
                 Route::get('/restaurants/create', [BusinessController::class, 'create']);
