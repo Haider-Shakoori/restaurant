@@ -54,6 +54,7 @@ use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Controllers\Tenant\TenantWebKitchenController;
 use App\Http\Controllers\Tenant\TenantWebOrderController;
 use App\Http\Controllers\Tenant\TransferOrderTableController;
 use App\Http\Controllers\Tenant\VoidKitchenTicketItemController;
@@ -106,6 +107,18 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
 
             Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
                 Route::get('/kitchen', [TenantPortalController::class, 'kitchen'])->name('tenant.web.kitchen');
+                Route::post('/kitchen/items/{kitchenTicketItem}/start', [TenantWebKitchenController::class, 'start'])
+                    ->name('tenant.web.kitchen.items.start');
+                Route::post('/kitchen/items/{kitchenTicketItem}/ready', [TenantWebKitchenController::class, 'ready'])
+                    ->name('tenant.web.kitchen.items.ready');
+                Route::post('/kitchen/items/{kitchenTicketItem}/void', [TenantWebKitchenController::class, 'void'])
+                    ->name('tenant.web.kitchen.items.void');
+                Route::post('/kitchen/items/{kitchenTicketItem}/recall', [TenantWebKitchenController::class, 'recall'])
+                    ->name('tenant.web.kitchen.items.recall');
+                Route::post('/kitchen/items/{kitchenTicketItem}/refire', [TenantWebKitchenController::class, 'refire'])
+                    ->name('tenant.web.kitchen.items.refire');
+                Route::post('/kitchen/items/{kitchenTicketItem}/waste', [TenantWebKitchenController::class, 'waste'])
+                    ->name('tenant.web.kitchen.items.waste');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,cashier')->group(function (): void {
