@@ -10,9 +10,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'order_id',
+    'kot_dispatch_round_id',
     'kitchen_station_id',
     'submitted_by_user_id',
     'ticket_number',
+    'human_kot_number',
     'status',
     'queued_at',
     'started_at',
@@ -22,6 +24,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class KitchenTicket extends Model
 {
     use HasUlids;
+
+    public const STATUS_ACTIVE = 'active';
 
     public const STATUS_QUEUED = 'queued';
 
@@ -48,6 +52,11 @@ class KitchenTicket extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function round(): BelongsTo
+    {
+        return $this->belongsTo(KotDispatchRound::class, 'kot_dispatch_round_id');
     }
 
     public function station(): BelongsTo

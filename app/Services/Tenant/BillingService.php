@@ -24,7 +24,7 @@ class BillingService
     {
         return DB::connection('tenant')->transaction(function () use ($order, $actor): Bill {
             $order = Order::query()
-                ->with(['table.diningArea.branch', 'items', 'bill'])
+                ->with(['branch', 'table.diningArea.branch', 'items', 'bill'])
                 ->lockForUpdate()
                 ->findOrFail($order->getKey());
 
@@ -48,7 +48,7 @@ class BillingService
 
             $bill = Bill::query()->create([
                 'order_id' => $order->id,
-                'branch_id' => $order->table->diningArea->branch_id,
+                'branch_id' => $order->branch_id ?? $order->table?->diningArea?->branch_id,
                 'created_by_user_id' => $actor->getKey(),
                 'bill_number' => 'BILL-'.strtoupper((string) Str::ulid()),
                 'status' => Bill::STATUS_OPEN,
@@ -274,18 +274,21 @@ class BillingService
         ]);
 
         $order = Order::query()->lockForUpdate()->findOrFail($bill->order_id);
-        $table = DiningTable::query()->lockForUpdate()->findOrFail($order->dining_table_id);
+        $table = $order->dining_table_id
+            ? DiningTable::query()->lockForUpdate()->find($order->dining_table_id)
+            : null;
 
         $order->update([
             'status' => Order::STATUS_CLOSED,
             'closed_at' => now(),
         ]);
 
-        $table->update(['status' => DiningTable::STATUS_AVAILABLE]);
+        $table?->update(['status' => DiningTable::STATUS_AVAILABLE]);
 
         $this->billEvent($bill, $actor, 'bill.paid', [
             'paid_amount' => $bill->fresh()->paid_amount,
-            'table_id' => $table->id,
+            'table_id' => $table?->id,
+            'service_type' => $order->service_type,
         ]);
 
         $order->events()->create([

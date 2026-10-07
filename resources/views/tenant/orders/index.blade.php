@@ -12,6 +12,17 @@
                 'name' => $item->name,
                 'category' => $category->name,
                 'price' => (float) $item->price,
+                'modifier_groups' => $item->modifierGroups->map(fn ($group) => [
+                    'id' => $group->id,
+                    'name' => $group->name,
+                    'min_selections' => $group->min_selections,
+                    'max_selections' => $group->max_selections,
+                    'options' => $group->options->map(fn ($option) => [
+                        'id' => $option->id,
+                        'name' => $option->name,
+                        'price_delta' => (float) $option->price_delta,
+                    ])->values(),
+                ])->values(),
             ]))
             ->values();
 
@@ -20,13 +31,26 @@
                 $item = $menuOptions->firstWhere('id', $line['menu_item_id'] ?? null);
 
                 return [
+                    'client_line_id' => $line['client_line_id'] ?? '',
                     'menu_item_id' => $line['menu_item_id'] ?? '',
                     'name' => $item['name'] ?? 'Menu item',
                     'price' => (float) ($item['price'] ?? 0),
                     'quantity' => (int) ($line['quantity'] ?? 1),
                     'notes' => $line['notes'] ?? '',
+                    'seat_number' => $line['seat_number'] ?? '',
+                    'course_number' => $line['course_number'] ?? '',
+                    'course_name' => $line['course_name'] ?? '',
+                    'hold_for_course' => (bool) ($line['hold_for_course'] ?? false),
+                    'allergy_instructions' => $line['allergy_instructions'] ?? '',
+                    'kitchen_instructions' => $line['kitchen_instructions'] ?? '',
+                    'modifier_groups' => $item['modifier_groups'] ?? [],
+                    'selected_modifiers' => collect($line['modifiers'] ?? [])->pluck('option_id')->values(),
                 ];
             })
+            ->values();
+
+        $activeOrderOptions = $orders
+            ->whereIn('status', ['draft', 'submitted', 'preparing', 'ready', 'served'])
             ->values();
 
         $openTakeOrder = $errors->has('dining_table_id')
@@ -38,6 +62,8 @@
     <div
         x-data="{
             showTakeOrder: @js($openTakeOrder),
+            serviceType: @js(old('service_type', 'dine_in')),
+            existingOrderId: @js(old('existing_order_id', '')),
             items: @js($menuOptions),
             lines: @js($oldLines),
             addItem(item) {
@@ -49,18 +75,53 @@
                 }
 
                 this.lines.push({
+                    client_line_id: (window.crypto && window.crypto.randomUUID)
+                        ? window.crypto.randomUUID()
+                        : String(Date.now()) + '-' + Math.random().toString(16).slice(2),
                     menu_item_id: item.id,
                     name: item.name,
                     price: Number(item.price),
                     quantity: 1,
-                    notes: ''
+                    notes: '',
+                    seat_number: '',
+                    course_number: '',
+                    course_name: '',
+                    hold_for_course: false,
+                    allergy_instructions: '',
+                    kitchen_instructions: '',
+                    modifier_groups: item.modifier_groups || [],
+                    selected_modifiers: []
                 });
             },
             removeLine(index) {
                 this.lines.splice(index, 1);
             },
+            toggleModifier(line, optionId, maxSelections, group) {
+                const selectedInGroup = line.selected_modifiers.filter(id =>
+                    (group.options || []).some(option => option.id === id)
+                );
+
+                if (line.selected_modifiers.includes(optionId)) {
+                    line.selected_modifiers = line.selected_modifiers.filter(id => id !== optionId);
+                    return;
+                }
+
+                if (selectedInGroup.length < Number(maxSelections || 1)) {
+                    line.selected_modifiers.push(optionId);
+                }
+            },
+            modifierDelta(line) {
+                return (line.modifier_groups || []).reduce((sum, group) => {
+                    return sum + (group.options || []).reduce((groupSum, option) => {
+                        return groupSum + (line.selected_modifiers.includes(option.id)
+                            ? Number(option.price_delta || 0)
+                            : 0);
+                    }, 0);
+                }, 0);
+            },
             lineTotal(line) {
-                return Number(line.price || 0) * Number(line.quantity || 0);
+                return (Number(line.price || 0) + this.modifierDelta(line))
+                    * Number(line.quantity || 0);
             },
             grandTotal() {
                 return this.lines.reduce((sum, line) => sum + this.lineTotal(line), 0);
@@ -85,7 +146,7 @@
                 <button
                     type="button"
                     @click="showTakeOrder = !showTakeOrder"
-                    @disabled($availableTables->isEmpty() || $menuOptions->isEmpty())
+                    @disabled($menuOptions->isEmpty())
                     class="inline-flex items-center justify-center rounded-xl bg-emerald-500 px-5 py-3 text-sm font-black text-slate-950 shadow-sm hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                     <span class="mr-2 text-lg leading-none">+</span>
@@ -93,11 +154,10 @@
                 </button>
             </div>
 
-            @if ($availableTables->isEmpty() || $menuOptions->isEmpty())
+            @if ($menuOptions->isEmpty())
                 <div class="border-b border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
                     <span class="font-bold">Order entry needs setup:</span>
-                    @if ($availableTables->isEmpty()) there are no available active tables.@endif
-                    @if ($menuOptions->isEmpty()) {{ $availableTables->isEmpty() ? ' Also,' : '' }} there are no available menu items.@endif
+                    @if ($menuOptions->isEmpty()) there are no available menu items.@endif
                     Use <a href="/tables" class="font-black underline">Tables</a> and <a href="/menu" class="font-black underline">Menu</a> to configure them.
                 </div>
             @endif
@@ -105,24 +165,79 @@
             <div x-show="showTakeOrder" x-cloak class="border-b border-slate-200 bg-slate-50/70 p-5 sm:p-6">
                 <form method="POST" action="/orders/take" class="space-y-6">
                     @csrf
+                    <input type="hidden" name="client_order_id" value="{{ old('client_order_id', (string) \Illuminate\Support\Str::uuid()) }}">
+                    <input type="hidden" name="client_mutation_id" value="{{ old('client_mutation_id', (string) \Illuminate\Support\Str::uuid()) }}">
 
-                    <div class="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
                         <label>
-                            <span class="text-sm font-bold text-slate-700">Dining table</span>
-                            <select name="dining_table_id" required class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200">
-                                <option value="">Select an available table</option>
-                                @foreach ($availableTables as $table)
-                                    <option value="{{ $table->id }}" @selected((string) old('dining_table_id') === (string) $table->id)>
-                                        {{ $table->diningArea?->branch?->name }} · {{ $table->diningArea?->name }} · {{ $table->name }} ({{ $table->capacity }} seats)
+                            <span class="text-sm font-black text-slate-800">Order target</span>
+                            <select name="existing_order_id" x-model="existingOrderId"
+                                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                                <option value="">Create a new order</option>
+                                @foreach ($activeOrderOptions as $activeOrder)
+                                    <option value="{{ $activeOrder->id }}">
+                                        Add another KOT to
+                                        {{ $activeOrder->table?->name
+                                            ?? $activeOrder->service_reference
+                                            ?? ucfirst(str_replace('_', ' ', $activeOrder->service_type ?? 'order')) }}
+                                        · {{ ucfirst($activeOrder->status) }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="mt-2 text-xs text-slate-500">
+                                Select an active order to add only new items and send a later KOT round without resending earlier production.
+                            </p>
+                        </label>
+                    </div>
+
+                    <div x-show="!existingOrderId" class="grid gap-4 lg:grid-cols-4">
+                        <label>
+                            <span class="text-sm font-bold text-slate-700">Service type</span>
+                            <select x-model="serviceType" name="service_type" required
+                                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                                @foreach (['dine_in' => 'Dine In', 'takeaway' => 'Takeaway', 'delivery' => 'Delivery', 'counter' => 'Counter'] as $value => $label)
+                                    <option value="{{ $value }}">{{ $label }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+
+                        <label x-show="serviceType !== 'dine_in'">
+                            <span class="text-sm font-bold text-slate-700">Branch</span>
+                            <select name="branch_id" :required="serviceType !== 'dine_in'"
+                                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                                <option value="">Select branch</option>
+                                @foreach ($activeBranches as $branch)
+                                    <option value="{{ $branch->id }}" @selected((string) old('branch_id') === (string) $branch->id)>
+                                        {{ $branch->name }}
                                     </option>
                                 @endforeach
                             </select>
                         </label>
 
+                        <label x-show="serviceType === 'dine_in'">
+                            <span class="text-sm font-bold text-slate-700">Dining table</span>
+                            <select name="dining_table_id" :required="serviceType === 'dine_in'"
+                                    class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                                <option value="">Select an available table</option>
+                                @foreach ($availableTables as $table)
+                                    <option value="{{ $table->id }}" @selected((string) old('dining_table_id') === (string) $table->id)>
+                                        {{ $table->diningArea?->branch?->name }} · {{ $table->diningArea?->name }} · {{ $table->name }}
+                                    </option>
+                                @endforeach
+                            </select>
+                        </label>
+
+                        <label x-show="serviceType !== 'dine_in'">
+                            <span class="text-sm font-bold text-slate-700">Reference</span>
+                            <input name="service_reference" value="{{ old('service_reference') }}"
+                                   placeholder="Token / delivery / customer ref"
+                                   class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
+                        </label>
+
                         <label>
                             <span class="text-sm font-bold text-slate-700">Guests</span>
                             <input name="guest_count" type="number" min="1" max="100" value="{{ old('guest_count', 1) }}" required
-                                   class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200">
+                                   class="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm">
                         </label>
                     </div>
 
@@ -181,6 +296,7 @@
 
                                 <template x-for="(line, index) in lines" :key="line.menu_item_id">
                                     <div class="rounded-xl border border-slate-200 p-3">
+                                        <input type="hidden" :name="'lines[' + index + '][client_line_id]'" :value="line.client_line_id">
                                         <input type="hidden" :name="'lines[' + index + '][menu_item_id]'" :value="line.menu_item_id">
 
                                         <div class="flex items-start justify-between gap-3">
@@ -213,15 +329,72 @@
                                             </div>
                                         </div>
 
+                                        <template x-for="group in line.modifier_groups" :key="group.id">
+                                            <div class="mt-3">
+                                                <p class="text-xs font-black uppercase tracking-wide text-slate-500"
+                                                   x-text="group.name + ' (' + group.min_selections + '–' + group.max_selections + ')'"></p>
+                                                <div class="mt-2 flex flex-wrap gap-2">
+                                                    <template x-for="option in group.options" :key="option.id">
+                                                        <label class="cursor-pointer rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold">
+                                                            <input
+                                                                type="checkbox"
+                                                                class="mr-1"
+                                                                :checked="line.selected_modifiers.includes(option.id)"
+                                                                @change="toggleModifier(line, option.id, group.max_selections, group)"
+                                                            >
+                                                            <span x-text="option.name"></span>
+                                                            <span class="text-emerald-700" x-text="' +' + money(option.price_delta)"></span>
+                                                        </label>
+                                                    </template>
+                                                </div>
+                                                <template x-for="(optionId, modifierIndex) in line.selected_modifiers" :key="optionId">
+                                                    <input type="hidden"
+                                                           :name="'lines[' + index + '][modifiers][' + modifierIndex + '][option_id]'"
+                                                           :value="optionId">
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                                            <input x-model="line.seat_number" :name="'lines[' + index + '][seat_number]'"
+                                                   type="number" min="1" placeholder="Seat"
+                                                   class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                                            <input x-model="line.course_number" :name="'lines[' + index + '][course_number]'"
+                                                   type="number" min="1" placeholder="Course #"
+                                                   class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                                            <input x-model="line.course_name" :name="'lines[' + index + '][course_name]'"
+                                                   placeholder="Course name"
+                                                   class="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                                        </div>
+
+                                        <label class="mt-2 flex items-center gap-2 text-xs font-bold text-slate-600">
+                                            <input type="hidden" :name="'lines[' + index + '][hold_for_course]'" value="0">
+                                            <input type="checkbox" x-model="line.hold_for_course"
+                                                   :name="'lines[' + index + '][hold_for_course]'" value="1">
+                                            Hold until course is fired
+                                        </label>
+
                                         <label class="mt-3 block">
                                             <span class="text-xs font-bold uppercase tracking-wide text-slate-500">Item note</span>
-                                            <input
-                                                x-model="line.notes"
-                                                :name="'lines[' + index + '][notes]'"
-                                                maxlength="1000"
-                                                placeholder="e.g. no chili, extra sauce"
-                                                class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                                            >
+                                            <input x-model="line.notes" :name="'lines[' + index + '][notes]'"
+                                                   maxlength="1000" placeholder="Guest-facing note"
+                                                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                                        </label>
+
+                                        <label class="mt-2 block">
+                                            <span class="text-xs font-bold uppercase tracking-wide text-slate-500">Kitchen instruction</span>
+                                            <input x-model="line.kitchen_instructions"
+                                                   :name="'lines[' + index + '][kitchen_instructions]'"
+                                                   maxlength="1000" placeholder="e.g. sauce on side"
+                                                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                                        </label>
+
+                                        <label class="mt-2 block">
+                                            <span class="text-xs font-black uppercase tracking-wide text-rose-600">Allergy / critical</span>
+                                            <input x-model="line.allergy_instructions"
+                                                   :name="'lines[' + index + '][allergy_instructions]'"
+                                                   maxlength="1000" placeholder="Critical kitchen instruction"
+                                                   class="mt-1 w-full rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm">
                                         </label>
                                     </div>
                                 </template>

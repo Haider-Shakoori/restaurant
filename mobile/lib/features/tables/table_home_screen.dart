@@ -24,6 +24,7 @@ class TableHomeScreen extends StatefulWidget {
 }
 
 class _TableHomeScreenState extends State<TableHomeScreen> {
+  List<Map<String, Object?>> _branches = const [];
   List<Map<String, Object?>> _tables = const [];
   List<Map<String, Object?>> _orders = const [];
   int _pending = 0;
@@ -42,6 +43,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   Future<void> _refresh() async {
     final db = widget.dependencies.database;
     final values = await Future.wait<Object?>([
+      db.branches(),
       db.tables(),
       db.activeOrders(),
       db.pendingCount(),
@@ -56,17 +58,20 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
 
     setState(() {
-      _tables = List<Map<String, Object?>>.from(
+      _branches = List<Map<String, Object?>>.from(
         values[0]! as List<Map<String, Object?>>,
       );
-      _orders = List<Map<String, Object?>>.from(
+      _tables = List<Map<String, Object?>>.from(
         values[1]! as List<Map<String, Object?>>,
       );
-      _pending = values[2]! as int;
-      _conflicts = values[3]! as int;
-      _syncError = values[4] as String?;
-      _connectionStatus = values[5] as String?;
-      _session = values[6] as SessionCredentials?;
+      _orders = List<Map<String, Object?>>.from(
+        values[2]! as List<Map<String, Object?>>,
+      );
+      _pending = values[3]! as int;
+      _conflicts = values[4]! as int;
+      _syncError = values[5] as String?;
+      _connectionStatus = values[6] as String?;
+      _session = values[7] as SessionCredentials?;
     });
   }
 
@@ -113,7 +118,46 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     try {
       final orderId = await widget.dependencies.orders.createOrder(
         tableId: table['id']!.toString(),
+        branchId: table['branch_id']!.toString(),
+        serviceType: 'dine_in',
         guestCount: guests,
+      );
+      await _showOrder(orderId);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString())),
+        );
+      }
+    }
+  }
+
+  Future<void> _createServiceOrder(String serviceType) async {
+    if (_branches.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active restaurant branch is available.')),
+      );
+      return;
+    }
+
+    final details = await showDialog<_ServiceOrderDetails>(
+      context: context,
+      builder: (context) => _ServiceOrderDialog(
+        serviceType: serviceType,
+        branches: _branches,
+      ),
+    );
+
+    if (details == null) {
+      return;
+    }
+
+    try {
+      final orderId = await widget.dependencies.orders.createOrder(
+        branchId: details.branchId,
+        serviceType: serviceType,
+        serviceReference: details.reference,
+        guestCount: details.guests,
       );
       await _showOrder(orderId);
     } on Object catch (error) {
@@ -240,6 +284,28 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                FilledButton.icon(
+                  onPressed: () => _createServiceOrder('takeaway'),
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: const Text('Takeaway'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => _createServiceOrder('delivery'),
+                  icon: const Icon(Icons.delivery_dining_outlined),
+                  label: const Text('Delivery'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: () => _createServiceOrder('counter'),
+                  icon: const Icon(Icons.point_of_sale_outlined),
+                  label: const Text('Counter'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             GridView.builder(
               physics: const NeverScrollableScrollPhysics(),
               shrinkWrap: true,
@@ -340,6 +406,130 @@ class _GuestDialogState extends State<_GuestDialog> {
         FilledButton(
           onPressed: () => Navigator.pop(context, guests),
           child: Text(widget.strings.createOrder),
+        ),
+      ],
+    );
+  }
+}
+
+
+class _ServiceOrderDetails {
+  const _ServiceOrderDetails({
+    required this.branchId,
+    required this.guests,
+    this.reference,
+  });
+
+  final String branchId;
+  final int guests;
+  final String? reference;
+}
+
+class _ServiceOrderDialog extends StatefulWidget {
+  const _ServiceOrderDialog({
+    required this.serviceType,
+    required this.branches,
+  });
+
+  final String serviceType;
+  final List<Map<String, Object?>> branches;
+
+  @override
+  State<_ServiceOrderDialog> createState() => _ServiceOrderDialogState();
+}
+
+class _ServiceOrderDialogState extends State<_ServiceOrderDialog> {
+  late String branchId;
+  final reference = TextEditingController();
+  int guests = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    branchId = widget.branches.first['id']!.toString();
+  }
+
+  @override
+  void dispose() {
+    reference.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.serviceType[0].toUpperCase() +
+        widget.serviceType.substring(1);
+
+    return AlertDialog(
+      title: Text('New $title order'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String>(
+              initialValue: branchId,
+              decoration: const InputDecoration(labelText: 'Branch'),
+              items: widget.branches
+                  .map(
+                    (branch) => DropdownMenuItem<String>(
+                      value: branch['id']!.toString(),
+                      child: Text(branch['name']!.toString()),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => branchId = value);
+                }
+              },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reference,
+              decoration: InputDecoration(
+                labelText: widget.serviceType == 'delivery'
+                    ? 'Delivery / customer reference'
+                    : 'Order reference (optional)',
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  onPressed:
+                      guests > 1 ? () => setState(() => guests--) : null,
+                  icon: const Icon(Icons.remove_circle_outline),
+                ),
+                Text('$guests guest(s)'),
+                IconButton(
+                  onPressed:
+                      guests < 100 ? () => setState(() => guests++) : null,
+                  icon: const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final cleaned = reference.text.trim();
+            Navigator.of(context).pop(
+              _ServiceOrderDetails(
+                branchId: branchId,
+                guests: guests,
+                reference: cleaned.isEmpty ? null : cleaned,
+              ),
+            );
+          },
+          child: const Text('Create order'),
         ),
       ],
     );

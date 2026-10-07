@@ -22,6 +22,8 @@ use App\Models\Supplier;
 use App\Models\TenantPayment;
 use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
+use App\Services\Tenant\KitchenPerformanceService;
+use App\Services\Tenant\RestaurantSettingsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
@@ -93,9 +95,19 @@ class TenantPortalController extends Controller
                 ->orderBy('name')
                 ->get(),
             'menuCategories' => MenuCategory::query()
-                ->with(['items' => fn ($query) => $query->where('is_available', true)->orderBy('sort_order')->orderBy('name')])
+                ->with(['items' => fn ($query) => $query
+                    ->where('is_available', true)
+                    ->with(['modifierGroups' => fn ($groups) => $groups
+                        ->where('menu_modifier_groups.is_active', true)
+                        ->with(['options' => fn ($options) => $options->where('is_active', true)])])
+                    ->orderBy('sort_order')
+                    ->orderBy('name')])
                 ->where('is_active', true)
                 ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(),
+            'activeBranches' => RestaurantBranch::query()
+                ->where('is_active', true)
                 ->orderBy('name')
                 ->get(),
             'statuses' => [
@@ -111,20 +123,30 @@ class TenantPortalController extends Controller
         ]);
     }
 
-    public function kitchen(): View
-    {
+    public function kitchen(
+        RestaurantSettingsService $settings,
+        KitchenPerformanceService $performance,
+    ): View {
         return $this->view('tenant.kitchen.index', [
             'stations' => KitchenStation::query()->with('branch')->where('is_active', true)->orderBy('sort_order')->get(),
             'tickets' => KitchenTicket::query()
-                ->with(['station', 'items', 'order.table', 'order.waiter'])
+                ->with(['round', 'station', 'items', 'order.table', 'order.waiter'])
                 ->whereIn('status', [
+                    KitchenTicket::STATUS_ACTIVE,
                     KitchenTicket::STATUS_QUEUED,
                     KitchenTicket::STATUS_PREPARING,
                     KitchenTicket::STATUS_READY,
                 ])
+                ->orderByRaw("CASE WHEN status = 'preparing' THEN 0 WHEN status IN ('queued', 'active') THEN 1 ELSE 2 END")
                 ->orderBy('queued_at')
                 ->limit(100)
                 ->get(),
+            'restaurantSettings' => $settings->all(),
+            'performance' => $performance->summary(
+                null,
+                now()->startOfDay()->toDateString(),
+                now()->toDateString(),
+            ),
         ]);
     }
 
@@ -186,7 +208,7 @@ class TenantPortalController extends Controller
         ]);
     }
 
-    public function settings(SubscriptionService $subscriptions): View
+    public function settings(SubscriptionService $subscriptions, RestaurantSettingsService $settings): View
     {
         $business = Business::query()->where('tenant_id', tenant('id'))->first();
         $mobileDeviceLimit = null;
@@ -217,6 +239,7 @@ class TenantPortalController extends Controller
             'mobileDeviceLimit' => $mobileDeviceLimit,
             'activeMobileDevices' => $activeMobileDevices,
             'activatedDevices' => $activatedDevices,
+            'restaurantSettings' => $settings->all(),
         ]);
     }
 

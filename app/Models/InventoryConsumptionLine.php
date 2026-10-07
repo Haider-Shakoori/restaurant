@@ -10,10 +10,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'inventory_consumption_id',
     'order_item_id',
+    'kitchen_ticket_item_id',
     'recipe_id',
     'inventory_item_id',
     'stock_movement_id',
     'quantity_base',
+    'cost_amount',
 ])]
 class InventoryConsumptionLine extends Model
 {
@@ -23,12 +25,20 @@ class InventoryConsumptionLine extends Model
 
     protected function casts(): array
     {
-        return ['quantity_base' => 'decimal:4'];
+        return [
+            'quantity_base' => 'decimal:4',
+            'cost_amount' => 'decimal:2',
+        ];
     }
 
     public function consumption(): BelongsTo
     {
         return $this->belongsTo(InventoryConsumption::class, 'inventory_consumption_id');
+    }
+
+    public function productionItem(): BelongsTo
+    {
+        return $this->belongsTo(KitchenTicketItem::class, 'kitchen_ticket_item_id');
     }
 
     public function stockMovement(): BelongsTo

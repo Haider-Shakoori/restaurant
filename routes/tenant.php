@@ -12,8 +12,11 @@ use App\Http\Controllers\Tenant\ChartAccountController;
 use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DesktopReconciliationController;
 use App\Http\Controllers\Tenant\DiningTableController;
+use App\Http\Controllers\Tenant\ExpoController;
+use App\Http\Controllers\Tenant\FireOrderCourseController;
 use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\JournalEntryController;
+use App\Http\Controllers\Tenant\KitchenPerformanceReportController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
 use App\Http\Controllers\Tenant\KitchenStationController;
 use App\Http\Controllers\Tenant\KitchenTicketController;
@@ -21,15 +24,23 @@ use App\Http\Controllers\Tenant\LicenseActivationController;
 use App\Http\Controllers\Tenant\LicensePublicKeyController;
 use App\Http\Controllers\Tenant\MenuController;
 use App\Http\Controllers\Tenant\MenuItemImageController;
+use App\Http\Controllers\Tenant\MergeOrdersController;
+use App\Http\Controllers\Tenant\MoveOrderItemController;
 use App\Http\Controllers\Tenant\OfflineLeaseController;
 use App\Http\Controllers\Tenant\OperatingExpenseController;
 use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
+use App\Http\Controllers\Tenant\ReadyKitchenTicketItemController;
+use App\Http\Controllers\Tenant\RecallKitchenTicketItemController;
 use App\Http\Controllers\Tenant\RecipeController;
+use App\Http\Controllers\Tenant\RecordProductionWasteController;
+use App\Http\Controllers\Tenant\RefireKitchenTicketItemController;
+use App\Http\Controllers\Tenant\RestaurantSettingsController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
+use App\Http\Controllers\Tenant\StartKitchenTicketItemController;
 use App\Http\Controllers\Tenant\StockMovementController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
@@ -43,7 +54,10 @@ use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Controllers\Tenant\TenantWebKitchenController;
 use App\Http\Controllers\Tenant\TenantWebOrderController;
+use App\Http\Controllers\Tenant\TransferOrderTableController;
+use App\Http\Controllers\Tenant\VoidKitchenTicketItemController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
@@ -93,6 +107,18 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
 
             Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
                 Route::get('/kitchen', [TenantPortalController::class, 'kitchen'])->name('tenant.web.kitchen');
+                Route::post('/kitchen/items/{kitchenTicketItem}/start', [TenantWebKitchenController::class, 'start'])
+                    ->name('tenant.web.kitchen.items.start');
+                Route::post('/kitchen/items/{kitchenTicketItem}/ready', [TenantWebKitchenController::class, 'ready'])
+                    ->name('tenant.web.kitchen.items.ready');
+                Route::post('/kitchen/items/{kitchenTicketItem}/void', [TenantWebKitchenController::class, 'void'])
+                    ->name('tenant.web.kitchen.items.void');
+                Route::post('/kitchen/items/{kitchenTicketItem}/recall', [TenantWebKitchenController::class, 'recall'])
+                    ->name('tenant.web.kitchen.items.recall');
+                Route::post('/kitchen/items/{kitchenTicketItem}/refire', [TenantWebKitchenController::class, 'refire'])
+                    ->name('tenant.web.kitchen.items.refire');
+                Route::post('/kitchen/items/{kitchenTicketItem}/waste', [TenantWebKitchenController::class, 'waste'])
+                    ->name('tenant.web.kitchen.items.waste');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,cashier')->group(function (): void {
@@ -116,6 +142,8 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                 Route::get('/settings', [TenantPortalController::class, 'settings'])->name('tenant.web.settings');
                 Route::post('/settings/devices/{deviceActivation}/revoke', [TenantDeviceController::class, 'revoke'])
                     ->name('tenant.web.devices.revoke');
+                Route::post('/settings/restaurant', [RestaurantSettingsController::class, 'update'])
+                    ->name('tenant.web.settings.restaurant.update');
 
                 Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
@@ -233,6 +261,30 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/kitchen/tickets/{kitchenTicket}/ready', ReadyKitchenTicketController::class)
                     ->name('tenant.api.kitchen.tickets.ready');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/start', StartKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.start');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/ready', ReadyKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.ready');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/void', VoidKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.void');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/refire', RefireKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.refire');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/recall', RecallKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.recall');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/waste', RecordProductionWasteController::class)
+                    ->name('tenant.api.kitchen.items.waste');
+
+                Route::get('/kitchen/expo', ExpoController::class)
+                    ->name('tenant.api.kitchen.expo');
+
+                Route::get('/kitchen/reports/performance', KitchenPerformanceReportController::class)
+                    ->name('tenant.api.kitchen.reports.performance');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
@@ -250,6 +302,18 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/orders/{order}/submit', SubmitOrderController::class)
                     ->name('tenant.api.orders.submit');
+
+                Route::post('/orders/{order}/courses/{courseNumber}/fire', FireOrderCourseController::class)
+                    ->name('tenant.api.orders.courses.fire');
+
+                Route::post('/orders/{order}/transfer-table', TransferOrderTableController::class)
+                    ->name('tenant.api.orders.transfer-table');
+
+                Route::post('/orders/{order}/items/{orderItem}/move', MoveOrderItemController::class)
+                    ->name('tenant.api.orders.items.move');
+
+                Route::post('/orders/{order}/merge', MergeOrdersController::class)
+                    ->name('tenant.api.orders.merge');
 
                 Route::post('/orders/{order}/serve', ServeOrderController::class)
                     ->name('tenant.api.orders.serve');

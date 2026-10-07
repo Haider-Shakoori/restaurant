@@ -5,6 +5,9 @@ namespace App\Services\Tenant;
 use App\Models\InventoryBalance;
 use App\Models\InventoryConsumption;
 use App\Models\InventoryItem;
+use App\Models\InventoryReservation;
+use App\Models\InventoryReservationLine;
+use App\Models\KitchenTicketItem;
 use App\Models\Order;
 use App\Models\Recipe;
 use App\Models\RestaurantBranch;
@@ -20,6 +23,7 @@ class InventoryService
     public function __construct(
         private readonly InventoryValuationService $valuation,
         private readonly AccountingService $accounting,
+        private readonly RestaurantSettingsService $settings,
     ) {}
 
     public function recordMovement(
@@ -154,102 +158,402 @@ class InventoryService
         });
     }
 
-    public function consumeOrder(Order $order, TenantUser $actor): InventoryConsumption
+    public function reserveProduction(KitchenTicketItem $productionItem, TenantUser $actor): ?InventoryReservation
     {
-        return DB::connection('tenant')->transaction(function () use ($order, $actor): InventoryConsumption {
-            $existing = InventoryConsumption::query()
-                ->where('order_id', $order->getKey())
+        return DB::connection('tenant')->transaction(function () use ($productionItem, $actor): ?InventoryReservation {
+            $productionItem = KitchenTicketItem::query()
+                ->with([
+                    'ticket.order.branch',
+                    'ticket.order.table.diningArea.branch',
+                    'orderItem',
+                ])
+                ->lockForUpdate()
+                ->findOrFail($productionItem->getKey());
+
+            $existing = InventoryReservation::query()
+                ->where('kitchen_ticket_item_id', $productionItem->id)
                 ->first();
 
             if ($existing) {
-                return $existing->load(['lines.stockMovement.item']);
+                return $existing->load('lines.inventoryItem');
             }
 
+            $order = $productionItem->ticket->order;
+            $branch = $order->branch ?? $order->table?->diningArea?->branch;
+
+            if (! $branch || ! $productionItem->orderItem?->menu_item_id) {
+                return null;
+            }
+
+            $recipe = Recipe::query()
+                ->where('branch_id', $branch->id)
+                ->where('menu_item_id', $productionItem->orderItem->menu_item_id)
+                ->where('is_active', true)
+                ->orderByDesc('version')
+                ->with('items.inventoryItem')
+                ->first();
+
+            if (! $recipe) {
+                return null;
+            }
+
+            $policy = $this->settings->all($branch->id)['negative_stock_policy'] ?? 'block';
+            $quantities = [];
+
+            foreach ($recipe->items as $recipeItem) {
+                $quantity = Quantity::multiply(
+                    (string) $recipeItem->quantity_base,
+                    (string) $productionItem->quantity,
+                );
+
+                InventoryBalance::query()->firstOrCreate(
+                    [
+                        'branch_id' => $branch->id,
+                        'inventory_item_id' => $recipeItem->inventory_item_id,
+                    ],
+                    ['quantity' => '0.0000'],
+                );
+
+                $balance = InventoryBalance::query()
+                    ->where('branch_id', $branch->id)
+                    ->where('inventory_item_id', $recipeItem->inventory_item_id)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                $reserved = InventoryReservationLine::query()
+                    ->where('inventory_item_id', $recipeItem->inventory_item_id)
+                    ->whereHas('reservation', fn ($query) => $query
+                        ->where('branch_id', $branch->id)
+                        ->where('status', InventoryReservation::STATUS_RESERVED))
+                    ->sum('quantity_base');
+
+                $available = Quantity::subtract((string) $balance->quantity, (string) $reserved);
+
+                if (
+                    $policy === 'block'
+                    && Quantity::toScaled($available) < Quantity::toScaled($quantity)
+                ) {
+                    throw ValidationException::withMessages([
+                        'inventory' => "Insufficient {$recipeItem->inventoryItem->name} for this kitchen production.",
+                    ]);
+                }
+
+                $quantities[] = [$recipeItem, $quantity];
+            }
+
+            $reservation = InventoryReservation::query()->create([
+                'branch_id' => $branch->id,
+                'order_id' => $order->id,
+                'kitchen_ticket_item_id' => $productionItem->id,
+                'status' => InventoryReservation::STATUS_RESERVED,
+                'reserved_at' => now(),
+            ]);
+
+            foreach ($quantities as [$recipeItem, $quantity]) {
+                $reservation->lines()->create([
+                    'recipe_id' => $recipe->id,
+                    'inventory_item_id' => $recipeItem->inventory_item_id,
+                    'quantity_base' => $quantity,
+                ]);
+            }
+
+            $order->events()->create([
+                'actor_user_id' => $actor->getKey(),
+                'event_type' => 'inventory.production_reserved',
+                'from_status' => $order->status,
+                'to_status' => $order->status,
+                'payload' => [
+                    'kitchen_ticket_item_id' => $productionItem->id,
+                    'reservation_id' => $reservation->id,
+                    'negative_stock_policy' => $policy,
+                ],
+                'occurred_at' => now(),
+            ]);
+
+            return $reservation->load('lines.inventoryItem');
+        });
+    }
+
+    public function commitProduction(KitchenTicketItem $productionItem, TenantUser $actor): ?InventoryConsumption
+    {
+        return DB::connection('tenant')->transaction(function () use ($productionItem, $actor): ?InventoryConsumption {
+            $productionItem = KitchenTicketItem::query()
+                ->with([
+                    'ticket.order.branch',
+                    'ticket.order.table.diningArea.branch',
+                    'orderItem',
+                ])
+                ->lockForUpdate()
+                ->findOrFail($productionItem->getKey());
+
+            $reservation = InventoryReservation::query()
+                ->with('lines.inventoryItem')
+                ->where('kitchen_ticket_item_id', $productionItem->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reservation) {
+                $reservation = $this->reserveProduction($productionItem, $actor);
+            }
+
+            if (! $reservation) {
+                return null;
+            }
+
+            if ($reservation->status === InventoryReservation::STATUS_RELEASED) {
+                throw ValidationException::withMessages([
+                    'inventory' => 'Released production cannot be committed without creating a new production item.',
+                ]);
+            }
+
+            $order = $productionItem->ticket->order;
+            $branch = $order->branch ?? $order->table?->diningArea?->branch;
+
+            $consumption = InventoryConsumption::query()->firstOrCreate(
+                ['order_id' => $order->id],
+                [
+                    'branch_id' => $branch->id,
+                    'consumed_by_user_id' => $actor->getKey(),
+                    'total_cost' => '0.00',
+                    'consumed_at' => now(),
+                ],
+            );
+
+            if ($reservation->status === InventoryReservation::STATUS_COMMITTED) {
+                return $consumption->load(['lines.stockMovement.item']);
+            }
+
+            $addedCostMinor = 0;
+
+            foreach ($reservation->lines as $line) {
+                $existingLine = $consumption->lines()
+                    ->where('kitchen_ticket_item_id', $productionItem->id)
+                    ->where('inventory_item_id', $line->inventory_item_id)
+                    ->first();
+
+                if ($existingLine) {
+                    continue;
+                }
+
+                $ingredientCost = $this->valuation->consume(
+                    $branch,
+                    $line->inventoryItem,
+                    (string) $line->quantity_base,
+                );
+                $addedCostMinor += Money::toMinor($ingredientCost);
+
+                $movement = $this->recordMovement(
+                    $branch,
+                    $line->inventoryItem,
+                    $actor,
+                    StockMovement::TYPE_CONSUMPTION,
+                    Quantity::subtract('0', (string) $line->quantity_base),
+                    'kitchen_production',
+                    $productionItem->id,
+                    'production-consumption:'.$productionItem->id.':'.$line->inventory_item_id,
+                    $productionItem->order_item_id,
+                    notes: 'Recipe consumption committed for kitchen production.',
+                );
+
+                $consumption->lines()->create([
+                    'order_item_id' => $productionItem->order_item_id,
+                    'kitchen_ticket_item_id' => $productionItem->id,
+                    'recipe_id' => $line->recipe_id,
+                    'inventory_item_id' => $line->inventory_item_id,
+                    'stock_movement_id' => $movement->id,
+                    'quantity_base' => $line->quantity_base,
+                    'cost_amount' => $ingredientCost,
+                ]);
+            }
+
+            if ($addedCostMinor !== 0) {
+                $addedCost = Money::fromMinor($addedCostMinor);
+
+                $consumption->update([
+                    'total_cost' => Money::add(
+                        (string) $consumption->total_cost,
+                        $addedCost,
+                    ),
+                ]);
+
+                $this->accounting->postProductionConsumption(
+                    $consumption->fresh(),
+                    $productionItem,
+                    $actor,
+                    $addedCost,
+                );
+            }
+
+            $reservation->update([
+                'status' => InventoryReservation::STATUS_COMMITTED,
+                'committed_at' => now(),
+            ]);
+
+            return $consumption->fresh()->load(['lines.stockMovement.item']);
+        });
+    }
+
+    public function releaseProduction(KitchenTicketItem $productionItem, TenantUser $actor): ?InventoryReservation
+    {
+        return DB::connection('tenant')->transaction(function () use ($productionItem, $actor): ?InventoryReservation {
+            $reservation = InventoryReservation::query()
+                ->where('kitchen_ticket_item_id', $productionItem->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $reservation || $reservation->status === InventoryReservation::STATUS_RELEASED) {
+                return $reservation;
+            }
+
+            if ($reservation->status === InventoryReservation::STATUS_COMMITTED) {
+                throw ValidationException::withMessages([
+                    'inventory' => 'Consumed production inventory cannot be released back to stock.',
+                ]);
+            }
+
+            $reservation->update([
+                'status' => InventoryReservation::STATUS_RELEASED,
+                'released_at' => now(),
+            ]);
+
+            $productionItem->loadMissing('ticket.order');
+            $productionItem->ticket->order->events()->create([
+                'actor_user_id' => $actor->getKey(),
+                'event_type' => 'inventory.production_released',
+                'from_status' => $productionItem->ticket->order->status,
+                'to_status' => $productionItem->ticket->order->status,
+                'payload' => [
+                    'kitchen_ticket_item_id' => $productionItem->id,
+                    'reservation_id' => $reservation->id,
+                ],
+                'occurred_at' => now(),
+            ]);
+
+            return $reservation;
+        });
+    }
+
+    public function consumeOrder(Order $order, TenantUser $actor): InventoryConsumption
+    {
+        return DB::connection('tenant')->transaction(function () use ($order, $actor): InventoryConsumption {
             $order = Order::query()
-                ->with(['table.diningArea.branch', 'items'])
+                ->with([
+                    'branch',
+                    'table.diningArea.branch',
+                    'kitchenTickets.items',
+                ])
                 ->lockForUpdate()
                 ->findOrFail($order->getKey());
 
             if (! in_array($order->status, [Order::STATUS_READY, Order::STATUS_SERVED], true)) {
                 throw ValidationException::withMessages([
-                    'order' => 'Inventory can only be consumed for a ready or served order.',
+                    'order' => 'Inventory can only be finalized for a ready or served order.',
                 ]);
             }
 
-            $branch = $order->table->diningArea->branch;
-            $menuItemIds = $order->items->pluck('menu_item_id')->filter()->unique();
+            $productionItems = $order->kitchenTickets->flatMap->items;
 
-            $recipes = Recipe::query()
-                ->where('branch_id', $branch->id)
-                ->where('is_active', true)
-                ->whereIn('menu_item_id', $menuItemIds)
-                ->with('items.inventoryItem')
-                ->get()
-                ->keyBy('menu_item_id');
-
-            $consumption = InventoryConsumption::query()->create([
-                'order_id' => $order->id,
-                'branch_id' => $branch->id,
-                'consumed_by_user_id' => $actor->getKey(),
-                'consumed_at' => now(),
-            ]);
-
-            $costMinor = 0;
-
-            foreach ($order->items as $orderItem) {
-                if (! $orderItem->menu_item_id) {
+            foreach ($productionItems as $productionItem) {
+                if (in_array($productionItem->status, ['voided', 'cancelled'], true)) {
                     continue;
                 }
 
-                $recipe = $recipes->get($orderItem->menu_item_id);
+                $this->commitProduction($productionItem, $actor);
+            }
 
-                if (! $recipe) {
-                    continue;
+            $branch = $order->branch ?? $order->table?->diningArea?->branch;
+
+            if (! $branch) {
+                throw ValidationException::withMessages([
+                    'branch_id' => 'This order is missing an inventory branch.',
+                ]);
+            }
+
+            $consumption = InventoryConsumption::query()->firstOrCreate(
+                ['order_id' => $order->id],
+                [
+                    'branch_id' => $branch->id,
+                    'consumed_by_user_id' => $actor->getKey(),
+                    'total_cost' => '0.00',
+                    'consumed_at' => now(),
+                ],
+            );
+
+            if ($productionItems->isEmpty() && $consumption->lines()->doesntExist()) {
+                $menuItemIds = $order->items()->pluck('menu_item_id')->filter()->unique();
+                $recipes = Recipe::query()
+                    ->where('branch_id', $branch->id)
+                    ->where('is_active', true)
+                    ->whereIn('menu_item_id', $menuItemIds)
+                    ->with('items.inventoryItem')
+                    ->get()
+                    ->keyBy('menu_item_id');
+
+                $legacyCostMinor = 0;
+
+                foreach ($order->items as $orderItem) {
+                    $recipe = $orderItem->menu_item_id
+                        ? $recipes->get($orderItem->menu_item_id)
+                        : null;
+
+                    if (! $recipe) {
+                        continue;
+                    }
+
+                    foreach ($recipe->items as $recipeItem) {
+                        $quantity = Quantity::multiply(
+                            (string) $recipeItem->quantity_base,
+                            (string) $orderItem->quantity,
+                        );
+
+                        $ingredientCost = $this->valuation->consume(
+                            $branch,
+                            $recipeItem->inventoryItem,
+                            $quantity,
+                        );
+                        $legacyCostMinor += Money::toMinor($ingredientCost);
+
+                        $movement = $this->recordMovement(
+                            $branch,
+                            $recipeItem->inventoryItem,
+                            $actor,
+                            StockMovement::TYPE_CONSUMPTION,
+                            Quantity::subtract('0', $quantity),
+                            'order_legacy',
+                            $order->id,
+                            'legacy-order-consumption:'.$order->id.':'.$orderItem->id.':'.$recipeItem->inventory_item_id,
+                            $orderItem->id,
+                            notes: 'Legacy recipe finalization for an order without production records.',
+                        );
+
+                        $consumption->lines()->create([
+                            'order_item_id' => $orderItem->id,
+                            'kitchen_ticket_item_id' => null,
+                            'recipe_id' => $recipe->id,
+                            'inventory_item_id' => $recipeItem->inventory_item_id,
+                            'stock_movement_id' => $movement->id,
+                            'quantity_base' => $quantity,
+                            'cost_amount' => $ingredientCost,
+                        ]);
+                    }
                 }
 
-                foreach ($recipe->items as $recipeItem) {
-                    $quantity = Quantity::multiply(
-                        (string) $recipeItem->quantity_base,
-                        (string) $orderItem->quantity,
-                    );
-
-                    $ingredientCost = $this->valuation->consume(
-                        $branch,
-                        $recipeItem->inventoryItem,
-                        $quantity,
-                    );
-                    $costMinor += Money::toMinor($ingredientCost);
-
-                    $movement = $this->recordMovement(
-                        $branch,
-                        $recipeItem->inventoryItem,
-                        $actor,
-                        StockMovement::TYPE_CONSUMPTION,
-                        Quantity::subtract('0', $quantity),
-                        'order',
-                        $order->id,
-                        'order-consumption:'.$order->id.':'.$orderItem->id.':'.$recipeItem->inventory_item_id,
-                        $orderItem->id,
-                        notes: 'Automatic recipe consumption for served order.',
-                    );
-
-                    $consumption->lines()->create([
-                        'order_item_id' => $orderItem->id,
-                        'recipe_id' => $recipe->id,
-                        'inventory_item_id' => $recipeItem->inventory_item_id,
-                        'stock_movement_id' => $movement->id,
-                        'quantity_base' => $quantity,
+                if ($legacyCostMinor !== 0) {
+                    $consumption->update([
+                        'total_cost' => Money::fromMinor($legacyCostMinor),
                     ]);
                 }
             }
 
-            $this->accounting->postInventoryConsumption(
-                $consumption,
-                $actor,
-                Money::fromMinor($costMinor),
-            );
+            if ($productionItems->isEmpty()) {
+                $this->accounting->postInventoryConsumption(
+                    $consumption->fresh(),
+                    $actor,
+                    (string) $consumption->fresh()->total_cost,
+                );
+            }
 
-            return $consumption->load(['lines.stockMovement.item']);
+            return $consumption->fresh()->load(['lines.stockMovement.item']);
         });
     }
 }

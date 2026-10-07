@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['order_id', 'branch_id', 'consumed_by_user_id', 'consumed_at'])]
+#[Fillable(['order_id', 'branch_id', 'consumed_by_user_id', 'total_cost', 'consumed_at'])]
 class InventoryConsumption extends Model
 {
     use HasUlids;
@@ -17,7 +17,10 @@ class InventoryConsumption extends Model
 
     protected function casts(): array
     {
-        return ['consumed_at' => 'datetime'];
+        return [
+            'total_cost' => 'decimal:2',
+            'consumed_at' => 'datetime',
+        ];
     }
 
     public function order(): BelongsTo

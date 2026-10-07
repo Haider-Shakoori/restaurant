@@ -453,6 +453,125 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonPath('data.kitchen.routes.0.kitchen_station_id', $station->id);
     }
 
+    public function test_mobile_sync_supports_table_transfer_unsent_split_and_merge(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'sync-device-ops');
+
+        tenancy()->initialize($tenant);
+        [, $table, $menuItem] = $this->seedRestaurant('waiter1@restaurant.test');
+        $area = DiningArea::query()->firstOrFail();
+
+        $tableTwo = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-02',
+            'name' => 'Table 2',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+        $tableThree = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-03',
+            'name' => 'Table 3',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        tenancy()->end();
+
+        $token = $this->login($domain, 'waiter1@restaurant.test');
+        $headers = $this->syncHeaders($token, $credentials);
+
+        $mutations = [
+            [
+                'mutation_id' => 'OPS-OPEN-SOURCE',
+                'operation' => 'order.open',
+                'payload' => [
+                    'client_order_id' => 'OPS-SOURCE',
+                    'dining_table_id' => $table->id,
+                    'guest_count' => 2,
+                ],
+            ],
+            [
+                'mutation_id' => 'OPS-LINE-SOURCE',
+                'operation' => 'order.item.add',
+                'payload' => [
+                    'client_order_id' => 'OPS-SOURCE',
+                    'client_line_id' => 'OPS-SOURCE-LINE',
+                    'menu_item_id' => $menuItem->id,
+                    'quantity' => 2,
+                ],
+            ],
+            [
+                'mutation_id' => 'OPS-OPEN-TARGET',
+                'operation' => 'order.open',
+                'payload' => [
+                    'client_order_id' => 'OPS-TARGET',
+                    'dining_table_id' => $tableTwo->id,
+                    'guest_count' => 1,
+                ],
+            ],
+            [
+                'mutation_id' => 'OPS-TRANSFER',
+                'operation' => 'order.table.transfer',
+                'payload' => [
+                    'client_order_id' => 'OPS-SOURCE',
+                    'target_table_id' => $tableThree->id,
+                ],
+            ],
+            [
+                'mutation_id' => 'OPS-MOVE',
+                'operation' => 'order.item.move',
+                'payload' => [
+                    'source_client_order_id' => 'OPS-SOURCE',
+                    'target_client_order_id' => 'OPS-TARGET',
+                    'client_line_id' => 'OPS-SOURCE-LINE',
+                    'target_client_line_id' => 'OPS-MOVED-LINE',
+                    'quantity' => 1,
+                ],
+            ],
+            [
+                'mutation_id' => 'OPS-MERGE',
+                'operation' => 'order.merge',
+                'payload' => [
+                    'source_client_order_id' => 'OPS-SOURCE',
+                    'target_client_order_id' => 'OPS-TARGET',
+                ],
+            ],
+        ];
+
+        $result = $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/sync/push", [
+                'batch_id' => 'OPS-BATCH',
+                'mutations' => $mutations,
+            ])
+            ->assertOk()
+            ->json('data.results');
+
+        $this->assertSame(
+            array_fill(0, 6, 'accepted'),
+            collect($result)->pluck('status')->all(),
+        );
+
+        tenancy()->initialize($tenant);
+
+        $source = Order::query()->where('client_order_id', 'OPS-SOURCE')->firstOrFail();
+        $target = Order::query()->where('client_order_id', 'OPS-TARGET')->firstOrFail();
+
+        $this->assertSame(Order::STATUS_CANCELLED, $source->status);
+        $this->assertSame('0.00', $source->total);
+        $this->assertSame('500.00', $target->total);
+        $this->assertSame(2, $target->items()->count());
+        $this->assertSame(1, $target->items()->where('client_line_id', 'OPS-MOVED-LINE')->count());
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $tableTwo->fresh()->status);
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $tableThree->fresh()->status);
+
+        tenancy()->end();
+    }
+
     public function test_sync_requires_valid_activated_device_secret_in_addition_to_user_token(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();

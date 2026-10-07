@@ -12,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'client_order_id',
+    'branch_id',
+    'service_type',
+    'service_reference',
     'dining_table_id',
     'waiter_id',
     'status',
@@ -28,6 +31,21 @@ class Order extends Model
 {
     use HasUlids, RecordsSyncChanges;
 
+    public const SERVICE_DINE_IN = 'dine_in';
+
+    public const SERVICE_TAKEAWAY = 'takeaway';
+
+    public const SERVICE_DELIVERY = 'delivery';
+
+    public const SERVICE_COUNTER = 'counter';
+
+    public const SERVICE_TYPES = [
+        self::SERVICE_DINE_IN,
+        self::SERVICE_TAKEAWAY,
+        self::SERVICE_DELIVERY,
+        self::SERVICE_COUNTER,
+    ];
+
     public const STATUS_DRAFT = 'draft';
 
     public const STATUS_SUBMITTED = 'submitted';
@@ -43,6 +61,14 @@ class Order extends Model
     public const STATUS_CLOSED = 'closed';
 
     public const STATUS_CANCELLED = 'cancelled';
+
+    public const EDITABLE_STATUSES = [
+        self::STATUS_DRAFT,
+        self::STATUS_SUBMITTED,
+        self::STATUS_PREPARING,
+        self::STATUS_READY,
+        self::STATUS_SERVED,
+    ];
 
     public const ACTIVE_STATUSES = [
         self::STATUS_DRAFT,
@@ -67,6 +93,11 @@ class Order extends Model
         ];
     }
 
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(RestaurantBranch::class, 'branch_id');
+    }
+
     public function table(): BelongsTo
     {
         return $this->belongsTo(DiningTable::class, 'dining_table_id');
@@ -85,6 +116,11 @@ class Order extends Model
     public function events(): HasMany
     {
         return $this->hasMany(OrderEvent::class)->orderBy('occurred_at');
+    }
+
+    public function kotRounds(): HasMany
+    {
+        return $this->hasMany(KotDispatchRound::class)->orderBy('sequence');
     }
 
     public function kitchenTickets(): HasMany

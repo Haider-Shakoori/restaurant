@@ -214,6 +214,86 @@ class BillingAndClosingTest extends TestCase
         $this->assertSame([1, 2], $refinalized->snapshots->pluck('version')->all());
     }
 
+    public function test_tableless_takeaway_order_can_be_billed_paid_and_closed(): void
+    {
+        $tenant = $this->createTenant('restaurant-takeaway-billing', 'takeaway-billing.test');
+        tenancy()->initialize($tenant);
+
+        $cashier = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Takeaway Cashier',
+            'email' => Str::ulid().'@restaurant.test',
+            'password' => 'secret-password',
+            'is_active' => true,
+            'role' => 'cashier',
+        ]);
+
+        $branch = RestaurantBranch::query()->create([
+            'code' => 'MAIN',
+            'name' => 'Main Branch',
+            'is_active' => true,
+        ]);
+
+        $category = MenuCategory::query()->create([
+            'name' => 'Menu',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $item = MenuItem::query()->create([
+            'menu_category_id' => $category->id,
+            'sku' => 'TAKE-001',
+            'name' => 'Takeaway Meal',
+            'price' => '250.00',
+            'is_available' => true,
+            'sort_order' => 1,
+        ]);
+
+        $order = Order::query()->create([
+            'client_order_id' => (string) Str::ulid(),
+            'branch_id' => $branch->id,
+            'service_type' => Order::SERVICE_TAKEAWAY,
+            'service_reference' => 'TA-100',
+            'waiter_id' => $cashier->id,
+            'status' => Order::STATUS_SERVED,
+            'guest_count' => 1,
+            'subtotal' => '250.00',
+            'total' => '250.00',
+            'opened_at' => now(),
+            'submitted_at' => now(),
+            'served_at' => now(),
+        ]);
+
+        $order->items()->create([
+            'menu_item_id' => $item->id,
+            'client_line_id' => (string) Str::ulid(),
+            'item_name' => $item->name,
+            'unit_price' => '250.00',
+            'quantity' => 1,
+            'line_total' => '250.00',
+            'status' => 'served',
+        ]);
+
+        $cashiers = app(CashierService::class);
+        $billing = app(BillingService::class);
+        $session = $cashiers->openSession($branch, $cashier, '0.00');
+
+        $bill = $billing->createBill($order, $cashier);
+
+        $this->assertSame($branch->id, $bill->branch_id);
+        $this->assertSame('250.00', $bill->total);
+
+        $billing->addPayment($bill, $session, $cashier, [
+            'client_payment_id' => 'PAY-TAKEAWAY-001',
+            'method' => 'cash',
+            'amount' => '250.00',
+        ]);
+
+        $this->assertSame(Bill::STATUS_PAID, $bill->fresh()->status);
+        $this->assertSame(Order::STATUS_CLOSED, $order->fresh()->status);
+        $this->assertNull($order->fresh()->dining_table_id);
+    }
+
     public function test_daily_close_is_blocked_by_open_cashier_session(): void
     {
         $tenant = $this->createTenant('restaurant-a', 'a.test');

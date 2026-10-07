@@ -8,6 +8,7 @@ use App\Models\GoodsReceipt;
 use App\Models\InventoryConsumption;
 use App\Models\JournalEntry;
 use App\Models\JournalLine;
+use App\Models\KitchenTicketItem;
 use App\Models\StockMovement;
 use App\Models\TenantPayment;
 use App\Models\TenantUser;
@@ -353,6 +354,32 @@ class AccountingService
                 ['account_id' => $this->systemAccount('inventory_asset')->id, 'credit' => $cost, 'counterparty_type' => 'order', 'counterparty_id' => $consumption->order_id],
             ],
             'inventory-consumption:'.$consumption->id.':posted',
+        );
+    }
+
+    public function postProductionConsumption(
+        InventoryConsumption $consumption,
+        KitchenTicketItem $productionItem,
+        TenantUser $actor,
+        string $cost,
+    ): ?JournalEntry {
+        if (Money::toMinor($cost) <= 0) {
+            return null;
+        }
+
+        return $this->post(
+            $consumption->branch_id,
+            $actor,
+            'kitchen_production',
+            $productionItem->id,
+            'consumed',
+            'Production consumption for order '.$consumption->order_id,
+            now()->format('Y-m-d'),
+            [
+                ['account_id' => $this->systemAccount('cost_of_goods_sold')->id, 'debit' => $cost, 'counterparty_type' => 'order', 'counterparty_id' => $consumption->order_id],
+                ['account_id' => $this->systemAccount('inventory_asset')->id, 'credit' => $cost, 'counterparty_type' => 'order', 'counterparty_id' => $consumption->order_id],
+            ],
+            'kitchen-production:'.$productionItem->id.':consumed',
         );
     }
 

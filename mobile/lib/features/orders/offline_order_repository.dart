@@ -30,7 +30,10 @@ class OfflineOrderRepository {
   final Uuid _uuid;
 
   Future<String> createOrder({
-    required String tableId,
+    String? tableId,
+    required String branchId,
+    String serviceType = 'dine_in',
+    String? serviceReference,
     required int guestCount,
     String? notes,
   }) async {
@@ -41,6 +44,9 @@ class OfflineOrderRepository {
       clientOrderId: clientOrderId,
       mutationId: _uuid.v4(),
       tableId: tableId,
+      branchId: branchId,
+      serviceType: serviceType,
+      serviceReference: serviceReference,
       guestCount: guestCount,
       notes: notes,
     );
@@ -53,6 +59,13 @@ class OfflineOrderRepository {
     required Map<String, Object?> menuItem,
     int quantity = 1,
     String? notes,
+    int? seatNumber,
+    int? courseNumber,
+    String? courseName,
+    bool holdForCourse = false,
+    List<Map<String, Object?>> modifiers = const [],
+    String? allergyInstructions,
+    String? kitchenInstructions,
   }) async {
     await _ensureOfflineOperationAllowed();
 
@@ -63,6 +76,114 @@ class OfflineOrderRepository {
       menuItem: menuItem,
       quantity: quantity,
       notes: notes,
+      seatNumber: seatNumber,
+      courseNumber: courseNumber,
+      courseName: courseName,
+      holdForCourse: holdForCourse,
+      modifiers: modifiers,
+      allergyInstructions: allergyInstructions,
+      kitchenInstructions: kitchenInstructions,
+    );
+  }
+
+  Future<void> fireCourse({
+    required String localOrderId,
+    required int courseNumber,
+    String priority = 'normal',
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.fireCourse(
+      localOrderId: localOrderId,
+      courseNumber: courseNumber,
+      mutationId: _uuid.v4(),
+      priority: priority,
+    );
+  }
+
+  Future<void> voidProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.void',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
+  Future<void> refireProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.refire',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
+  Future<void> recallProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.recall',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
+  Future<void> transferTable({
+    required String localOrderId,
+    required String targetTableId,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.transferOrderTable(
+      localOrderId: localOrderId,
+      targetTableId: targetTableId,
+      mutationId: _uuid.v4(),
+    );
+  }
+
+  Future<void> moveUnsentItem({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+    required String localLineId,
+    required int quantity,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.moveUnsentOrderItem(
+      sourceLocalOrderId: sourceLocalOrderId,
+      targetLocalOrderId: targetLocalOrderId,
+      localLineId: localLineId,
+      targetLocalLineId: _uuid.v4(),
+      quantity: quantity,
+      mutationId: _uuid.v4(),
+    );
+  }
+
+  Future<void> mergeOrders({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.mergeOrders(
+      sourceLocalOrderId: sourceLocalOrderId,
+      targetLocalOrderId: targetLocalOrderId,
+      mutationId: _uuid.v4(),
     );
   }
 
