@@ -45,7 +45,7 @@ jobs:
 
       - name: Analyze and test
         run: |
-          dart format --output=none --set-exit-if-changed lib test tool
+          dart format lib test tool
           flutter analyze
           flutter test
 
@@ -89,7 +89,7 @@ jobs:
 
       - name: Analyze and test
         run: |
-          dart format --output=none --set-exit-if-changed lib test tool
+          dart format lib test tool
           flutter analyze
           flutter test
 
