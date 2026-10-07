@@ -290,6 +290,119 @@ public sealed class KotRealignmentTests
     }
 
     [Fact]
+    public async Task Modifier_groups_enforce_required_and_max_selections_and_price_delta()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+
+            await using (var db = factory.Create())
+            {
+                db.ModifierGroups.Add(new LocalModifierGroup
+                {
+                    Id = "group-sauce",
+                    Name = "Sauce",
+                    MinSelections = 1,
+                    MaxSelections = 2,
+                    SortOrder = 1,
+                    IsActive = true,
+                });
+                db.ModifierOptions.AddRange(
+                    new LocalModifierOption
+                    {
+                        Id = "opt-hot",
+                        ModifierGroupId = "group-sauce",
+                        Name = "Hot",
+                        PriceDelta = 10m,
+                        SortOrder = 1,
+                        IsActive = true,
+                    },
+                    new LocalModifierOption
+                    {
+                        Id = "opt-garlic",
+                        ModifierGroupId = "group-sauce",
+                        Name = "Garlic",
+                        PriceDelta = 15m,
+                        SortOrder = 2,
+                        IsActive = true,
+                    },
+                    new LocalModifierOption
+                    {
+                        Id = "opt-yogurt",
+                        ModifierGroupId = "group-sauce",
+                        Name = "Yogurt",
+                        PriceDelta = 5m,
+                        SortOrder = 3,
+                        IsActive = true,
+                    });
+                db.MenuItemModifierGroups.Add(new LocalMenuItemModifierGroup
+                {
+                    MenuItemId = "item-grill",
+                    ModifierGroupId = "group-sauce",
+                    SortOrder = 1,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var sync = new LocalSyncService(factory, catalog);
+            await OpenAsync(sync);
+
+            var missing = await PushOneAsync(sync, Waiter(), "MOD-MISSING", "order.item.add", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-MISSING",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            Assert.Equal("conflict", missing.GetProperty("status").GetString());
+            Assert.Equal("modifier_selection_required", missing.GetProperty("code").GetString());
+
+            var tooMany = await PushOneAsync(sync, Waiter(), "MOD-MAX", "order.item.add", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-MAX",
+                menu_item_id = "item-grill",
+                quantity = 1,
+                modifiers = new[]
+                {
+                    new { option_id = "opt-hot" },
+                    new { option_id = "opt-garlic" },
+                    new { option_id = "opt-yogurt" },
+                },
+            });
+            Assert.Equal("conflict", tooMany.GetProperty("status").GetString());
+            Assert.Equal("modifier_selection_limit", tooMany.GetProperty("code").GetString());
+
+            var accepted = await PushOneAsync(sync, Waiter(), "MOD-OK", "order.item.add", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-OK",
+                menu_item_id = "item-grill",
+                quantity = 1,
+                modifiers = new[]
+                {
+                    new { option_id = "opt-hot" },
+                    new { option_id = "opt-garlic" },
+                },
+            });
+            Assert.Equal("accepted", accepted.GetProperty("status").GetString());
+
+            await using var finalDb = factory.Create();
+            var line = await finalDb.OrderItems.SingleAsync();
+            Assert.Equal(375m, line.UnitPrice);
+            Assert.Contains("Hot", line.ModifiersJson, StringComparison.Ordinal);
+            Assert.Contains("Garlic", line.ModifiersJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Workflow_settings_persist_across_service_restart_and_enqueue_cloud_sync()
     {
         var root = CreateTemporaryDirectory();
