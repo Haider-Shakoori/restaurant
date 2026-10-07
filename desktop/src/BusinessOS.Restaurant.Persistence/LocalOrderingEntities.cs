@@ -587,7 +587,10 @@ public sealed class LocalKotRound
 {
     public required string Id { get; set; }
     public required string OrderId { get; set; }
+    public required string BranchId { get; set; }
     public int RoundNumber { get; set; }
+    public int DisplayNumber { get; set; }
+    public DateOnly BusinessDate { get; set; }
     public required string KotNumber { get; set; }
     public required string MutationId { get; set; }
     public long SubmittedByUserId { get; set; }
