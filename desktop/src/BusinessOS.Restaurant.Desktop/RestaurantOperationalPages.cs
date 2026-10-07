@@ -355,7 +355,10 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 0, 12, 12),
             Padding = new Thickness(12)
         };
-        pairing.SetBinding(TextBox.TextProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingDetails)));
+        pairing.SetBinding(TextBox.TextProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingDetails))
+        {
+            Mode = BindingMode.OneWay,
+        });
         var pairingPanel = new StackPanel();
         var qr = new Image
         {
