@@ -135,7 +135,7 @@ class TenantPortalController extends Controller
     public function purchasing(): View
     {
         return $this->view('tenant.purchasing.index', [
-            'orders' => PurchaseOrder::query()->with(['branch', 'supplier'])->withCount('lines')->latest('ordered_at')->limit(100)->get(),
+            'orders' => PurchaseOrder::query()->with(['branch', 'supplier', 'lines.item'])->withCount('lines')->latest('ordered_at')->limit(100)->get(),
             'suppliers' => Supplier::query()->where('is_active', true)->orderBy('name')->get(),
             'branches' => RestaurantBranch::query()->where('is_active', true)->orderBy('name')->get(),
             'inventoryItems' => InventoryItem::query()->where('is_active', true)->orderBy('name')->get(),
