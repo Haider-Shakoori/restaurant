@@ -26,9 +26,11 @@ use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
+use App\Http\Controllers\Tenant\ReadyKitchenTicketItemController;
 use App\Http\Controllers\Tenant\RecipeController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
+use App\Http\Controllers\Tenant\StartKitchenTicketItemController;
 use App\Http\Controllers\Tenant\StockMovementController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
@@ -227,6 +229,12 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/kitchen/tickets/{kitchenTicket}/ready', ReadyKitchenTicketController::class)
                     ->name('tenant.api.kitchen.tickets.ready');
+
+                Route::post('/kitchen/ticket-items/{kitchenTicketItem}/start', StartKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.ticket-items.start');
+
+                Route::post('/kitchen/ticket-items/{kitchenTicketItem}/ready', ReadyKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.ticket-items.ready');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
