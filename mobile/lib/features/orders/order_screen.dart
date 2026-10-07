@@ -187,6 +187,47 @@ class _OrderScreenState extends State<OrderScreen> {
     return courses;
   }
 
+  List<Map<String, Object?>> get _kotRounds {
+    final raw = _order?['kot_rounds_json']?.toString();
+
+    if (raw == null || raw.isEmpty) {
+      return const [];
+    }
+
+    final decoded = jsonDecode(raw) as List<Object?>;
+
+    return decoded
+        .whereType<Map<Object?, Object?>>()
+        .map((round) => Map<String, Object?>.from(round))
+        .toList(growable: false);
+  }
+
+  bool get _allProductionReady {
+    final rounds = _kotRounds;
+    if (rounds.isEmpty) return false;
+
+    final statuses = <String>[];
+
+    for (final round in rounds) {
+      for (final rawTicket in round['tickets'] as List<Object?>? ?? const []) {
+        if (rawTicket is! Map<Object?, Object?>) continue;
+        final ticket = Map<String, Object?>.from(rawTicket);
+        for (final rawItem in ticket['items'] as List<Object?>? ?? const []) {
+          if (rawItem is! Map<Object?, Object?>) continue;
+          final item = Map<String, Object?>.from(rawItem);
+          final status = item['status']?.toString();
+          if (status == null || status == 'voided' || status == 'cancelled') {
+            continue;
+          }
+          statuses.add(status);
+        }
+      }
+    }
+
+    return statuses.isNotEmpty &&
+        statuses.every((status) => status == 'ready' || status == 'completed');
+  }
+
   List<Map<String, Object?>> get _visibleItems {
     Iterable<Map<String, Object?>> result = _selectedCategoryId == null
         ? _menu.values.expand((items) => items)
@@ -282,6 +323,46 @@ class _OrderScreenState extends State<OrderScreen> {
             style: TextStyle(color: Colors.white70, fontSize: 12),
           ),
           const Spacer(),
+          if (_kotRounds.isNotEmpty) ...[
+            Container(
+              margin: const EdgeInsetsDirectional.only(end: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFF252A30),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                _kotRounds.length == 1
+                    ? '1 KOT round'
+                    : '${_kotRounds.length} KOT rounds',
+                style: const TextStyle(
+                  color: Color(0xFFFFD96B),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (_allProductionReady)
+              Container(
+                margin: const EdgeInsetsDirectional.only(end: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF174F2B),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Text(
+                  'READY',
+                  style: TextStyle(
+                    color: Color(0xFF8DF0A7),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+          ],
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
@@ -594,6 +675,33 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ),
           ),
+          if (_kotRounds.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+              color: const Color(0xFFF8F9FA),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _kotRounds.map((round) {
+                  final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
+                  final number = round['kot_number']?.toString() ?? 'KOT';
+                  final priority = round['priority']?.toString() ?? 'normal';
+
+                  return Chip(
+                    avatar: priority == 'rush'
+                        ? const Icon(
+                            Icons.bolt_rounded,
+                            size: 16,
+                            color: Colors.red,
+                          )
+                        : const Icon(Icons.receipt_long_rounded, size: 16),
+                    label: Text('R$sequence · $number'),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
           Flexible(
             child: _items.isEmpty
                 ? const Padding(
