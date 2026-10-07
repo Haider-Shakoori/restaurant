@@ -142,8 +142,83 @@ class LicenseService
             ]);
         }
 
+        return $this->activateAgainstLicense(
+            $business,
+            $license,
+            $access->features,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+        );
+    }
+
+    /**
+     * Activate a waiter mobile after a short-lived pairing token has already
+     * proved that an authorized Restaurant Desktop approved the pairing.
+     *
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    public function activatePairedMobile(
+        Business $business,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+    ): array {
+        if (! $this->isMobilePlatform($platform)) {
+            throw ValidationException::withMessages([
+                'platform' => 'Desktop pairing tokens may only activate Android or iOS waiter devices.',
+            ]);
+        }
+
+        $business->refresh();
+        $access = $this->subscriptions->access($business);
+
+        if (! $access->allowed) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'An active trial or subscription is required for waiter pairing.',
+            ]);
+        }
+
+        $license = LicenseKey::query()
+            ->where('business_id', $business->id)
+            ->where('status', LicenseStatus::Active)
+            ->latest('version')
+            ->first();
+
+        if (! $license) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'Generate an active Restaurant license before pairing waiter devices.',
+            ]);
+        }
+
+        return $this->activateAgainstLicense(
+            $business,
+            $license,
+            $access->features,
+            $deviceUid,
+            $deviceName,
+            $platform,
+            $appVersion,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>  $features
+     * @return array{device: DeviceActivation, device_secret: string, lease: array<string, mixed>}
+     */
+    private function activateAgainstLicense(
+        Business $business,
+        LicenseKey $license,
+        array $features,
+        string $deviceUid,
+        ?string $deviceName,
+        string $platform,
+        ?string $appVersion,
+    ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
-            function () use ($business, $license, $deviceUid, $deviceName, $platform, $appVersion): array {
+            function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion): array {
                 $existing = DeviceActivation::query()
                     ->where('business_id', $business->id)
                     ->where('device_uid', $deviceUid)
@@ -158,7 +233,7 @@ class LicenseService
                     ->count();
 
                 $limit = $mobile
-                    ? $this->resolveMobileDeviceLimit($this->subscriptions->access($business)->features)
+                    ? $this->resolveMobileDeviceLimit($features)
                     : $license->max_devices_snapshot;
 
                 if ($limit !== null && $activeOtherDevices >= $limit) {
@@ -177,7 +252,7 @@ class LicenseService
                     [
                         'license_key_id' => $license->id,
                         'device_name' => $deviceName,
-                        'platform' => $platform,
+                        'platform' => strtolower(trim($platform)),
                         'app_version' => $appVersion,
                         'credential_hash' => $this->hashDeviceSecret($secret),
                         'credential_last4' => substr($secret, -4),
@@ -204,6 +279,7 @@ class LicenseService
                         'device_uid' => $deviceUid,
                         'platform' => $platform,
                         'app_version' => $appVersion,
+                        'paired' => $mobile,
                     ],
                 );
 
