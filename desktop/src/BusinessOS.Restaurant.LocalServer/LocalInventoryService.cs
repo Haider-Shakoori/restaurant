@@ -569,16 +569,29 @@ public sealed class LocalInventoryService
         var order = await db.Orders.SingleAsync(
             value => value.Id == ticket.OrderId,
             cancellationToken);
-        var table = await db.DiningTables.SingleAsync(
-            value => value.Id == order.DiningTableId,
-            cancellationToken);
-        var area = await db.DiningAreas.SingleAsync(
-            value => value.Id == table.DiningAreaId,
-            cancellationToken);
+        var branchId = order.BranchId;
+        if (string.IsNullOrWhiteSpace(branchId))
+        {
+            if (string.IsNullOrWhiteSpace(order.DiningTableId))
+            {
+                throw new LocalSyncConflictException(
+                    "dependency_missing",
+                    "Order branch context is unavailable for inventory reservation.");
+            }
+
+            var table = await db.DiningTables.SingleAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            var area = await db.DiningAreas.SingleAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            branchId = area.BranchId;
+            order.BranchId = branchId;
+        }
 
         var recipe = await db.Recipes
             .Where(value =>
-                value.BranchId == area.BranchId &&
+                value.BranchId == branchId &&
                 value.MenuItemId == orderItem.MenuItemId &&
                 value.IsActive)
             .OrderByDescending(value => value.Version)
@@ -605,7 +618,7 @@ public sealed class LocalInventoryService
             OrderId = order.Id,
             OrderItemId = orderItem.Id,
             KitchenTicketItemId = kitchenItem.Id,
-            BranchId = area.BranchId,
+            BranchId = branchId,
             CreatedByUserId = actor.UserId,
             Status = "reserved",
             ReservedAt = now,
@@ -629,7 +642,7 @@ public sealed class LocalInventoryService
             actor,
             "inventory",
             "inventory.production_reserved",
-            area.BranchId,
+            branchId,
             "inventory_reservation",
             reservation.Id,
             new
