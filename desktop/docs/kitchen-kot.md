@@ -53,10 +53,18 @@ Supported actions include:
 - start item
 - ready/send to Expo
 - pass Expo
+- recall a recent ready/completed item with a required reason
+- mark already-produced food as waste without returning ingredients to stock
 - re-fire item
 - ticket-level start/ready for backward-compatible clients
 
-## Re-fire
+The KDS derives staff-facing `NEW`, `ACCEPTED`, `PREPARING`, `READY` and `DELAYED` labels from the underlying workflow and configured age thresholds. `DELAYED` is presentation state only; it is not persisted as another shared kitchen status.
+
+## Recall, waste and re-fire
+
+Recall is allowed for recent ready/completed items while the order is still operational. It moves the production item back into the workflow without deleting the previous completion audit or reversing ingredient consumption. The original completion timestamps remain recoverable through persisted metadata/audit history, and the recall reason/user/time are stored.
+
+Waste is allowed only after production consumption exists. Recording waste never returns ingredients to usable inventory. Post-KOT void/cancel automatically records committed production as waste; unstarted reservations are released instead.
 
 Re-fire creates a new rush production event in a new KOT round while keeping the original order/bill line unchanged. The new kitchen item stores `refire_of_kitchen_item_id` and a reason. Inventory reservation/consumption therefore happens for the additional production exactly once without double-billing the guest.
 
