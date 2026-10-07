@@ -51,6 +51,7 @@ public sealed class LocalDatabaseFactory
         await EnsureOrderingSchemaAsync(db, cancellationToken);
         await EnsureMenuImageColumnAsync(cancellationToken);
         await EnsureKotRealignmentSchemaAsync(cancellationToken);
+        await BackfillLegacyKotRoundsAsync(cancellationToken);
     }
 
     private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
@@ -238,6 +239,122 @@ public sealed class LocalDatabaseFactory
                 ON kitchen_tickets (OrderId, RoundNumber);
             """;
         await schema.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task BackfillLegacyKotRoundsAsync(CancellationToken cancellationToken)
+    {
+        await using var db = Create();
+
+        var legacyTickets = await db.KitchenTickets
+            .Where(value => value.KotRoundId == null)
+            .OrderBy(value => value.QueuedAt)
+            .ToArrayAsync(cancellationToken);
+
+        if (legacyTickets.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var group in legacyTickets.GroupBy(value => value.OrderId, StringComparer.Ordinal))
+        {
+            var order = await db.Orders.SingleOrDefaultAsync(
+                value => value.Id == group.Key,
+                cancellationToken);
+            if (order is null)
+            {
+                continue;
+            }
+
+            var table = await db.DiningTables.SingleOrDefaultAsync(
+                value => value.Id == order.DiningTableId,
+                cancellationToken);
+            if (table is null)
+            {
+                continue;
+            }
+
+            var area = await db.DiningAreas.SingleOrDefaultAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            if (area is null)
+            {
+                continue;
+            }
+
+            var sentAt = group.Min(value => value.QueuedAt);
+            var businessDate = DateOnly.FromDateTime(sentAt.LocalDateTime);
+            var counter = await db.KotCounters.SingleOrDefaultAsync(
+                value => value.BranchId == area.BranchId && value.BusinessDate == businessDate,
+                cancellationToken);
+
+            var existingMax = await db.KotRounds
+                .Where(value => value.BranchId == area.BranchId && value.BusinessDate == businessDate)
+                .Select(value => (int?)value.DisplayNumber)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            if (counter is null)
+            {
+                counter = new LocalKotCounter
+                {
+                    BranchId = area.BranchId,
+                    BusinessDate = businessDate,
+                    LastNumber = existingMax,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                db.KotCounters.Add(counter);
+            }
+            else if (counter.LastNumber < existingMax)
+            {
+                counter.LastNumber = existingMax;
+            }
+
+            counter.LastNumber += 1;
+            counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+            var kotNumber = $"KOT-{counter.LastNumber:0000}";
+            var round = new LocalKotRound
+            {
+                Id = Guid.CreateVersion7().ToString("N"),
+                OrderId = order.Id,
+                BranchId = area.BranchId,
+                RoundNumber = 1,
+                DisplayNumber = counter.LastNumber,
+                BusinessDate = businessDate,
+                KotNumber = kotNumber,
+                MutationId = $"legacy:{order.Id}",
+                SubmittedByUserId = group.First().SubmittedByUserId,
+                QueueEnabled = true,
+                PreparingEnabled = true,
+                ExpoEnabled = false,
+                CoursesEnabled = false,
+                SentAt = sentAt,
+            };
+            db.KotRounds.Add(round);
+
+            var ticketIds = group.Select(value => value.Id).ToArray();
+            foreach (var ticket in group)
+            {
+                ticket.KotRoundId = round.Id;
+                ticket.RoundNumber = 1;
+                ticket.KotNumber ??= kotNumber;
+            }
+
+            var kitchenItems = await db.KitchenTicketItems
+                .Where(value => ticketIds.Contains(value.KitchenTicketId))
+                .ToArrayAsync(cancellationToken);
+            var orderItemIds = kitchenItems.Select(value => value.OrderItemId).Distinct().ToArray();
+            var orderItems = await db.OrderItems
+                .Where(value => orderItemIds.Contains(value.Id))
+                .ToArrayAsync(cancellationToken);
+
+            foreach (var orderItem in orderItems)
+            {
+                orderItem.KotRoundId ??= round.Id;
+                orderItem.RoundNumber ??= 1;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private static async Task<bool> ColumnExistsAsync(
