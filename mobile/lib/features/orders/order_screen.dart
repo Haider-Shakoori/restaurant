@@ -471,7 +471,7 @@ class _OrderScreenState extends State<OrderScreen> {
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              '\${item['price']} AFN',
+                              item['price'].toString() + ' AFN',
                               style: const TextStyle(
                                 color: Color(0xFF9A6C00),
                                 fontWeight: FontWeight.w700,
@@ -598,7 +598,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'x\${item['quantity']} · \${item['line_total']} AFN',
+                                  'x' + item['quantity'].toString() + ' · ' + item['line_total'].toString() + ' AFN',
                                   style: const TextStyle(
                                     color: Colors.black54,
                                     fontSize: 12,
@@ -628,12 +628,12 @@ class _OrderScreenState extends State<OrderScreen> {
               children: [
                 _totalRow(
                   'Subtotal',
-                  "\${order['subtotal'] ?? '0.00'} AFN",
+                  (order['subtotal'] ?? '0.00').toString() + ' AFN',
                 ),
                 const SizedBox(height: 8),
                 _totalRow(
                   'Total',
-                  "\${order['total'] ?? '0.00'} AFN",
+                  (order['total'] ?? '0.00').toString() + ' AFN',
                   emphasized: true,
                 ),
                 const SizedBox(height: 14),
