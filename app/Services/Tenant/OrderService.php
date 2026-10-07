@@ -48,7 +48,7 @@ class OrderService
             }
 
             if (($data['submit_action'] ?? 'kitchen') === 'kitchen') {
-                return $this->submit($order, $actor);
+                return $this->submit($order, $actor, $data['client_mutation_id'] ?? null);
             }
 
             return $order->fresh()->load([
