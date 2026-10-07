@@ -442,7 +442,9 @@ class InventoryService
                 ]);
             }
 
-            foreach ($order->kitchenTickets->flatMap->items as $productionItem) {
+            $productionItems = $order->kitchenTickets->flatMap->items;
+
+            foreach ($productionItems as $productionItem) {
                 if (in_array($productionItem->status, ['voided', 'cancelled'], true)) {
                     continue;
                 }
@@ -451,6 +453,12 @@ class InventoryService
             }
 
             $branch = $order->branch ?? $order->table?->diningArea?->branch;
+
+            if (! $branch) {
+                throw ValidationException::withMessages([
+                    'branch_id' => 'This order is missing an inventory branch.',
+                ]);
+            }
 
             $consumption = InventoryConsumption::query()->firstOrCreate(
                 ['order_id' => $order->id],
@@ -461,6 +469,72 @@ class InventoryService
                     'consumed_at' => now(),
                 ],
             );
+
+            if ($productionItems->isEmpty() && $consumption->lines()->doesntExist()) {
+                $menuItemIds = $order->items()->pluck('menu_item_id')->filter()->unique();
+                $recipes = Recipe::query()
+                    ->where('branch_id', $branch->id)
+                    ->where('is_active', true)
+                    ->whereIn('menu_item_id', $menuItemIds)
+                    ->with('items.inventoryItem')
+                    ->get()
+                    ->keyBy('menu_item_id');
+
+                $legacyCostMinor = 0;
+
+                foreach ($order->items as $orderItem) {
+                    $recipe = $orderItem->menu_item_id
+                        ? $recipes->get($orderItem->menu_item_id)
+                        : null;
+
+                    if (! $recipe) {
+                        continue;
+                    }
+
+                    foreach ($recipe->items as $recipeItem) {
+                        $quantity = Quantity::multiply(
+                            (string) $recipeItem->quantity_base,
+                            (string) $orderItem->quantity,
+                        );
+
+                        $ingredientCost = $this->valuation->consume(
+                            $branch,
+                            $recipeItem->inventoryItem,
+                            $quantity,
+                        );
+                        $legacyCostMinor += Money::toMinor($ingredientCost);
+
+                        $movement = $this->recordMovement(
+                            $branch,
+                            $recipeItem->inventoryItem,
+                            $actor,
+                            StockMovement::TYPE_CONSUMPTION,
+                            Quantity::subtract('0', $quantity),
+                            'order_legacy',
+                            $order->id,
+                            'legacy-order-consumption:'.$order->id.':'.$orderItem->id.':'.$recipeItem->inventory_item_id,
+                            $orderItem->id,
+                            notes: 'Legacy recipe finalization for an order without production records.',
+                        );
+
+                        $consumption->lines()->create([
+                            'order_item_id' => $orderItem->id,
+                            'kitchen_ticket_item_id' => null,
+                            'recipe_id' => $recipe->id,
+                            'inventory_item_id' => $recipeItem->inventory_item_id,
+                            'stock_movement_id' => $movement->id,
+                            'quantity_base' => $quantity,
+                            'cost_amount' => $ingredientCost,
+                        ]);
+                    }
+                }
+
+                if ($legacyCostMinor !== 0) {
+                    $consumption->update([
+                        'total_cost' => Money::fromMinor($legacyCostMinor),
+                    ]);
+                }
+            }
 
             $this->accounting->postInventoryConsumption(
                 $consumption->fresh(),
