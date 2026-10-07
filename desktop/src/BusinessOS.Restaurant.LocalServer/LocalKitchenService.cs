@@ -504,6 +504,191 @@ public sealed class LocalKitchenService
         return snapshot;
     }
 
+    public async Task<object> RecallItemAsync(
+        string ticketItemId,
+        string reason,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureKitchenRole(actor);
+
+        reason = reason?.Trim() ?? string.Empty;
+        if (reason.Length == 0 || reason.Length > 500)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "A recall reason is required.");
+        }
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var item = await db.KitchenTicketItems
+            .SingleOrDefaultAsync(value => value.Id == ticketItemId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Kitchen item does not exist.");
+        var ticket = await RequireTicketAsync(db, item.KitchenTicketId, cancellationToken);
+        var round = await RequireRoundAsync(db, ticket, cancellationToken);
+        var order = await db.Orders
+            .SingleAsync(value => value.Id == ticket.OrderId, cancellationToken);
+
+        if (order.Status is "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "A financially closed or cancelled order cannot be recalled to the kitchen.");
+        }
+
+        if (item.Status is not ("ready" or "completed"))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                $"Only ready or completed kitchen items can be recalled, not {item.Status}.");
+        }
+
+        var previousStatus = item.Status;
+        var previousReadyAt = item.ReadyAt;
+        var previousCompletedAt = item.CompletedAt;
+        var now = DateTimeOffset.UtcNow;
+        var target = round.PreparingEnabled
+            ? "preparing"
+            : round.QueueEnabled
+                ? "queued"
+                : "active";
+
+        item.Status = target;
+        item.ReadyAt = null;
+        item.RecalledAt = now;
+        item.RecallReason = reason;
+        item.RecalledByUserId = actor.UserId;
+
+        var orderItem = await db.OrderItems
+            .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
+        orderItem.Status = target;
+        orderItem.UpdatedAtUtc = now;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "kitchen",
+            "kitchen.item_recalled",
+            order.BranchId,
+            "kitchen_ticket_item",
+            item.Id,
+            new
+            {
+                order_id = order.Id,
+                ticket_id = ticket.Id,
+                order_item_id = item.OrderItemId,
+                from_status = previousStatus,
+                to_status = target,
+                reason,
+                previous_ready_at = previousReadyAt,
+                previous_completed_at = previousCompletedAt,
+                production_consumption_retained = true,
+            });
+
+        await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
+        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        AddChange(
+            db,
+            "order",
+            order.Id,
+            order.WaiterId,
+            await BasicOrderSnapshotAsync(db, order, cancellationToken));
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    public async Task<object> RecordWasteAsync(
+        string ticketItemId,
+        string reason,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureKitchenRole(actor);
+
+        reason = reason?.Trim() ?? string.Empty;
+        if (reason.Length == 0 || reason.Length > 500)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "A waste reason is required.");
+        }
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var item = await db.KitchenTicketItems
+            .SingleOrDefaultAsync(value => value.Id == ticketItemId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Kitchen item does not exist.");
+        var ticket = await RequireTicketAsync(db, item.KitchenTicketId, cancellationToken);
+        var order = await db.Orders
+            .SingleAsync(value => value.Id == ticket.OrderId, cancellationToken);
+
+        var consumption = await db.InventoryConsumptions
+            .SingleOrDefaultAsync(
+                value => value.KitchenTicketItemId == item.Id,
+                cancellationToken);
+
+        if (consumption is null)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Unstarted production has no waste to record. Void/cancel it so the reservation can be released.");
+        }
+
+        if (item.WastedAt.HasValue)
+        {
+            return await TicketSnapshotAsync(db, ticket, cancellationToken);
+        }
+
+        var movementIds = await db.InventoryConsumptionLines
+            .Where(value => value.InventoryConsumptionId == consumption.Id)
+            .Select(value => value.StockMovementId)
+            .ToArrayAsync(cancellationToken);
+
+        var movements = movementIds.Length == 0
+            ? []
+            : await db.StockMovements
+                .Where(value => movementIds.Contains(value.Id))
+                .AsNoTracking()
+                .ToArrayAsync(cancellationToken);
+
+        var estimatedCost = movements.Sum(value =>
+            Math.Abs(value.QuantityDelta) * (value.UnitCost ?? 0m));
+
+        item.WastedAt = DateTimeOffset.UtcNow;
+        item.WasteReason = reason;
+        item.WastedByUserId = actor.UserId;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            actor,
+            "inventory",
+            "kitchen.production_waste_recorded",
+            consumption.BranchId,
+            "kitchen_ticket_item",
+            item.Id,
+            new
+            {
+                order_id = order.Id,
+                ticket_id = ticket.Id,
+                order_item_id = item.OrderItemId,
+                inventory_consumption_id = consumption.Id,
+                reason,
+                estimated_cost = decimal.Round(estimatedCost, 2, MidpointRounding.AwayFromZero),
+                stock_returned = false,
+            });
+
+        var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
+        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
     public async Task VoidOrderItemAsync(
         RestaurantDbContext db,
         LocalOrder order,
@@ -869,6 +1054,12 @@ public sealed class LocalKitchenService
                 void_reason = item.VoidReason,
                 refire_of_kitchen_item_id = item.RefireOfKitchenItemId,
                 refire_reason = item.RefireReason,
+                recalled_at = item.RecalledAt,
+                recall_reason = item.RecallReason,
+                recalled_by_user_id = item.RecalledByUserId,
+                wasted_at = item.WastedAt,
+                waste_reason = item.WasteReason,
+                wasted_by_user_id = item.WastedByUserId,
             }).ToArray(),
         };
     }
