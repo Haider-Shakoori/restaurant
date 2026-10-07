@@ -118,6 +118,8 @@ public partial class App : System.Windows.Application
         e.SetObserved();
     }
 
+    internal static void LogRecoverableException(string area, Exception exception) => WriteCrashLog(exception, area);
+
     private static void WriteCrashLog(Exception exception, string area = "startup")
     {
         try
