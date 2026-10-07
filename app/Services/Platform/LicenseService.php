@@ -26,6 +26,54 @@ class LicenseService
     /**
      * @return array{license: LicenseKey, raw_key: string}
      */
+
+    /**
+     * Resolve a raw desktop license key to its provisioned tenant URL.
+     *
+     * The raw key is never persisted or returned. This endpoint exists so the
+     * Windows installer only needs the license key; the tenant domain remains
+     * an implementation detail discovered from the BusinessOS server.
+     *
+     * @return array{business: Business, license: LicenseKey, tenant_base_url: string}
+     */
+    public function resolveDesktopLicense(string $rawLicenseKey): array
+    {
+        $license = LicenseKey::query()
+            ->with(['business.tenant.domains'])
+            ->where('key_hash', $this->hashLicenseKey($rawLicenseKey))
+            ->where('status', LicenseStatus::Active)
+            ->first();
+
+        if (! $license) {
+            throw ValidationException::withMessages([
+                'license_key' => 'The license key is invalid or has been revoked.',
+            ]);
+        }
+
+        $business = $license->business;
+        $access = $this->subscriptions->access($business->fresh());
+
+        if (! $access->allowed) {
+            throw ValidationException::withMessages([
+                'license_key' => 'An active trial or subscription is required for activation.',
+            ]);
+        }
+
+        $domain = $business->tenant?->domains->first()?->domain;
+
+        if (! is_string($domain) || trim($domain) === '') {
+            throw ValidationException::withMessages([
+                'license_key' => 'The restaurant workspace is not ready for desktop activation.',
+            ]);
+        }
+
+        return [
+            'business' => $business,
+            'license' => $license,
+            'tenant_base_url' => 'https://'.trim($domain),
+        ];
+    }
+
     public function generate(Business $business, AdminUser $admin): array
     {
         $business->refresh();
@@ -141,6 +189,22 @@ class LicenseService
             throw ValidationException::withMessages([
                 'license_key' => 'The license key is invalid or has been revoked.',
             ]);
+        }
+
+        if (strtolower(trim($platform)) === 'windows') {
+            $boundDesktop = DeviceActivation::query()
+                ->where('business_id', $business->id)
+                ->where('license_key_id', $license->id)
+                ->where('status', DeviceStatus::Active)
+                ->where('platform', 'windows')
+                ->where('device_uid', '!=', $deviceUid)
+                ->first();
+
+            if ($boundDesktop) {
+                throw ValidationException::withMessages([
+                    'license_key' => 'This Restaurant license is already activated on another Windows computer.',
+                ]);
+            }
         }
 
         return $this->activateAgainstLicense(
@@ -275,6 +339,12 @@ class LicenseService
                 $license->update([
                     'last_used_at' => now(),
                 ]);
+
+                if ($platform === 'windows' && ! $business->first_activated_at) {
+                    $business->update([
+                        'first_activated_at' => now(),
+                    ]);
+                }
 
                 $this->recordEvent(
                     $business,
