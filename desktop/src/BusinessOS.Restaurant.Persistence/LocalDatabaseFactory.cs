@@ -94,6 +94,33 @@ public sealed class LocalDatabaseFactory
         await using var connection = CreateConnection();
         await connection.OpenAsync(cancellationToken);
 
+        // Existing Desktop databases created before KOT realignment do not have
+        // kot_rounds. Ensure the base table exists before attempting additive
+        // ALTER TABLE upgrades below.
+        await using (var bootstrap = connection.CreateCommand())
+        {
+            bootstrap.CommandText = """
+                CREATE TABLE IF NOT EXISTS kot_rounds (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    OrderId TEXT NOT NULL,
+                    BranchId TEXT NULL,
+                    RoundNumber INTEGER NOT NULL,
+                    DisplayNumber INTEGER NOT NULL DEFAULT 0,
+                    BusinessDate TEXT NULL,
+                    KotNumber TEXT NOT NULL,
+                    MutationId TEXT NOT NULL,
+                    Priority TEXT NOT NULL DEFAULT 'normal',
+                    SubmittedByUserId INTEGER NOT NULL,
+                    QueueEnabled INTEGER NOT NULL,
+                    PreparingEnabled INTEGER NOT NULL,
+                    ExpoEnabled INTEGER NOT NULL,
+                    CoursesEnabled INTEGER NOT NULL,
+                    SentAt TEXT NOT NULL
+                );
+                """;
+            await bootstrap.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         var columns = new (string Table, string Column, string Definition)[]
         {
             ("order_items", "KotRoundId", "TEXT NULL"),
