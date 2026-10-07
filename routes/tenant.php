@@ -96,6 +96,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
                 Route::get('/inventory', [TenantPortalController::class, 'inventory'])->name('tenant.web.inventory');
                 Route::get('/purchasing', [TenantPortalController::class, 'purchasing'])->name('tenant.web.purchasing');
+                Route::post('/purchasing/orders', [PurchaseOrderController::class, 'store'])->name('tenant.web.purchasing.orders.store');
             });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {

@@ -8,8 +8,12 @@ use App\Enums\LicenseStatus;
 use App\Enums\ProvisioningState;
 use App\Models\Business;
 use App\Models\DeviceActivation;
+use App\Models\InventoryItem;
 use App\Models\LicenseKey;
 use App\Models\Plan;
+use App\Models\PurchaseOrder;
+use App\Models\RestaurantBranch;
+use App\Models\Supplier;
 use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
@@ -76,6 +80,84 @@ class TenantWebPortalTest extends TestCase
             ->assertSee('Dashboard')
             ->assertSee('Open orders')
             ->assertDontSee('tenant_id');
+    }
+
+    public function test_owner_can_create_purchase_order_from_purchasing_page(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+
+        tenancy()->initialize($tenant);
+
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Owner',
+            'email' => 'purchasing-owner@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+
+        $branch = RestaurantBranch::query()->create([
+            'code' => 'MAIN',
+            'name' => 'Main Branch',
+            'is_active' => true,
+        ]);
+
+        $supplier = Supplier::query()->create([
+            'code' => 'SUP-001',
+            'name' => 'Main Supplier',
+            'is_active' => true,
+        ]);
+
+        $item = InventoryItem::query()->create([
+            'sku' => 'RICE-001',
+            'name' => 'Rice',
+            'base_unit' => 'g',
+            'purchase_unit' => 'kg',
+            'purchase_to_base_factor' => '1000.000000',
+            'reorder_level' => '5.0000',
+            'is_active' => true,
+        ]);
+
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'purchasing-owner@example.test',
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $this->get("http://{$domain}/purchasing")
+            ->assertOk()
+            ->assertSee('New Purchase Order')
+            ->assertSee('Create Purchase Order')
+            ->assertSee('Main Supplier')
+            ->assertSee('Rice · kg');
+
+        $this->post("http://{$domain}/purchasing/orders", [
+            'branch_id' => $branch->id,
+            'supplier_id' => $supplier->id,
+            'notes' => 'Weekly stock order',
+            'lines' => [[
+                'inventory_item_id' => $item->id,
+                'purchase_quantity' => '2.0000',
+                'unit_cost' => '150.00',
+            ]],
+        ])
+            ->assertRedirect('/purchasing')
+            ->assertSessionHas('status');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $purchaseOrder = PurchaseOrder::query()->with('lines')->sole();
+
+            $this->assertSame($branch->id, $purchaseOrder->branch_id);
+            $this->assertSame($supplier->id, $purchaseOrder->supplier_id);
+            $this->assertSame('300.00', $purchaseOrder->estimated_total);
+            $this->assertSame('Rice', $purchaseOrder->lines->first()->item_name);
+        } finally {
+            tenancy()->end();
+        }
     }
 
     public function test_owner_can_revoke_waiter_mobile_from_restaurant_settings(): void
