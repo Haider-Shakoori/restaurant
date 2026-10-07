@@ -14,6 +14,7 @@ public sealed class LocalSyncService
         "draft",
         "submitted",
         "preparing",
+        "expo",
         "ready",
         "served",
         "billed",
@@ -244,6 +245,8 @@ public sealed class LocalSyncService
                 "order.submit" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
                 "order.kot.send" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
                 "course.fire" => await FireCourseAsync(db, principal, mutation, cancellationToken),
+                "order.item.void" => await VoidOrderItemAsync(db, principal, mutation, cancellationToken),
+                "order.cancel" => await CancelOrderAsync(db, principal, mutation, cancellationToken),
                 _ => throw new LocalSyncConflictException(
                     "unsupported_operation",
                     "Unsupported offline operation."),
@@ -737,6 +740,206 @@ public sealed class LocalSyncService
             });
     }
 
+    private async Task<Dictionary<string, object?>> VoidOrderItemAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+
+        var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
+        var clientLineId = RequiredString(mutation.Payload, "client_line_id", 80);
+        var reason = RequiredString(mutation.Payload, "reason", 500);
+
+        var order = await db.Orders
+            .SingleOrDefaultAsync(value => value.ClientOrderId == clientOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Order does not exist.");
+        AuthorizeOrder(principal, order);
+
+        if (order.Status is "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Items cannot be voided after the order is billed, closed or cancelled.");
+        }
+
+        var item = await db.OrderItems
+            .SingleOrDefaultAsync(
+                value => value.OrderId == order.Id && value.ClientLineId == clientLineId,
+                cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Order item does not exist.");
+
+        if (item.Status == "voided")
+        {
+            return Accepted(
+                mutation,
+                "order_item",
+                item.Id,
+                item.ClientLineId,
+                new
+                {
+                    line = LineSnapshot(item),
+                    order = await OrderSnapshotAsync(db, order, cancellationToken),
+                });
+        }
+
+        var sentToKitchen = await db.KitchenTicketItems
+            .AnyAsync(value => value.OrderItemId == item.Id, cancellationToken);
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+
+        if (sentToKitchen &&
+            settings.RequireManagerApprovalForPostKotVoid &&
+            !IsManagerApprovalRole(principal))
+        {
+            throw new LocalSyncConflictException(
+                "manager_approval_required",
+                "A manager must approve voids after an item has been sent to the kitchen.",
+                "rejected");
+        }
+
+        await _kitchen.VoidOrderItemAsync(
+            db,
+            order,
+            item,
+            reason,
+            principal,
+            cancellationToken);
+
+        order.Subtotal = await db.OrderItems
+            .Where(value =>
+                value.OrderId == order.Id &&
+                value.Status != "voided" &&
+                value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken);
+        order.Total = order.Subtotal;
+        order.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId, snapshot);
+
+        return Accepted(
+            mutation,
+            "order_item",
+            item.Id,
+            item.ClientLineId,
+            new
+            {
+                line = LineSnapshot(item),
+                order = snapshot,
+            });
+    }
+
+    private async Task<Dictionary<string, object?>> CancelOrderAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+
+        var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
+        var reason = RequiredString(mutation.Payload, "reason", 500);
+
+        var order = await db.Orders
+            .SingleOrDefaultAsync(value => value.ClientOrderId == clientOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Order does not exist.");
+        AuthorizeOrder(principal, order);
+
+        if (order.Status == "cancelled")
+        {
+            return Accepted(
+                mutation,
+                "order",
+                order.Id,
+                order.ClientOrderId,
+                await OrderSnapshotAsync(db, order, cancellationToken));
+        }
+
+        if (order.Status is "billed" or "closed")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Billed or closed orders cannot be cancelled.");
+        }
+
+        var hasKitchenProduction = await db.KitchenTickets
+            .AnyAsync(value => value.OrderId == order.Id, cancellationToken);
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+
+        if (hasKitchenProduction &&
+            settings.RequireManagerApprovalForPostKotVoid &&
+            !IsManagerApprovalRole(principal))
+        {
+            throw new LocalSyncConflictException(
+                "manager_approval_required",
+                "A manager must approve cancellation after a KOT has been sent.",
+                "rejected");
+        }
+
+        var items = await db.OrderItems
+            .Where(value => value.OrderId == order.Id &&
+                            value.Status != "voided" &&
+                            value.Status != "cancelled")
+            .ToArrayAsync(cancellationToken);
+
+        foreach (var item in items)
+        {
+            await _kitchen.VoidOrderItemAsync(
+                db,
+                order,
+                item,
+                reason,
+                principal,
+                cancellationToken);
+        }
+
+        LocalDiningTable? table = null;
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            table = await db.DiningTables
+                .SingleOrDefaultAsync(value => value.Id == order.DiningTableId, cancellationToken);
+            if (table is not null)
+            {
+                table.Status = "available";
+                AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        order.Status = "cancelled";
+        order.Subtotal = 0m;
+        order.Total = 0m;
+        order.ClosedAt = now;
+        order.UpdatedAtUtc = now;
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            principal,
+            "order",
+            hasKitchenProduction ? "order.cancelled_post_kot" : "order.cancelled_pre_kot",
+            order.BranchId,
+            "order",
+            order.Id,
+            new
+            {
+                order_id = order.Id,
+                client_order_id = order.ClientOrderId,
+                reason,
+                had_kitchen_production = hasKitchenProduction,
+            });
+
+        var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId, snapshot);
+
+        return Accepted(
+            mutation,
+            "order",
+            order.Id,
+            order.ClientOrderId,
+            snapshot);
+    }
+
     private static Dictionary<string, object?> Accepted(
         LocalSyncMutationRequest mutation,
         string entityType,
@@ -779,6 +982,9 @@ public sealed class LocalSyncService
                 "rejected");
         }
     }
+
+    private static bool IsManagerApprovalRole(LocalTerminalPrincipal principal) =>
+        principal.UserRole is "owner" or "admin" or "manager";
 
     private static void AuthorizeOrder(LocalTerminalPrincipal principal, LocalOrder order)
     {
