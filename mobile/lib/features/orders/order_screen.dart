@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../app/app_strings.dart';
@@ -65,12 +67,37 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _addItem(Map<String, Object?> item) async {
     if (_working) return;
+
+    final rawGroups = item['modifier_groups_json']?.toString();
+    final groups = rawGroups == null || rawGroups.isEmpty
+        ? const <Object?>[]
+        : (jsonDecode(rawGroups) as List<Object?>);
+
+    _OrderItemOptions options = const _OrderItemOptions();
+
+    if (groups.isNotEmpty) {
+      final selected = await showDialog<_OrderItemOptions>(
+        context: context,
+        builder: (context) => _ItemOptionsDialog(
+          itemName: item['name']!.toString(),
+          groups: groups,
+        ),
+      );
+
+      if (selected == null) return;
+      options = selected;
+    }
+
     setState(() => _working = true);
 
     try {
       await widget.dependencies.orders.addItem(
         localOrderId: widget.localOrderId,
         menuItem: item,
+        notes: options.notes,
+        modifiers: options.modifiers,
+        allergyInstructions: options.allergyInstructions,
+        kitchenInstructions: options.kitchenInstructions,
       );
       await _refresh();
     } on Object catch (error) {
@@ -752,6 +779,212 @@ class _MenuItemImage extends StatelessWidget {
         size: 34,
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
+    );
+  }
+}
+
+
+class _OrderItemOptions {
+  const _OrderItemOptions({
+    this.modifiers = const [],
+    this.notes,
+    this.allergyInstructions,
+    this.kitchenInstructions,
+  });
+
+  final List<Map<String, Object?>> modifiers;
+  final String? notes;
+  final String? allergyInstructions;
+  final String? kitchenInstructions;
+}
+
+class _ItemOptionsDialog extends StatefulWidget {
+  const _ItemOptionsDialog({
+    required this.itemName,
+    required this.groups,
+  });
+
+  final String itemName;
+  final List<Object?> groups;
+
+  @override
+  State<_ItemOptionsDialog> createState() => _ItemOptionsDialogState();
+}
+
+class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
+  final Map<String, Set<String>> _selected = {};
+  final _notes = TextEditingController();
+  final _allergy = TextEditingController();
+  final _kitchen = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    _allergy.dispose();
+    _kitchen.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final modifiers = <Map<String, Object?>>[];
+
+    for (final raw in widget.groups) {
+      final group = Map<String, Object?>.from(raw! as Map<Object?, Object?>);
+      final id = group['id']!.toString();
+      final min = (group['min_selections'] as num?)?.toInt() ?? 0;
+      final max = (group['max_selections'] as num?)?.toInt() ?? 1;
+      final selected = _selected[id] ?? const <String>{};
+
+      if (selected.length < min || selected.length > max) {
+        setState(() {
+          _error = 'Select between ' +
+              min.toString() +
+              ' and ' +
+              max.toString() +
+              ' option(s) for ' +
+              group['name']!.toString() +
+              '.';
+        });
+        return;
+      }
+
+      for (final optionId in selected) {
+        modifiers.add(<String, Object?>{'option_id': optionId});
+      }
+    }
+
+    Navigator.of(context).pop(
+      _OrderItemOptions(
+        modifiers: modifiers,
+        notes: _clean(_notes.text),
+        allergyInstructions: _clean(_allergy.text),
+        kitchenInstructions: _clean(_kitchen.text),
+      ),
+    );
+  }
+
+  String? _clean(String value) {
+    final cleaned = value.trim();
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.itemName),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ...widget.groups.map((raw) {
+                final group =
+                    Map<String, Object?>.from(raw! as Map<Object?, Object?>);
+                final id = group['id']!.toString();
+                final options =
+                    group['options'] as List<Object?>? ?? const <Object?>[];
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group['name']!.toString(),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: options.map((rawOption) {
+                          final option = Map<String, Object?>.from(
+                            rawOption! as Map<Object?, Object?>,
+                          );
+                          final optionId = option['id']!.toString();
+                          final selected =
+                              _selected[id]?.contains(optionId) ?? false;
+                          final label = option['name']!.toString() +
+                              ' (+' +
+                              option['price_delta']!.toString() +
+                              ' AFN)';
+
+                          return FilterChip(
+                            selected: selected,
+                            label: Text(label),
+                            onSelected: (value) {
+                              setState(() {
+                                final set = _selected.putIfAbsent(
+                                  id,
+                                  () => <String>{},
+                                );
+                                if (value) {
+                                  final max =
+                                      (group['max_selections'] as num?)
+                                              ?.toInt() ??
+                                          1;
+                                  if (set.length < max) set.add(optionId);
+                                } else {
+                                  set.remove(optionId);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              TextField(
+                controller: _notes,
+                decoration: const InputDecoration(
+                  labelText: 'Order note',
+                  prefixIcon: Icon(Icons.note_alt_outlined),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _kitchen,
+                decoration: const InputDecoration(
+                  labelText: 'Kitchen instructions',
+                  prefixIcon: Icon(Icons.soup_kitchen_outlined),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _allergy,
+                decoration: const InputDecoration(
+                  labelText: 'Allergy / critical instruction',
+                  prefixIcon: Icon(Icons.warning_amber_rounded),
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Add to order'),
+        ),
+      ],
     );
   }
 }
