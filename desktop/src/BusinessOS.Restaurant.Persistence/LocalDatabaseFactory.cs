@@ -306,10 +306,11 @@ public sealed class LocalDatabaseFactory
     {
         await using var db = Create();
 
-        var legacyTickets = await db.KitchenTickets
-            .Where(value => value.KotRoundId == null)
+        var legacyTickets = (await db.KitchenTickets
+                .Where(value => value.KotRoundId == null)
+                .ToArrayAsync(cancellationToken))
             .OrderBy(value => value.QueuedAt)
-            .ToArrayAsync(cancellationToken);
+            .ToArray();
 
         if (legacyTickets.Length == 0)
         {
