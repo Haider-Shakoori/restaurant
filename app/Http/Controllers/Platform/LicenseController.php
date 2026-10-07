@@ -14,6 +14,36 @@ use Illuminate\View\View;
 
 class LicenseController extends Controller
 {
+    public function index(): View
+    {
+        $search = trim((string) request('q', ''));
+
+        $businesses = Business::query()
+            ->with(['tenant.domains', 'plan', 'licenseKeys'])
+            ->withCount([
+                'devices as active_devices_count' => fn ($query) => $query
+                    ->where('status', DeviceStatus::Active),
+                'devices as active_mobile_devices_count' => fn ($query) => $query
+                    ->where('status', DeviceStatus::Active)
+                    ->whereIn('platform', ['android', 'ios']),
+            ])
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(function ($query) use ($search): void {
+                    $query
+                        ->where('name', 'like', '%'.$search.'%')
+                        ->orWhere('contact_name', 'like', '%'.$search.'%')
+                        ->orWhere('phone', 'like', '%'.$search.'%')
+                        ->orWhere('requested_subdomain', 'like', '%'.$search.'%')
+                        ->orWhere('tenant_id', 'like', '%'.$search.'%');
+                });
+            })
+            ->orderBy('name')
+            ->paginate(20)
+            ->withQueryString();
+
+        return view('platform.licenses.index', compact('businesses', 'search'));
+    }
+
     public function show(
         Business $business,
         SubscriptionService $subscriptions,
@@ -49,10 +79,19 @@ class LicenseController extends Controller
         Business $business,
         LicenseService $licenses,
     ): RedirectResponse {
+        $hadActiveLicense = $business->licenseKeys()
+            ->where('status', 'active')
+            ->exists();
+
         $result = $licenses->generate($business, request()->user());
 
         return back()
-            ->with('status', 'License generated. Copy the raw key now; it will not be shown again.')
+            ->with(
+                'status',
+                $hadActiveLicense
+                    ? 'License regenerated. Previous license and active device credentials were revoked. Copy the new raw key now; it will not be shown again.'
+                    : 'License generated. Copy the raw key now; it will not be shown again.',
+            )
             ->with('generated_license_key', $result['raw_key']);
     }
 

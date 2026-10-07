@@ -23,6 +23,7 @@
                 <a href="/platform" class="rounded-lg px-3 py-2 hover:bg-slate-900">Dashboard</a>
                 <a href="/platform/restaurants" class="rounded-lg px-3 py-2 hover:bg-slate-900">Restaurants</a>
                 <a href="/platform/tenants" class="rounded-lg px-3 py-2 hover:bg-slate-900">Tenant Infrastructure</a>
+                <a href="/platform/licenses" class="rounded-lg px-3 py-2 hover:bg-slate-900">License Management</a>
                 <a href="/platform/system-health" class="rounded-lg px-3 py-2 hover:bg-slate-900">System Health</a>
                 @can('manage-platform')
                     <a href="/platform/plans" class="rounded-lg px-3 py-2 hover:bg-slate-900">Plans & Features</a>
