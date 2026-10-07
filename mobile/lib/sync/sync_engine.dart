@@ -1,5 +1,6 @@
 import '../core/api/mobile_api_client.dart';
 import '../core/connection/connection_mode.dart';
+import '../core/connection/connection_resolver.dart';
 import '../core/models/session_credentials.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
@@ -28,7 +29,8 @@ class SyncEngine {
   bool _running = false;
 
   Future<void> bootstrap() async {
-    final session = await _requireSession();
+    var session = await _requireSession();
+    session = await _resolveActiveChannel(session);
     final refreshed = await _refreshLeaseIfNeeded(session);
     final data = await _api.syncBootstrap(refreshed);
     await _store.applyBootstrap(data);
@@ -46,12 +48,21 @@ class SyncEngine {
       session = await _resolveActiveChannel(session);
       session = await _refreshLeaseIfNeeded(session);
 
-      if (session.activeChannel == ConnectionChannel.local) {
-        await _api.heartbeat(session);
+      try {
+        await _syncUsing(session);
+      } on ApiException catch (error) {
+        if (!_isRetryable(error) ||
+            session.connectionMode != ConnectionMode.automatic ||
+            session.activeChannel != ConnectionChannel.local ||
+            session.cloudBaseUrl == null ||
+            session.cloudBaseUrl!.isEmpty) {
+          rethrow;
+        }
+
+        final fallback = await _switchToCloud(session);
+        await _syncUsing(fallback);
       }
 
-      await _push(session);
-      await _pull(session);
       await _store.setSystemState('last_sync_error', '');
       await _store.setSystemState(
         'last_sync_at',
@@ -68,6 +79,38 @@ class SyncEngine {
     } finally {
       _running = false;
     }
+  }
+
+  Future<void> _syncUsing(SessionCredentials session) async {
+    if (session.activeChannel == ConnectionChannel.local) {
+      await _api.heartbeat(session);
+    }
+
+    await _push(session);
+    await _pull(session);
+  }
+
+  Future<SessionCredentials> _switchToCloud(SessionCredentials session) async {
+    final resolver = _connectionResolver;
+    if (resolver == null || session.cloudBaseUrl == null) {
+      return session;
+    }
+
+    final target = await resolver.resolve(
+      mode: ConnectionMode.cloud,
+      localUrl: session.localBaseUrl,
+      cloudUrl: session.cloudBaseUrl,
+    );
+    final switched = session.copyWith(
+      baseUrl: target.baseUrl,
+      activeChannel: ConnectionChannel.cloud,
+    );
+    await _credentials.saveActiveConnection(
+      baseUrl: switched.baseUrl,
+      activeChannel: switched.activeChannel,
+    );
+    await _store.setSystemState('active_connection', 'cloud');
+    return switched;
   }
 
   Future<void> _push(SessionCredentials session) async {
@@ -192,7 +235,15 @@ class SyncEngine {
     }
 
     try {
-      final response = await _api.refreshLease(session);
+      final refreshSession = session.activeChannel == ConnectionChannel.local &&
+              session.cloudBaseUrl != null &&
+              session.cloudBaseUrl!.isNotEmpty
+          ? session.copyWith(
+              baseUrl: session.cloudBaseUrl,
+              activeChannel: ConnectionChannel.cloud,
+            )
+          : session;
+      final response = await _api.refreshLease(refreshSession);
       final lease = Map<String, Object?>.from(
         response['lease']! as Map<Object?, Object?>,
       );
