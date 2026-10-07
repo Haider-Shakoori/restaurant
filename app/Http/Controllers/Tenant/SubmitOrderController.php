@@ -18,8 +18,12 @@ class SubmitOrderController extends Controller
         /** @var TenantUser $user */
         $user = $request->user();
 
+        $clientDispatchId = $request->filled('client_dispatch_id')
+            ? $request->string('client_dispatch_id')->toString()
+            : null;
+
         return response()->json([
-            'data' => $orders->submit($order, $user),
+            'data' => $orders->submit($order, $user, $clientDispatchId),
         ]);
     }
 }
