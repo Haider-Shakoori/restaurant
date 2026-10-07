@@ -95,9 +95,19 @@ class TenantPortalController extends Controller
                 ->orderBy('name')
                 ->get(),
             'menuCategories' => MenuCategory::query()
-                ->with(['items' => fn ($query) => $query->where('is_available', true)->orderBy('sort_order')->orderBy('name')])
+                ->with(['items' => fn ($query) => $query
+                    ->where('is_available', true)
+                    ->with(['modifierGroups' => fn ($groups) => $groups
+                        ->where('menu_modifier_groups.is_active', true)
+                        ->with(['options' => fn ($options) => $options->where('is_active', true)])])
+                    ->orderBy('sort_order')
+                    ->orderBy('name')])
                 ->where('is_active', true)
                 ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(),
+            'activeBranches' => RestaurantBranch::query()
+                ->where('is_active', true)
                 ->orderBy('name')
                 ->get(),
             'statuses' => [
