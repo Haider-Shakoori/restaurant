@@ -53,6 +53,13 @@ class OfflineOrderRepository {
     required Map<String, Object?> menuItem,
     int quantity = 1,
     String? notes,
+    int? seatNumber,
+    int? courseNumber,
+    String? courseName,
+    bool holdForCourse = false,
+    List<Map<String, Object?>> modifiers = const [],
+    String? allergyInstructions,
+    String? kitchenInstructions,
   }) async {
     await _ensureOfflineOperationAllowed();
 
@@ -63,6 +70,28 @@ class OfflineOrderRepository {
       menuItem: menuItem,
       quantity: quantity,
       notes: notes,
+      seatNumber: seatNumber,
+      courseNumber: courseNumber,
+      courseName: courseName,
+      holdForCourse: holdForCourse,
+      modifiers: modifiers,
+      allergyInstructions: allergyInstructions,
+      kitchenInstructions: kitchenInstructions,
+    );
+  }
+
+  Future<void> fireCourse({
+    required String localOrderId,
+    required int courseNumber,
+    String priority = 'normal',
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.fireCourse(
+      localOrderId: localOrderId,
+      courseNumber: courseNumber,
+      mutationId: _uuid.v4(),
+      priority: priority,
     );
   }
 
