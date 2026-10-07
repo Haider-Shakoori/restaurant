@@ -428,6 +428,28 @@ class LocalDatabase implements SyncStore {
     return rows.isEmpty ? null : rows.first['value'] as String?;
   }
 
+  Future<Map<String, Object?>> restaurantSettings() async {
+    final raw = await systemState('restaurant_settings_json');
+
+    if (raw == null || raw.isEmpty) {
+      return const <String, Object?>{
+        'kitchen_queue_enabled': true,
+        'preparing_stage_enabled': true,
+        'expo_enabled': false,
+        'courses_enabled': false,
+        'kot_sound_enabled': true,
+        'kitchen_warning_minutes': 10,
+        'kitchen_late_minutes': 20,
+        'require_manager_approval_post_kot_void': false,
+        'negative_stock_policy': 'block',
+      };
+    }
+
+    return Map<String, Object?>.from(
+      jsonDecode(raw) as Map<String, dynamic>,
+    );
+  }
+
   Future<List<Map<String, Object?>>> branches() {
     return _db.query(
       'branches',
