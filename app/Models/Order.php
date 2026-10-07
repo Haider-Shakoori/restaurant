@@ -12,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable([
     'client_order_id',
+    'branch_id',
+    'service_type',
+    'service_reference',
     'dining_table_id',
     'waiter_id',
     'status',
@@ -27,6 +30,21 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Order extends Model
 {
     use HasUlids, RecordsSyncChanges;
+
+    public const SERVICE_DINE_IN = 'dine_in';
+
+    public const SERVICE_TAKEAWAY = 'takeaway';
+
+    public const SERVICE_DELIVERY = 'delivery';
+
+    public const SERVICE_COUNTER = 'counter';
+
+    public const SERVICE_TYPES = [
+        self::SERVICE_DINE_IN,
+        self::SERVICE_TAKEAWAY,
+        self::SERVICE_DELIVERY,
+        self::SERVICE_COUNTER,
+    ];
 
     public const STATUS_DRAFT = 'draft';
 
@@ -73,6 +91,11 @@ class Order extends Model
             'served_at' => 'datetime',
             'closed_at' => 'datetime',
         ];
+    }
+
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(RestaurantBranch::class, 'branch_id');
     }
 
     public function table(): BelongsTo
