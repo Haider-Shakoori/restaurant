@@ -15,12 +15,20 @@ class LocalDatabase implements SyncStore {
     final root = await getDatabasesPath();
     final database = await openDatabase(
       p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE branches (
+            id TEXT PRIMARY KEY,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1
           )
         ''');
         await db.execute('''
@@ -178,6 +186,16 @@ class LocalDatabase implements SyncStore {
             "ALTER TABLE order_items ADD COLUMN course_state TEXT NOT NULL DEFAULT 'open'",
           );
         }
+        if (oldVersion < 5) {
+          await db.execute('''
+            CREATE TABLE branches (
+              id TEXT PRIMARY KEY,
+              code TEXT NOT NULL,
+              name TEXT NOT NULL,
+              is_active INTEGER NOT NULL DEFAULT 1
+            )
+          ''');
+        }
       },
     );
 
@@ -227,6 +245,23 @@ class LocalDatabase implements SyncStore {
     await _db.transaction((txn) async {
       await txn.delete('menu_items');
       await txn.delete('menu_categories');
+      await txn.delete('branches');
+
+      for (final rawBranch in data['branches'] as List<Object?>? ?? const []) {
+        final branch = Map<String, Object?>.from(
+          rawBranch! as Map<Object?, Object?>,
+        );
+        await txn.insert(
+          'branches',
+          <String, Object?>{
+            'id': branch['id']!.toString(),
+            'code': branch['code']!.toString(),
+            'name': branch['name']!.toString(),
+            'is_active': _boolInt(branch['is_active'], defaultValue: true),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
 
       for (final rawCategory in data['menu'] as List<Object?>? ?? const []) {
         final category = Map<String, Object?>.from(
@@ -384,6 +419,14 @@ class LocalDatabase implements SyncStore {
     return rows.isEmpty ? null : rows.first['value'] as String?;
   }
 
+  Future<List<Map<String, Object?>>> branches() {
+    return _db.query(
+      'branches',
+      where: 'is_active = 1',
+      orderBy: 'name ASC',
+    );
+  }
+
   Future<List<Map<String, Object?>>> tables() async {
     return _db.query(
       'dining_tables',
@@ -491,7 +534,10 @@ class LocalDatabase implements SyncStore {
   Future<void> createDraftOrder({
     required String clientOrderId,
     required String mutationId,
-    required String tableId,
+    String? tableId,
+    required String branchId,
+    required String serviceType,
+    String? serviceReference,
     required int guestCount,
     String? notes,
   }) async {
@@ -502,6 +548,9 @@ class LocalDatabase implements SyncStore {
         'local_order_id': clientOrderId,
         'client_order_id': clientOrderId,
         'table_id': tableId,
+        'branch_id': branchId,
+        'service_type': serviceType,
+        'service_reference': serviceReference,
         'status': 'draft',
         'guest_count': guestCount,
         'notes': notes,
@@ -510,18 +559,23 @@ class LocalDatabase implements SyncStore {
         'opened_at': now,
         'updated_at': now,
       });
-      await txn.update(
-        'dining_tables',
-        <String, Object?>{'status': 'occupied'},
-        where: 'id = ?',
-        whereArgs: <Object?>[tableId],
-      );
+      if (tableId != null) {
+        await txn.update(
+          'dining_tables',
+          <String, Object?>{'status': 'occupied'},
+          where: 'id = ?',
+          whereArgs: <Object?>[tableId],
+        );
+      }
       await _enqueue(
         txn,
         mutationId: mutationId,
         operation: 'order.open',
         payload: <String, Object?>{
           'client_order_id': clientOrderId,
+          'branch_id': branchId,
+          'service_type': serviceType,
+          'service_reference': serviceReference,
           'dining_table_id': tableId,
           'guest_count': guestCount,
           'notes': notes,
