@@ -8,7 +8,7 @@
         Background="{DynamicResource AppBackgroundBrush}"
         ResizeMode="CanResizeWithGrip">
     <Grid>
-        <Image Source="Assets/RestaurantGlassBackground.jpg"
+        <Image Source="Assets/RestaurantInstallerBackground.png"
                Stretch="UniformToFill"
                Effect="{DynamicResource BackgroundBlurEffect}" />
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
