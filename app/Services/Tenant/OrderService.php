@@ -15,6 +15,7 @@ class OrderService
 {
     public function __construct(
         private readonly KitchenService $kitchen,
+        private readonly RestaurantSettingsService $settings,
     ) {}
 
     public function take(TenantUser $actor, array $data): Order
@@ -196,6 +197,14 @@ class OrderService
                 (array) ($data['modifiers'] ?? []),
             );
 
+            $order->loadMissing('table.diningArea');
+            $branchId = $order->branch_id ?? $order->table?->diningArea?->branch_id;
+            $restaurantSettings = $this->settings->all($branchId);
+            $courseState = (
+                ($restaurantSettings['courses_enabled'] ?? false)
+                && ($data['hold_for_course'] ?? false)
+            ) ? 'held' : 'open';
+
             $quantity = (int) $data['quantity'];
             $unitPrice = $this->fromMinor($this->toMinor((string) $menuItem->price) + $modifierDeltaMinor);
             $lineTotal = $this->multiplyMoney($unitPrice, $quantity);
@@ -212,6 +221,7 @@ class OrderService
                 'seat_number' => $data['seat_number'] ?? null,
                 'course_number' => $data['course_number'] ?? null,
                 'course_name' => $data['course_name'] ?? null,
+                'course_state' => $courseState,
                 'modifiers_snapshot' => $modifierSnapshot ?: null,
                 'allergy_instructions' => $data['allergy_instructions'] ?? null,
                 'kitchen_instructions' => $data['kitchen_instructions'] ?? null,
@@ -263,6 +273,7 @@ class OrderService
 
             $hasUnsent = $order->items()
                 ->whereColumn('dispatched_quantity', '<', 'quantity')
+                ->where('course_state', '!=', 'held')
                 ->exists();
 
             if ($hasUnsent && in_array($order->status, [
@@ -292,6 +303,69 @@ class OrderService
                 'kotRounds.tickets.items',
                 'kitchenTickets.station',
             ]);
+        });
+    }
+
+    public function fireCourse(
+        Order $order,
+        TenantUser $actor,
+        int $courseNumber,
+        string $mutationId,
+        string $priority = 'normal',
+    ): Order {
+        return DB::connection('tenant')->transaction(function () use (
+            $order,
+            $actor,
+            $courseNumber,
+            $mutationId,
+            $priority,
+        ): Order {
+            $order = Order::query()
+                ->with('table.diningArea')
+                ->lockForUpdate()
+                ->findOrFail($order->getKey());
+
+            if (! in_array($order->status, Order::EDITABLE_STATUSES, true)) {
+                throw ValidationException::withMessages([
+                    'order' => 'This order can no longer fire a course.',
+                ]);
+            }
+
+            $branchId = $order->branch_id ?? $order->table?->diningArea?->branch_id;
+            $settings = $this->settings->all($branchId);
+
+            if (! ($settings['courses_enabled'] ?? false)) {
+                throw ValidationException::withMessages([
+                    'course' => 'Course sequencing is disabled for this restaurant.',
+                ]);
+            }
+
+            $held = $order->items()
+                ->where('course_number', $courseNumber)
+                ->where('course_state', 'held')
+                ->lockForUpdate()
+                ->get();
+
+            if ($held->isNotEmpty()) {
+                foreach ($held as $item) {
+                    $item->update(['course_state' => 'fired']);
+                }
+
+                $this->event(
+                    $order,
+                    $actor,
+                    'order.course_fired',
+                    $order->status,
+                    $order->status,
+                    [
+                        'course_number' => $courseNumber,
+                        'item_ids' => $held->pluck('id')->all(),
+                        'mutation_id' => $mutationId,
+                    ],
+                );
+            }
+
+            return $this->submit($order->fresh(), $actor, $mutationId, $priority);
         });
     }
 
