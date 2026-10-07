@@ -26,6 +26,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'voided_at',
     'refire_of_kitchen_ticket_item_id',
     'production_reason',
+    'client_operation_id',
+    'void_reason',
+    'voided_by_user_id',
+    'recalled_at',
+    'recall_reason',
 ])]
 class KitchenTicketItem extends Model
 {
@@ -59,6 +64,7 @@ class KitchenTicketItem extends Model
             'ready_at' => 'datetime',
             'completed_at' => 'datetime',
             'voided_at' => 'datetime',
+            'recalled_at' => 'datetime',
         ];
     }
 
