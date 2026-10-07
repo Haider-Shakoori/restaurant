@@ -440,6 +440,138 @@ public static class LocalEndpointMappings
             }
         });
 
+        app.MapPost("/api/v1/kitchen/items/{itemId}/start", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.StartItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapPost("/api/v1/kitchen/items/{itemId}/ready", async (
+            string itemId,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalKitchenService kitchen,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Kitchen terminal authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var data = await kitchen.ReadyItemAsync(itemId, principal, token);
+                return Results.Ok(new { data });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
+        app.MapGet("/api/v1/restaurant/settings", async (
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalRestaurantSettingsService settings,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Restaurant authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            var data = await settings.GetAsync(token);
+            return Results.Ok(new { data = LocalRestaurantSettingsService.ToPayload(data) });
+        });
+
+        app.MapPut("/api/v1/restaurant/settings", async (
+            RestaurantWorkflowSettingsUpdate body,
+            HttpRequest request,
+            LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator,
+            LocalRestaurantSettingsService settings,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request,
+                options,
+                allowCloudPairing: true,
+                token);
+
+            if (principal is null)
+            {
+                return Results.Json(
+                    new { code = "unauthenticated", message = "Restaurant management authentication is required." },
+                    statusCode: StatusCodes.Status401Unauthorized);
+            }
+
+            try
+            {
+                var updated = await settings.UpdateAsync(body, principal, token);
+                return Results.Ok(new { data = LocalRestaurantSettingsService.ToPayload(updated) });
+            }
+            catch (LocalSyncConflictException conflict)
+            {
+                return Results.Json(
+                    new { code = conflict.Code, message = conflict.Message },
+                    statusCode: conflict.Status == "rejected"
+                        ? StatusCodes.Status403Forbidden
+                        : StatusCodes.Status409Conflict);
+            }
+        });
+
         app.MapPut("/api/v1/kitchen/stations/{stationId}/printer", async (
             string stationId,
             LocalPrinterBindingRequest body,
