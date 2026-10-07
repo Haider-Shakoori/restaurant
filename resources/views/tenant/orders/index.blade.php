@@ -165,6 +165,7 @@
             <div x-show="showTakeOrder" x-cloak class="border-b border-slate-200 bg-slate-50/70 p-5 sm:p-6">
                 <form method="POST" action="/orders/take" class="space-y-6">
                     @csrf
+                    <input type="hidden" name="client_order_id" value="{{ old('client_order_id', (string) \Illuminate\Support\Str::uuid()) }}">
                     <input type="hidden" name="client_mutation_id" value="{{ old('client_mutation_id', (string) \Illuminate\Support\Str::uuid()) }}">
 
                     <div class="rounded-2xl border border-slate-200 bg-white p-4">
