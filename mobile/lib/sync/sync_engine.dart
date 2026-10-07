@@ -54,7 +54,7 @@ class SyncEngine {
       try {
         await _syncUsing(session);
       } on ApiException catch (error) {
-        if (!_isRetryable(error) ||
+        if (!_canFallbackFromLocal(error) ||
             session.connectionMode != ConnectionMode.automatic ||
             session.activeChannel != ConnectionChannel.local ||
             session.cloudBaseUrl == null ||
@@ -323,6 +323,14 @@ class SyncEngine {
       message: message,
       retryAt: DateTime.now().toUtc().add(Duration(seconds: seconds)),
     );
+  }
+
+  bool _canFallbackFromLocal(ApiException error) {
+    return _isRetryable(error) ||
+        error.statusCode == 401 ||
+        error.statusCode == 403 ||
+        error.code == 'unauthenticated' ||
+        error.code == 'forbidden';
   }
 
   bool _isRetryable(ApiException error) {
