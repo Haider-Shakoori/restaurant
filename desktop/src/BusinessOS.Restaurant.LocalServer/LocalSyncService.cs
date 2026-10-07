@@ -313,9 +313,19 @@ public sealed class LocalSyncService
 
         var payload = mutation.Payload;
         var clientOrderId = RequiredString(payload, "client_order_id", 40);
-        var tableId = RequiredString(payload, "dining_table_id", 40);
-        var guestCount = OptionalInt(payload, "guest_count", 1);
+        var serviceType = (OptionalString(payload, "service_type", 24) ?? "dine_in")
+            .Trim()
+            .ToLowerInvariant()
+            .Replace('-', '_');
 
+        if (serviceType is not ("dine_in" or "takeaway" or "delivery" or "counter"))
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                "service_type must be dine_in, takeaway, delivery or counter.");
+        }
+
+        var guestCount = OptionalInt(payload, "guest_count", 1);
         if (guestCount is < 1 or > 100)
         {
             throw new LocalSyncConflictException("invalid_payload", "Guest count must be between 1 and 100.");
@@ -327,7 +337,6 @@ public sealed class LocalSyncService
         if (existing is not null)
         {
             AuthorizeOrder(principal, existing);
-
             return Accepted(
                 mutation,
                 "order",
@@ -336,25 +345,54 @@ public sealed class LocalSyncService
                 await OrderSnapshotAsync(db, existing, cancellationToken));
         }
 
-        var table = await db.DiningTables.FindAsync([tableId], cancellationToken);
+        LocalDiningTable? table = null;
+        string branchId;
+        var tableId = OptionalString(payload, "dining_table_id", 40);
 
-        if (table is null || !table.IsActive ||
-            table.Status is "disabled" or "reserved")
+        if (serviceType == "dine_in")
         {
-            throw new LocalSyncConflictException(
-                "table_busy",
-                "This table is not currently available for walk-in ordering.");
+            if (string.IsNullOrWhiteSpace(tableId))
+            {
+                throw new LocalSyncConflictException(
+                    "invalid_payload",
+                    "dining_table_id is required for dine-in orders.");
+            }
+
+            table = await db.DiningTables.FindAsync([tableId], cancellationToken);
+            if (table is null || !table.IsActive || table.Status is "disabled" or "reserved")
+            {
+                throw new LocalSyncConflictException(
+                    "table_busy",
+                    "This table is not currently available for dine-in ordering.");
+            }
+
+            var busy = await db.Orders.AnyAsync(
+                value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status),
+                cancellationToken);
+            if (busy)
+            {
+                throw new LocalSyncConflictException(
+                    "table_busy",
+                    "This table already has an active order.");
+            }
+
+            var area = await db.DiningAreas.SingleAsync(
+                value => value.Id == table.DiningAreaId,
+                cancellationToken);
+            branchId = area.BranchId;
         }
-
-        var busy = await db.Orders.AnyAsync(
-            value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status),
-            cancellationToken);
-
-        if (busy)
+        else
         {
-            throw new LocalSyncConflictException(
-                "table_busy",
-                "This table already has an active order.");
+            branchId = RequiredString(payload, "branch_id", 40);
+            var branchExists = await db.Branches.AnyAsync(
+                value => value.Id == branchId && value.IsActive,
+                cancellationToken);
+            if (!branchExists)
+            {
+                throw new LocalSyncConflictException(
+                    "dependency_missing",
+                    "The selected branch is inactive or unavailable.");
+            }
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -362,7 +400,11 @@ public sealed class LocalSyncService
         {
             Id = Guid.CreateVersion7().ToString("N"),
             ClientOrderId = clientOrderId,
-            DiningTableId = tableId,
+            DiningTableId = table?.Id ?? string.Empty,
+            BranchId = branchId,
+            ServiceType = serviceType,
+            ServiceReference = OptionalString(payload, "service_reference", 80) ??
+                (serviceType == "dine_in" ? null : clientOrderId),
             WaiterId = principal.UserId,
             WaiterPublicId = principal.UserPublicId,
             WaiterName = principal.UserName,
@@ -377,12 +419,19 @@ public sealed class LocalSyncService
         };
 
         db.Orders.Add(order);
-        table.Status = "occupied";
+        if (table is not null)
+        {
+            table.Status = "occupied";
+        }
+
         await db.SaveChangesAsync(cancellationToken);
 
         var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
         AddChange(db, "order", order.Id, principal.UserId, snapshot);
-        AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+        if (table is not null)
+        {
+            AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+        }
 
         return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
     }
@@ -754,15 +803,44 @@ public sealed class LocalSyncService
         LocalOrder order,
         CancellationToken cancellationToken)
     {
-        var table = await db.DiningTables
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var area = await db.DiningAreas
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
-        var branch = await db.Branches
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == area.BranchId, cancellationToken);
+        object? tableSnapshot = null;
+        LocalBranch? branch = null;
+
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            var table = await db.DiningTables
+                .AsNoTracking()
+                .SingleOrDefaultAsync(value => value.Id == order.DiningTableId, cancellationToken);
+
+            if (table is not null)
+            {
+                var area = await db.DiningAreas
+                    .AsNoTracking()
+                    .SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
+                branch = await db.Branches
+                    .AsNoTracking()
+                    .SingleAsync(value => value.Id == area.BranchId, cancellationToken);
+                tableSnapshot = new
+                {
+                    id = table.Id,
+                    code = table.Code,
+                    name = table.Name,
+                    capacity = table.Capacity,
+                    status = table.Status,
+                    is_active = table.IsActive,
+                    area = new { id = area.Id, name = area.Name },
+                    branch = new { id = branch.Id, name = branch.Name },
+                };
+            }
+        }
+
+        if (branch is null && !string.IsNullOrWhiteSpace(order.BranchId))
+        {
+            branch = await db.Branches
+                .AsNoTracking()
+                .SingleOrDefaultAsync(value => value.Id == order.BranchId, cancellationToken);
+        }
+
         var items = (await db.OrderItems
             .Where(value => value.OrderId == order.Id)
             .AsNoTracking()
@@ -793,6 +871,9 @@ public sealed class LocalSyncService
         {
             id = order.Id,
             client_order_id = order.ClientOrderId,
+            branch_id = order.BranchId ?? branch?.Id,
+            service_type = order.ServiceType,
+            service_reference = order.ServiceReference,
             status = order.Status,
             guest_count = order.GuestCount,
             notes = order.Notes,
@@ -802,17 +883,7 @@ public sealed class LocalSyncService
             submitted_at = order.SubmittedAt,
             served_at = order.ServedAt,
             closed_at = order.ClosedAt,
-            table = new
-            {
-                id = table.Id,
-                code = table.Code,
-                name = table.Name,
-                capacity = table.Capacity,
-                status = table.Status,
-                is_active = table.IsActive,
-                area = new { id = area.Id, name = area.Name },
-                branch = new { id = branch.Id, name = branch.Name },
-            },
+            table = tableSnapshot,
             waiter = new
             {
                 id = order.WaiterId,
