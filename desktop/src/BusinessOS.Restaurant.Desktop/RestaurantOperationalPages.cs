@@ -325,10 +325,87 @@ internal static class RestaurantOperationalPages
     {
         var panel = Stack();
         panel.DataContext = diagnostics.Reports;
-        panel.Children.Add(Card("Reports & accounting", "Use the existing local reporting service. Financial data stays available on the desktop during internet outages."));
-        var button = new Button { Content = "Run report", Width = 140, Height = 38, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 14, 0, 0) };
-        button.SetBinding(Button.CommandProperty, new Binding("RefreshReportsCommand"));
-        panel.Children.Add(button);
+        panel.Children.Add(Card(
+            "Reports & accounting",
+            "Financial and kitchen performance data stay local-first. Kitchen metrics use KOT/item timestamps and the same warning/late thresholds configured in Restaurant Settings."));
+
+        var filters = new WrapPanel { Margin = new Thickness(0, 12, 0, 12) };
+        var branch = new TextBox { Width = 180, Height = 34, Margin = new Thickness(0, 4, 8, 6) };
+        branch.SetBinding(TextBox.TextProperty, new Binding(nameof(ReportsViewModel.BranchId))
+        {
+            Mode = BindingMode.TwoWay,
+            UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+        });
+        var from = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
+        from.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.From)) { Mode = BindingMode.TwoWay });
+        var to = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
+        to.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.To)) { Mode = BindingMode.TwoWay });
+        var button = new Button { Content = "Run report", Width = 140, Height = 38, Margin = new Thickness(0, 2, 0, 0) };
+        button.SetBinding(Button.CommandProperty, new Binding(nameof(ReportsViewModel.RefreshReportsCommand)));
+        filters.Children.Add(branch);
+        filters.Children.Add(from);
+        filters.Children.Add(to);
+        filters.Children.Add(button);
+        panel.Children.Add(filters);
+
+        var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 16) };
+        foreach (var metric in new[]
+        {
+            ("KOT ROUNDS", nameof(ReportsViewModel.KitchenRounds)),
+            ("AVG KITCHEN", nameof(ReportsViewModel.KitchenAverage)),
+            ("LATE ITEMS", nameof(ReportsViewModel.KitchenLateItems)),
+            ("RUSH ITEMS", nameof(ReportsViewModel.KitchenRushItems)),
+        })
+        {
+            var stack = new StackPanel();
+            var label = new TextBlock
+            {
+                Text = metric.Item1,
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+            };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            var value = new TextBlock
+            {
+                FontSize = 22,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 4, 0, 0),
+            };
+            value.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            value.SetBinding(TextBlock.TextProperty, new Binding(metric.Item2));
+            stack.Children.Add(label);
+            stack.Children.Add(value);
+
+            var metricCard = new Border
+            {
+                Child = stack,
+                Padding = new Thickness(14),
+                Margin = new Thickness(0, 0, 10, 0),
+                CornerRadius = new CornerRadius(12),
+                BorderThickness = new Thickness(1),
+            };
+            metricCard.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+            metricCard.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+            metrics.Children.Add(metricCard);
+        }
+        panel.Children.Add(metrics);
+
+        var kitchenGrid = GridFor(diagnostics.Reports.KitchenStations);
+        kitchenGrid.MinHeight = 240;
+        kitchenGrid.Columns.Add(Column("Station", nameof(ReportKitchenStationRow.Station), 180));
+        kitchenGrid.Columns.Add(Column("Items", nameof(ReportKitchenStationRow.Items), 80));
+        kitchenGrid.Columns.Add(Column("Active", nameof(ReportKitchenStationRow.ActiveItems), 80));
+        kitchenGrid.Columns.Add(Column("Rush", nameof(ReportKitchenStationRow.RushItems), 80));
+        kitchenGrid.Columns.Add(Column("Late", nameof(ReportKitchenStationRow.LateItems), 80));
+        kitchenGrid.Columns.Add(Column("Queue min", nameof(ReportKitchenStationRow.AverageQueueMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Prep min", nameof(ReportKitchenStationRow.AveragePreparationMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Total min", nameof(ReportKitchenStationRow.AverageTotalMinutes), 110));
+        kitchenGrid.Columns.Add(Column("Utilization %", nameof(ReportKitchenStationRow.UtilizationPercent), 110));
+        panel.Children.Add(Section(
+            "Kitchen performance",
+            "Stations are ordered by total preparation time so bottlenecks surface first.",
+            kitchenGrid));
+
         return Scroll(panel);
     }
 
