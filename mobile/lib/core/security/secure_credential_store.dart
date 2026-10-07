@@ -29,6 +29,11 @@ abstract interface class CredentialStore {
 
   Future<void> saveLease(Map<String, Object?> lease);
 
+  Future<void> saveActiveConnection({
+    required String baseUrl,
+    required ConnectionChannel activeChannel,
+  });
+
   Future<void> clearSession();
 }
 
@@ -153,6 +158,18 @@ class SecureCredentialStore implements CredentialStore {
   @override
   Future<void> saveLease(Map<String, Object?> lease) {
     return _storage.write(key: _leaseKey, value: jsonEncode(lease));
+  }
+
+  @override
+  Future<void> saveActiveConnection({
+    required String baseUrl,
+    required ConnectionChannel activeChannel,
+  }) async {
+    await _storage.write(key: _baseUrlKey, value: baseUrl);
+    await _storage.write(
+      key: _activeChannelKey,
+      value: activeChannel.storageValue,
+    );
   }
 
   @override
