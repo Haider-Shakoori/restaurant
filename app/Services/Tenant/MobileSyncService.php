@@ -385,7 +385,10 @@ class MobileSyncService
         return [
             'entity_type' => 'kitchen_ticket_item',
             'entity_id' => $item->id,
-            'data' => $item->toArray(),
+            'data' => [
+                'item' => $item->toArray(),
+                'order' => $this->orderSnapshot($item->ticket->order->fresh()),
+            ],
         ];
     }
 
@@ -403,10 +406,15 @@ class MobileSyncService
         $this->authorizeOrder($user, $item->ticket->order);
         $refire = $this->kitchen->refireItem($item, $user, $data['reason'], $mutationId);
 
+        $refire->loadMissing('ticket.order');
+
         return [
             'entity_type' => 'kitchen_ticket_item',
             'entity_id' => $refire->id,
-            'data' => $refire->toArray(),
+            'data' => [
+                'item' => $refire->toArray(),
+                'order' => $this->orderSnapshot($refire->ticket->order->fresh()),
+            ],
         ];
     }
 
@@ -424,10 +432,15 @@ class MobileSyncService
         $this->authorizeOrder($user, $item->ticket->order);
         $recalled = $this->kitchen->recallItem($item, $user, $data['reason']);
 
+        $recalled->loadMissing('ticket.order');
+
         return [
             'entity_type' => 'kitchen_ticket_item',
             'entity_id' => $recalled->id,
-            'data' => $recalled->toArray(),
+            'data' => [
+                'item' => $recalled->toArray(),
+                'order' => $this->orderSnapshot($recalled->ticket->order->fresh()),
+            ],
         ];
     }
 
