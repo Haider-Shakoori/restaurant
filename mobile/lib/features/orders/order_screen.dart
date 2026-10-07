@@ -26,6 +26,7 @@ class _OrderScreenState extends State<OrderScreen> {
   List<Map<String, Object?>> _items = const [];
   List<Map<String, Object?>> _categories = const [];
   Map<String, List<Map<String, Object?>>> _menu = const {};
+  Map<String, Object?> _restaurantSettings = const {};
   String? _selectedCategoryId;
   String _query = '';
   bool _working = false;
@@ -43,6 +44,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final items = await db.orderItems(widget.localOrderId);
     final categories = await db.menuCategories();
     final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
+    final restaurantSettings = await db.restaurantSettings();
     final menu = <String, List<Map<String, Object?>>>{};
 
     for (final category in categories) {
@@ -60,6 +62,7 @@ class _OrderScreenState extends State<OrderScreen> {
       _categories = categories;
       _menu = menu;
       _hasUnsent = hasUnsent;
+      _restaurantSettings = restaurantSettings;
       _selectedCategoryId ??= categories.isEmpty
           ? null
           : categories.first['id']!.toString();
@@ -74,20 +77,17 @@ class _OrderScreenState extends State<OrderScreen> {
         ? const <Object?>[]
         : (jsonDecode(rawGroups) as List<Object?>);
 
-    _OrderItemOptions options = const _OrderItemOptions();
+    final selected = await showDialog<_OrderItemOptions>(
+      context: context,
+      builder: (context) => _ItemOptionsDialog(
+        itemName: item['name']!.toString(),
+        groups: groups,
+        coursesEnabled: _restaurantSettings['courses_enabled'] == true,
+      ),
+    );
 
-    if (groups.isNotEmpty) {
-      final selected = await showDialog<_OrderItemOptions>(
-        context: context,
-        builder: (context) => _ItemOptionsDialog(
-          itemName: item['name']!.toString(),
-          groups: groups,
-        ),
-      );
-
-      if (selected == null) return;
-      options = selected;
-    }
+    if (selected == null) return;
+    final options = selected;
 
     setState(() => _working = true);
 
@@ -96,11 +96,39 @@ class _OrderScreenState extends State<OrderScreen> {
         localOrderId: widget.localOrderId,
         menuItem: item,
         notes: options.notes,
+        seatNumber: options.seatNumber,
+        courseNumber: options.courseNumber,
+        courseName: options.courseName,
+        holdForCourse: options.holdForCourse,
         modifiers: options.modifiers,
         allergyInstructions: options.allergyInstructions,
         kitchenInstructions: options.kitchenInstructions,
       );
       await _refresh();
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _fireCourse(int courseNumber) async {
+    if (_working) return;
+    setState(() => _working = true);
+
+    try {
+      await widget.dependencies.orders.fireCourse(
+        localOrderId: widget.localOrderId,
+        courseNumber: courseNumber,
+      );
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Course $courseNumber sent to Kitchen.')),
+        );
+      }
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -146,6 +174,18 @@ class _OrderScreenState extends State<OrderScreen> {
     'ready',
     'served',
   }.contains(_order?['status']?.toString());
+
+  List<int> get _heldCourses {
+    final courses = _items
+        .where((item) => item['course_state']?.toString() == 'held')
+        .map((item) => (item['course_number'] as num?)?.toInt())
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort();
+
+    return courses;
+  }
 
   List<Map<String, Object?>> get _visibleItems {
     Iterable<Map<String, Object?>> result = _selectedCategoryId == null
@@ -626,6 +666,36 @@ class _OrderScreenState extends State<OrderScreen> {
                     },
                   ),
           ),
+          if (_restaurantSettings['courses_enabled'] == true &&
+              _heldCourses.isNotEmpty) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  'Held courses',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _heldCourses.map((course) {
+                  return FilledButton.tonalIcon(
+                    onPressed: _working ? null : () => _fireCourse(course),
+                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                    label: Text('Fire course $course'),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.all(16),
@@ -658,7 +728,11 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                     icon: const Icon(Icons.send_rounded),
                     label: Text(
-                      _working ? 'Sending...' : 'Send to Kitchen',
+                      _working
+                          ? 'Sending...'
+                          : (_order?['status']?.toString() == 'draft'
+                              ? 'Send to Kitchen'
+                              : 'Send New KOT Round'),
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
@@ -791,21 +865,34 @@ class _OrderItemOptions {
   const _OrderItemOptions({
     this.modifiers = const [],
     this.notes,
+    this.seatNumber,
+    this.courseNumber,
+    this.courseName,
+    this.holdForCourse = false,
     this.allergyInstructions,
     this.kitchenInstructions,
   });
 
   final List<Map<String, Object?>> modifiers;
   final String? notes;
+  final int? seatNumber;
+  final int? courseNumber;
+  final String? courseName;
+  final bool holdForCourse;
   final String? allergyInstructions;
   final String? kitchenInstructions;
 }
 
 class _ItemOptionsDialog extends StatefulWidget {
-  const _ItemOptionsDialog({required this.itemName, required this.groups});
+  const _ItemOptionsDialog({
+    required this.itemName,
+    required this.groups,
+    required this.coursesEnabled,
+  });
 
   final String itemName;
   final List<Object?> groups;
+  final bool coursesEnabled;
 
   @override
   State<_ItemOptionsDialog> createState() => _ItemOptionsDialogState();
@@ -816,6 +903,10 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
   final _notes = TextEditingController();
   final _allergy = TextEditingController();
   final _kitchen = TextEditingController();
+  final _seat = TextEditingController();
+  final _course = TextEditingController();
+  final _courseName = TextEditingController();
+  bool _holdForCourse = false;
   String? _error;
 
   @override
@@ -823,6 +914,9 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
     _notes.dispose();
     _allergy.dispose();
     _kitchen.dispose();
+    _seat.dispose();
+    _course.dispose();
+    _courseName.dispose();
     super.dispose();
   }
 
@@ -859,6 +953,12 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
       _OrderItemOptions(
         modifiers: modifiers,
         notes: _clean(_notes.text),
+        seatNumber: int.tryParse(_seat.text.trim()),
+        courseNumber: widget.coursesEnabled
+            ? int.tryParse(_course.text.trim())
+            : null,
+        courseName: widget.coursesEnabled ? _clean(_courseName.text) : null,
+        holdForCourse: widget.coursesEnabled && _holdForCourse,
         allergyInstructions: _clean(_allergy.text),
         kitchenInstructions: _clean(_kitchen.text),
       ),
@@ -941,6 +1041,50 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
                   ),
                 );
               }),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _seat,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Seat #',
+                        prefixIcon: Icon(Icons.event_seat_outlined),
+                      ),
+                    ),
+                  ),
+                  if (widget.coursesEnabled) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: _course,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Course #',
+                          prefixIcon: Icon(Icons.format_list_numbered),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              if (widget.coursesEnabled) ...[
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _courseName,
+                  decoration: const InputDecoration(
+                    labelText: 'Course name',
+                    prefixIcon: Icon(Icons.restaurant_menu_outlined),
+                  ),
+                ),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Hold until course is fired'),
+                  value: _holdForCourse,
+                  onChanged: (value) => setState(() => _holdForCourse = value),
+                ),
+              ],
+              const SizedBox(height: 10),
               TextField(
                 controller: _notes,
                 decoration: const InputDecoration(
