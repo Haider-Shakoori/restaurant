@@ -281,19 +281,101 @@ internal static class OperationalActionViews
         return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
-    private static TextBlock HeaderText(string text, double size, bool bold = false) => new() { Text = text, FontSize = size, FontWeight = bold ? FontWeights.Bold : FontWeights.Normal };
+    private static TextBlock HeaderText(string text, double size, bool bold = false)
+    {
+        var block = new TextBlock
+        {
+            Text = text,
+            FontSize = size,
+            FontWeight = bold ? FontWeights.Bold : FontWeights.Normal,
+        };
+        block.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        return block;
+    }
+
     private static StackPanel Header(string title, string subtitle)
     {
-        var p = new StackPanel { Margin = new Thickness(0,0,0,16) };
-        p.Children.Add(HeaderText(title,20,true));
-        p.Children.Add(new TextBlock { Text = subtitle, Foreground = System.Windows.Media.Brushes.SlateGray, Margin = new Thickness(0,4,0,0), TextWrapping = TextWrapping.Wrap });
-        return p;
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+        panel.Children.Add(HeaderText(title, 20, true));
+
+        var subtitleBlock = new TextBlock
+        {
+            Text = subtitle,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        subtitleBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(subtitleBlock);
+        return panel;
     }
-    private static TextBlock Label(string text) => new() { Text = text, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0,8,0,0) };
-    private static ComboBox Combo(object items, string member) => new() { ItemsSource = (System.Collections.IEnumerable)items, DisplayMemberPath = member, Height = 34, Margin = new Thickness(0,4,0,6) };
-    private static Button Button(string text) => new() { Content = text, Height = 36, MinWidth = 120, Margin = new Thickness(0,4,8,4), Padding = new Thickness(12,0,12,0), HorizontalAlignment = HorizontalAlignment.Left };
-    private static Border Card(UIElement child) => new() { Background = System.Windows.Media.Brushes.White, CornerRadius = new CornerRadius(14), Padding = new Thickness(18), Child = child };
-    private static DataGrid DataGrid(object items) => new() { ItemsSource = (System.Collections.IEnumerable)items, AutoGenerateColumns = false, IsReadOnly = true, CanUserAddRows = false, MinHeight = 420, Background = System.Windows.Media.Brushes.White, BorderThickness = new Thickness(0) };
+
+    private static TextBlock Label(string text)
+    {
+        var block = new TextBlock
+        {
+            Text = text,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        block.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        return block;
+    }
+
+    private static ComboBox Combo(object items, string member) => new()
+    {
+        ItemsSource = (System.Collections.IEnumerable)items,
+        DisplayMemberPath = member,
+        Height = 34,
+        Margin = new Thickness(0, 4, 0, 6),
+    };
+
+    private static Button Button(string text) => new()
+    {
+        Content = text,
+        Height = 36,
+        MinWidth = 120,
+        Margin = new Thickness(0, 4, 8, 4),
+        Padding = new Thickness(12, 0, 12, 0),
+        HorizontalAlignment = HorizontalAlignment.Left,
+    };
+
+    private static Border Card(UIElement child)
+    {
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(18),
+            BorderThickness = new Thickness(1),
+            Child = child,
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 18,
+            ShadowDepth = 4,
+            Opacity = 0.10,
+            Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
+        };
+        return border;
+    }
+
+    private static DataGrid DataGrid(object items)
+    {
+        var grid = new DataGrid
+        {
+            ItemsSource = (System.Collections.IEnumerable)items,
+            AutoGenerateColumns = false,
+            IsReadOnly = true,
+            CanUserAddRows = false,
+            MinHeight = 420,
+            BorderThickness = new Thickness(1),
+            AlternationCount = 2,
+        };
+        grid.SetResourceReference(DataGrid.BackgroundProperty, "SurfaceBrush");
+        grid.SetResourceReference(DataGrid.BorderBrushProperty, "BorderBrush");
+        return grid;
+    }
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new System.Windows.Data.Binding(property), Width = width };
 
     private sealed record Choice(string Id, string Label);
