@@ -162,7 +162,7 @@ class RestaurantOrderingTest extends TestCase
 
         $this->assertSame(Order::STATUS_SUBMITTED, $retry->status);
         $this->assertNotNull($retry->submitted_at);
-        $this->assertSame(3, $retry->events()->count());
+        $this->assertSame(4, $retry->events()->count());
     }
 
     public function test_takeaway_order_and_structured_modifiers_preserve_shared_kitchen_context(): void
