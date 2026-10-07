@@ -143,6 +143,50 @@ class OfflineOrderRepository {
     );
   }
 
+  Future<void> transferTable({
+    required String localOrderId,
+    required String targetTableId,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.transferOrderTable(
+      localOrderId: localOrderId,
+      targetTableId: targetTableId,
+      mutationId: _uuid.v4(),
+    );
+  }
+
+  Future<void> moveUnsentItem({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+    required String localLineId,
+    required int quantity,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.moveUnsentOrderItem(
+      sourceLocalOrderId: sourceLocalOrderId,
+      targetLocalOrderId: targetLocalOrderId,
+      localLineId: localLineId,
+      targetLocalLineId: _uuid.v4(),
+      quantity: quantity,
+      mutationId: _uuid.v4(),
+    );
+  }
+
+  Future<void> mergeOrders({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.mergeOrders(
+      sourceLocalOrderId: sourceLocalOrderId,
+      targetLocalOrderId: targetLocalOrderId,
+      mutationId: _uuid.v4(),
+    );
+  }
+
   Future<void> submit(String localOrderId) async {
     await _ensureOfflineOperationAllowed();
 
