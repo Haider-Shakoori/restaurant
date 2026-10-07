@@ -101,6 +101,48 @@ class OfflineOrderRepository {
     );
   }
 
+  Future<void> voidProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.void',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
+  Future<void> refireProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.refire',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
+  Future<void> recallProduction({
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    await _ensureOfflineOperationAllowed();
+
+    await _database.enqueueKitchenItemOperation(
+      mutationId: _uuid.v4(),
+      operation: 'order.item.recall',
+      kitchenTicketItemId: kitchenTicketItemId,
+      reason: reason,
+    );
+  }
+
   Future<void> submit(String localOrderId) async {
     await _ensureOfflineOperationAllowed();
 
