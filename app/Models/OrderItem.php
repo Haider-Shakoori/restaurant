@@ -15,9 +15,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'item_name',
     'unit_price',
     'quantity',
+    'dispatched_quantity',
     'line_total',
     'notes',
     'status',
+    'last_dispatched_at',
 ])]
 class OrderItem extends Model
 {
@@ -30,6 +32,8 @@ class OrderItem extends Model
         return [
             'unit_price' => 'decimal:2',
             'line_total' => 'decimal:2',
+            'dispatched_quantity' => 'integer',
+            'last_dispatched_at' => 'datetime',
         ];
     }
 
