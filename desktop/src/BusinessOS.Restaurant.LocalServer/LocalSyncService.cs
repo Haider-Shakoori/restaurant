@@ -46,6 +46,7 @@ public sealed class LocalSyncService
             .MaxAsync(cancellationToken) ?? 0;
 
         var orders = await ActiveOrdersAsync(db, principal, cancellationToken);
+        var workflowSettings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
         var menu = BuildMenu(catalog);
         var tables = BuildTables(catalog);
         var staff = await db.StaffUsers
@@ -86,6 +87,7 @@ public sealed class LocalSyncService
                 is_active = value.IsActive,
             }).ToArray(),
             staff,
+            restaurant_settings = LocalRestaurantSettingsService.ToPayload(workflowSettings),
             menu,
             kitchen = new
             {
@@ -240,6 +242,7 @@ public sealed class LocalSyncService
                 "order.open" => await OpenOrderAsync(db, principal, mutation, cancellationToken),
                 "order.item.add" => await AddOrderItemAsync(db, principal, mutation, cancellationToken),
                 "order.submit" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
+                "order.kot.send" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
                 _ => throw new LocalSyncConflictException(
                     "unsupported_operation",
                     "Unsupported offline operation."),
@@ -411,11 +414,11 @@ public sealed class LocalSyncService
 
         AuthorizeOrder(principal, order);
 
-        if (order.Status != "draft")
+        if (order.Status is "billed" or "closed" or "cancelled")
         {
             throw new LocalSyncConflictException(
                 "order_state_conflict",
-                "Items can only be edited while the order is in draft.");
+                "Items cannot be added after the order is financially closed or cancelled.");
         }
 
         var existingLine = await db.OrderItems.SingleOrDefaultAsync(
@@ -444,7 +447,27 @@ public sealed class LocalSyncService
                 "menu_unavailable",
                 "The selected menu item is unavailable.");
 
+        var modifiers = await ResolveModifiersAsync(db, menuItem.Id, payload, cancellationToken);
+        var priority = (OptionalString(payload, "priority", 16) ?? "normal").Trim().ToLowerInvariant();
+        if (priority is not ("normal" or "rush"))
+        {
+            throw new LocalSyncConflictException("invalid_payload", "priority must be normal or rush.");
+        }
+
+        var seatNumber = OptionalNullableInt(payload, "seat_number", 1, 999);
+        var courseNumber = OptionalNullableInt(payload, "course_number", 1, 99);
+        var courseName = OptionalString(payload, "course_name", 80);
+        var workflowSettings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var held = OptionalBool(payload, "held", false);
+        if (held && (!workflowSettings.CoursesEnabled || courseNumber is null))
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                "Held items require Courses to be enabled and a course_number.");
+        }
+
         var now = DateTimeOffset.UtcNow;
+        var unitPrice = menuItem.Price + modifiers.PriceDelta;
         var line = new LocalOrderItem
         {
             Id = Guid.CreateVersion7().ToString("N"),
@@ -452,11 +475,18 @@ public sealed class LocalSyncService
             MenuItemId = menuItem.Id,
             ClientLineId = clientLineId,
             ItemName = menuItem.Name,
-            UnitPrice = menuItem.Price,
+            UnitPrice = unitPrice,
             Quantity = quantity,
-            LineTotal = menuItem.Price * quantity,
+            LineTotal = unitPrice * quantity,
             Notes = OptionalString(payload, "notes", 1000),
-            Status = "pending",
+            Status = held ? "held" : "pending",
+            SeatNumber = seatNumber,
+            CourseNumber = courseNumber,
+            CourseName = courseName,
+            Priority = priority,
+            ModifiersJson = modifiers.Json,
+            AllergyInstructions = OptionalString(payload, "allergy_instructions", 500),
+            KitchenInstructions = OptionalString(payload, "kitchen_instructions", 500),
             CreatedAtUtc = now,
             UpdatedAtUtc = now,
         };
@@ -495,7 +525,6 @@ public sealed class LocalSyncService
         EnsureOrderingRole(principal);
 
         var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
-
         var order = await db.Orders
             .SingleOrDefaultAsync(value => value.ClientOrderId == clientOrderId, cancellationToken)
             ?? throw new LocalSyncConflictException(
@@ -504,44 +533,60 @@ public sealed class LocalSyncService
 
         AuthorizeOrder(principal, order);
 
-        if (order.Status is "submitted" or "preparing" or "ready")
-        {
-            return Accepted(
-                mutation,
-                "order",
-                order.Id,
-                order.ClientOrderId,
-                await OrderSnapshotAsync(db, order, cancellationToken));
-        }
-
-        if (order.Status != "draft")
+        if (order.Status is "billed" or "closed" or "cancelled")
         {
             throw new LocalSyncConflictException(
                 "order_state_conflict",
-                "Only draft orders can be submitted.");
+                "This order can no longer send kitchen production.");
         }
 
-        var hasItems = await db.OrderItems
-            .AnyAsync(value => value.OrderId == order.Id, cancellationToken);
+        var unsent = await db.OrderItems
+            .Where(value => value.OrderId == order.Id && value.Status == "pending")
+            .OrderBy(value => value.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
 
-        if (!hasItems)
+        if (unsent.Length == 0)
         {
             throw new LocalSyncConflictException(
                 "order_state_conflict",
-                "Add at least one item before submitting the order.");
+                "There are no new unsent items to send to the kitchen.");
         }
 
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var round = await _kitchen.CreateRoundAsync(
+            db,
+            order,
+            principal,
+            mutation.MutationId,
+            settings,
+            cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
         order.Status = "submitted";
-        order.SubmittedAt = DateTimeOffset.UtcNow;
-        order.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        order.SubmittedAt ??= now;
+        order.UpdatedAtUtc = now;
         await db.SaveChangesAsync(cancellationToken);
 
-        await _kitchen.DispatchAsync(db, order, principal, cancellationToken);
+        await _kitchen.DispatchRoundAsync(db, order, round, unsent, principal, cancellationToken);
 
         var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
         AddChange(db, "order", order.Id, order.WaiterId, snapshot);
 
-        return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
+        if (string.Equals(mutation.Operation, "order.submit", StringComparison.Ordinal))
+        {
+            return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
+        }
+
+        return Accepted(
+            mutation,
+            "kot_round",
+            round.Id,
+            null,
+            new
+            {
+                round = LocalKitchenService.RoundSnapshot(round),
+                order = snapshot,
+            });
     }
 
     private static Dictionary<string, object?> Accepted(
@@ -725,8 +770,16 @@ public sealed class LocalSyncService
             .OrderBy(value => value.CreatedAtUtc)
             .ToArray();
 
+        var rounds = await db.KotRounds
+            .Where(value => value.OrderId == order.Id)
+            .OrderBy(value => value.RoundNumber)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
+
         var tickets = await db.KitchenTickets
             .Where(value => value.OrderId == order.Id)
+            .OrderBy(value => value.RoundNumber)
+            .ThenBy(value => value.QueuedAt)
             .AsNoTracking()
             .ToArrayAsync(cancellationToken);
         var ticketSnapshots = new List<object>(tickets.Length);
@@ -767,6 +820,7 @@ public sealed class LocalSyncService
                 name = order.WaiterName,
             },
             items = items.Select(LineSnapshot).ToArray(),
+            kot_rounds = rounds.Select(LocalKitchenService.RoundSnapshot).ToArray(),
             kitchen_tickets = ticketSnapshots.ToArray(),
         };
     }
@@ -782,6 +836,18 @@ public sealed class LocalSyncService
         line_total = line.LineTotal.ToString("0.00"),
         notes = line.Notes,
         status = line.Status,
+        kot_round_id = line.KotRoundId,
+        round_number = line.RoundNumber,
+        seat_number = line.SeatNumber,
+        course_number = line.CourseNumber,
+        course_name = line.CourseName,
+        priority = line.Priority,
+        modifiers = ParseJson(line.ModifiersJson),
+        allergy_instructions = line.AllergyInstructions,
+        kitchen_instructions = line.KitchenInstructions,
+        refire_of_order_item_id = line.RefireOfOrderItemId,
+        voided_at = line.VoidedAt,
+        void_reason = line.VoidReason,
     };
 
     private object TableSnapshot(RestaurantDbContext db, LocalDiningTable table)
@@ -887,6 +953,144 @@ public sealed class LocalSyncService
 
         return value;
     }
+
+    private static async Task<ResolvedModifiers> ResolveModifiersAsync(
+        RestaurantDbContext db,
+        string menuItemId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (!payload.TryGetProperty("modifiers", out var modifiers) ||
+            modifiers.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return new ResolvedModifiers(null, 0m);
+        }
+
+        if (modifiers.ValueKind != JsonValueKind.Array)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "modifiers must be an array.");
+        }
+
+        var optionIds = new List<string>();
+        foreach (var selected in modifiers.EnumerateArray())
+        {
+            if (selected.ValueKind != JsonValueKind.Object ||
+                !selected.TryGetProperty("option_id", out var optionIdProperty) ||
+                optionIdProperty.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(optionIdProperty.GetString()))
+            {
+                throw new LocalSyncConflictException("invalid_payload", "Each modifier requires option_id.");
+            }
+
+            var optionId = optionIdProperty.GetString()!.Trim();
+            if (optionIds.Contains(optionId, StringComparer.Ordinal))
+            {
+                throw new LocalSyncConflictException("invalid_payload", "A modifier option cannot be selected twice.");
+            }
+
+            optionIds.Add(optionId);
+        }
+
+        if (optionIds.Count == 0)
+        {
+            return new ResolvedModifiers(null, 0m);
+        }
+
+        var options = await db.ModifierOptions
+            .Where(value => optionIds.Contains(value.Id) && value.IsActive)
+            .AsNoTracking()
+            .ToArrayAsync(cancellationToken);
+
+        if (options.Length != optionIds.Count)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "One or more modifier options are unavailable.");
+        }
+
+        var groupIds = options.Select(value => value.ModifierGroupId).Distinct(StringComparer.Ordinal).ToArray();
+        var allowedGroups = await db.MenuItemModifierGroups
+            .Where(value => value.MenuItemId == menuItemId && groupIds.Contains(value.ModifierGroupId))
+            .Select(value => value.ModifierGroupId)
+            .ToArrayAsync(cancellationToken);
+
+        if (allowedGroups.Distinct(StringComparer.Ordinal).Count() != groupIds.Length)
+        {
+            throw new LocalSyncConflictException("invalid_payload", "A selected modifier does not belong to this menu item.");
+        }
+
+        var byId = options.ToDictionary(value => value.Id, StringComparer.Ordinal);
+        var snapshot = optionIds.Select(id =>
+        {
+            var option = byId[id];
+            return new
+            {
+                option_id = option.Id,
+                group_id = option.ModifierGroupId,
+                name = option.Name,
+                price_delta = option.PriceDelta.ToString("0.00"),
+            };
+        }).ToArray();
+
+        return new ResolvedModifiers(
+            JsonSerializer.Serialize(snapshot, JsonOptions),
+            options.Sum(value => value.PriceDelta));
+    }
+
+    private static int? OptionalNullableInt(
+        JsonElement payload,
+        string name,
+        int minimum,
+        int maximum)
+    {
+        if (!payload.TryGetProperty(name, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        if (!property.TryGetInt32(out var value) || value < minimum || value > maximum)
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                $"{name} must be between {minimum} and {maximum}.");
+        }
+
+        return value;
+    }
+
+    private static bool OptionalBool(JsonElement payload, string name, bool defaultValue)
+    {
+        if (!payload.TryGetProperty(name, out var property) ||
+            property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return defaultValue;
+        }
+
+        if (property.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+        {
+            throw new LocalSyncConflictException("invalid_payload", $"{name} must be a boolean.");
+        }
+
+        return property.GetBoolean();
+    }
+
+    private static object? ParseJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private sealed record ResolvedModifiers(string? Json, decimal PriceDelta);
 
     private static string MutationHash(string operation, JsonElement payload)
     {
