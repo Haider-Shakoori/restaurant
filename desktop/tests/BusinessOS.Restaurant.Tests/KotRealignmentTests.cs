@@ -289,6 +289,388 @@ public sealed class KotRealignmentTests
         }
     }
 
+    [Fact]
+    public async Task Expo_enabled_gates_ready_until_expo_passes_item()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+
+            var settings = new LocalRestaurantSettingsService(factory);
+            await settings.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: true,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: true,
+                    CoursesEnabled: false,
+                    KotSoundEnabled: false,
+                    KitchenWarningMinutes: 10,
+                    KitchenLateMinutes: 20,
+                    RequireManagerApprovalForPostKotVoid: true),
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD", "LINE-1", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            string ticketId;
+            string kitchenItemId;
+            await using (var db = factory.Create())
+            {
+                ticketId = (await db.KitchenTickets.SingleAsync()).Id;
+                kitchenItemId = (await db.KitchenTicketItems.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyItemAsync(kitchenItemId, Kitchen(), CancellationToken.None);
+
+            await using (var db = factory.Create())
+            {
+                Assert.Equal("expo", (await db.KitchenTicketItems.SingleAsync()).Status);
+                Assert.Equal("expo", (await db.KitchenTickets.SingleAsync()).Status);
+                Assert.Equal("expo", (await db.Orders.SingleAsync()).Status);
+            }
+
+            await kitchen.PassExpoItemAsync(kitchenItemId, Expo(), CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            Assert.Equal("ready", (await finalDb.KitchenTicketItems.SingleAsync()).Status);
+            Assert.Equal("ready", (await finalDb.KitchenTickets.SingleAsync()).Status);
+            Assert.Equal("ready", (await finalDb.Orders.SingleAsync()).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Post_kot_void_requires_manager_and_releases_unstarted_reservation()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN",
+                    "Chicken",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-VOID",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD", "LINE-1", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            var rejected = await PushOneAsync(sync, Waiter(), "VOID-WAITER", "order.item.void", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-1",
+                reason = "Guest changed mind",
+            });
+            Assert.Equal("rejected", rejected.GetProperty("status").GetString());
+            Assert.Equal("manager_approval_required", rejected.GetProperty("code").GetString());
+
+            var approved = await PushOneAsync(sync, Manager(), "VOID-MANAGER", "order.item.void", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-1",
+                reason = "Manager approved guest cancellation",
+            });
+            Assert.Equal("accepted", approved.GetProperty("status").GetString());
+
+            await using var db = factory.Create();
+            Assert.Equal("voided", (await db.OrderItems.SingleAsync()).Status);
+            Assert.Equal("voided", (await db.KitchenTicketItems.SingleAsync()).Status);
+            Assert.Equal("released", (await db.InventoryReservations.SingleAsync()).Status);
+            Assert.Equal(1000m, (await db.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Empty(await db.InventoryConsumptions.ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Refire_creates_new_round_and_second_production_without_duplicate_bill_line()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN",
+                    "Chicken",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-REFIRE",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD", "LINE-1", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            string firstTicketId;
+            string firstKitchenItemId;
+            await using (var db = factory.Create())
+            {
+                firstTicketId = (await db.KitchenTickets.SingleAsync()).Id;
+                firstKitchenItemId = (await db.KitchenTicketItems.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(firstTicketId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyAsync(firstTicketId, Kitchen(), CancellationToken.None);
+
+            await kitchen.RefireItemAsync(
+                firstKitchenItemId,
+                "REFIRE-1",
+                "Dropped plate",
+                Kitchen(),
+                CancellationToken.None);
+            await kitchen.RefireItemAsync(
+                firstKitchenItemId,
+                "REFIRE-1",
+                "Dropped plate",
+                Kitchen(),
+                CancellationToken.None);
+
+            string secondTicketId;
+            await using (var db = factory.Create())
+            {
+                Assert.Equal(2, await db.KotRounds.CountAsync());
+                Assert.Equal(2, await db.KitchenTicketItems.CountAsync());
+                Assert.Single(await db.OrderItems.ToArrayAsync());
+
+                var refire = await db.KitchenTicketItems
+                    .SingleAsync(x => x.RefireOfKitchenItemId == firstKitchenItemId);
+                Assert.Equal("Dropped plate", refire.RefireReason);
+                secondTicketId = refire.KitchenTicketId;
+            }
+
+            await kitchen.StartAsync(secondTicketId, Kitchen(), CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            Assert.Equal(500m, (await finalDb.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Equal(2, await finalDb.InventoryConsumptions.CountAsync());
+            Assert.Equal(2, await finalDb.StockMovements.CountAsync(x => x.MovementType == "consumption"));
+            Assert.Single(await finalDb.OrderItems.ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Course_fire_is_idempotent_and_dispatches_held_items()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var settings = new LocalRestaurantSettingsService(factory);
+            await settings.UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(
+                    KitchenQueueEnabled: true,
+                    PreparingStageEnabled: true,
+                    ExpoEnabled: false,
+                    CoursesEnabled: true,
+                    KotSoundEnabled: false,
+                    KitchenWarningMinutes: 10,
+                    KitchenLateMinutes: 20,
+                    RequireManagerApprovalForPostKotVoid: true),
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await PushOneAsync(sync, Waiter(), "ADD-COURSE", "order.item.add", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-COURSE",
+                menu_item_id = "item-grill",
+                quantity = 1,
+                course_number = 2,
+                course_name = "Main",
+                held = true,
+            });
+
+            var first = await PushOneAsync(sync, Waiter(), "FIRE-2", "course.fire", new
+            {
+                client_order_id = "ORDER-1",
+                course_number = 2,
+            });
+            var replay = await PushOneAsync(sync, Waiter(), "FIRE-2", "course.fire", new
+            {
+                client_order_id = "ORDER-1",
+                course_number = 2,
+            });
+
+            Assert.Equal("accepted", first.GetProperty("status").GetString());
+            Assert.Equal(first.GetProperty("entity_id").GetString(), replay.GetProperty("entity_id").GetString());
+
+            await using var db = factory.Create();
+            Assert.Single(await db.KotRounds.ToArrayAsync());
+            Assert.Single(await db.KitchenTicketItems.ToArrayAsync());
+            Assert.NotEqual("held", (await db.OrderItems.SingleAsync()).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Takeaway_order_uses_branch_context_without_fake_table()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog);
+
+            var opened = await PushOneAsync(sync, Waiter(), "OPEN-TAKEAWAY", "order.open", new
+            {
+                client_order_id = "TAKEAWAY-1",
+                branch_id = "branch-1",
+                service_type = "takeaway",
+                service_reference = "Pickup Ali",
+                guest_count = 1,
+            });
+
+            Assert.Equal("accepted", opened.GetProperty("status").GetString());
+
+            await using var db = factory.Create();
+            var order = await db.Orders.SingleAsync();
+            Assert.Equal("takeaway", order.ServiceType);
+            Assert.Equal("branch-1", order.BranchId);
+            Assert.Equal(string.Empty, order.DiningTableId);
+            Assert.Equal("Pickup Ali", order.ServiceReference);
+            Assert.Equal("available", (await db.DiningTables.SingleAsync(x => x.Id == "table-1")).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Split_moves_only_unsent_lines_and_keeps_source_kot_lineage_unchanged()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog);
+            var cashier = new LocalCashierService(factory);
+
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD-1", "LINE-1", "item-grill", 1);
+            await AddAsync(sync, "ADD-2", "LINE-2", "item-general", 1);
+
+            string sourceOrderId;
+            string movedItemId;
+            await using (var db = factory.Create())
+            {
+                sourceOrderId = (await db.Orders.SingleAsync()).Id;
+                movedItemId = (await db.OrderItems.SingleAsync(x => x.ClientLineId == "LINE-2")).Id;
+            }
+
+            await cashier.SplitUnsentItemsAsync(
+                sourceOrderId,
+                "table-2",
+                [movedItemId],
+                Manager(),
+                CancellationToken.None);
+
+            await using var finalDb = factory.Create();
+            var orders = await finalDb.Orders.OrderBy(x => x.CreatedAtUtc).ToArrayAsync();
+            Assert.Equal(2, orders.Length);
+            Assert.Equal(sourceOrderId, (await finalDb.OrderItems.SingleAsync(x => x.ClientLineId == "LINE-1")).OrderId);
+            Assert.NotEqual(sourceOrderId, (await finalDb.OrderItems.SingleAsync(x => x.ItemName == "Salad")).OrderId);
+            Assert.Equal("occupied", (await finalDb.DiningTables.SingleAsync(x => x.Id == "table-2")).Status);
+            Assert.Empty(await finalDb.KitchenTickets.ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
@@ -342,6 +724,9 @@ public sealed class KotRealignmentTests
     private static LocalTerminalPrincipal Manager() =>
         new("manager-device", 3, "manager-1", "Manager One", "manager", "tenant-1");
 
+    private static LocalTerminalPrincipal Expo() =>
+        new("expo-device", 4, "expo-1", "Expo One", "expo", "tenant-1");
+
     private static OperationalSnapshot Snapshot() =>
         new(
             1,
@@ -387,6 +772,15 @@ public sealed class KotRealignmentTests
                     "table-1",
                     "T-01",
                     "Table 1",
+                    4,
+                    "available",
+                    true,
+                    new DiningAreaSummary("area-1", "Main Hall"),
+                    new BranchSummary("branch-1", "Main Branch")),
+                new DiningTableSnapshot(
+                    "table-2",
+                    "T-02",
+                    "Table 2",
                     4,
                     "available",
                     true,
