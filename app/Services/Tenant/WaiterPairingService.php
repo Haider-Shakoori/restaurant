@@ -55,10 +55,21 @@ class WaiterPairingService
     {
         $value = Cache::pull($this->cacheKey($token));
 
-        if (! is_array($value) ||
-            ! hash_equals((string) ($value['business_id'] ?? ''), (string) $business->id) ||
-            ! hash_equals((string) ($value['tenant_id'] ?? ''), (string) $business->tenant_id) ||
-            (int) ($value['expires_at'] ?? 0) <= now()->getTimestamp()) {
+        if (is_array($value) === false) {
+            throw ValidationException::withMessages([
+                'pairing_token' => 'The waiter pairing code is invalid, expired, or has already been used.',
+            ]);
+        }
+
+        $businessId = strval($value['business_id'] ?? '');
+        $tenantId = strval($value['tenant_id'] ?? '');
+        $expiresAt = intval($value['expires_at'] ?? 0);
+
+        if (
+            hash_equals($businessId, strval($business->id)) === false ||
+            hash_equals($tenantId, strval($business->tenant_id)) === false ||
+            $expiresAt <= now()->getTimestamp()
+        ) {
             throw ValidationException::withMessages([
                 'pairing_token' => 'The waiter pairing code is invalid, expired, or has already been used.',
             ]);
