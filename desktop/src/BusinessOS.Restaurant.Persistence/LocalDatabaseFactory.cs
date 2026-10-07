@@ -580,7 +580,6 @@ public sealed class LocalDatabaseFactory
                 UpdatedAtUtc TEXT NOT NULL
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_TicketNumber ON kitchen_tickets (TicketNumber);
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_OrderId_KitchenStationId ON kitchen_tickets (OrderId, KitchenStationId);
             CREATE INDEX IF NOT EXISTS IX_kitchen_tickets_KitchenStationId_Status ON kitchen_tickets (KitchenStationId, Status);
 
             CREATE TABLE IF NOT EXISTS kitchen_ticket_items (
@@ -592,7 +591,6 @@ public sealed class LocalDatabaseFactory
                 Notes TEXT NULL,
                 Status TEXT NOT NULL
             );
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_ticket_items_OrderItemId ON kitchen_ticket_items (OrderItemId);
             CREATE INDEX IF NOT EXISTS IX_kitchen_ticket_items_KitchenTicketId ON kitchen_ticket_items (KitchenTicketId);
 
             CREATE TABLE IF NOT EXISTS kitchen_printer_bindings (
