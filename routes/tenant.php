@@ -12,6 +12,7 @@ use App\Http\Controllers\Tenant\ChartAccountController;
 use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DesktopReconciliationController;
 use App\Http\Controllers\Tenant\DiningTableController;
+use App\Http\Controllers\Tenant\ExpoController;
 use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\JournalEntryController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
@@ -27,10 +28,12 @@ use App\Http\Controllers\Tenant\OrderController;
 use App\Http\Controllers\Tenant\OrderItemController;
 use App\Http\Controllers\Tenant\PurchaseOrderController;
 use App\Http\Controllers\Tenant\ReadyKitchenTicketController;
+use App\Http\Controllers\Tenant\ReadyKitchenTicketItemController;
 use App\Http\Controllers\Tenant\RecipeController;
 use App\Http\Controllers\Tenant\RestaurantSettingsController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
+use App\Http\Controllers\Tenant\StartKitchenTicketItemController;
 use App\Http\Controllers\Tenant\StockMovementController;
 use App\Http\Controllers\Tenant\SubmitOrderController;
 use App\Http\Controllers\Tenant\SubscriptionStatusController;
@@ -236,6 +239,15 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/kitchen/tickets/{kitchenTicket}/ready', ReadyKitchenTicketController::class)
                     ->name('tenant.api.kitchen.tickets.ready');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/start', StartKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.start');
+
+                Route::post('/kitchen/items/{kitchenTicketItem}/ready', ReadyKitchenTicketItemController::class)
+                    ->name('tenant.api.kitchen.items.ready');
+
+                Route::get('/kitchen/expo', ExpoController::class)
+                    ->name('tenant.api.kitchen.expo');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
