@@ -6,6 +6,7 @@ use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\KitchenStation;
 use App\Models\KitchenTicket;
+use App\Models\KitchenTicketItem;
 use App\Models\KotDispatchRound;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
@@ -289,6 +290,104 @@ class KitchenWorkflowTest extends TestCase
 
             tenancy()->end();
         }
+    }
+
+    public function test_item_level_kds_transitions_drive_ticket_and_order_aggregates(): void
+    {
+        $tenant = $this->createTenant('restaurant-item-kds', 'item-kds.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $branch, $food, $drink] = $this->seedRestaurant();
+        $station = KitchenStation::query()->create([
+            'branch_id' => $branch->id,
+            'code' => 'HOT',
+            'name' => 'Hot Kitchen',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        foreach ([$food, $drink] as $menuItem) {
+            MenuItemKitchenRoute::query()->create([
+                'menu_item_id' => $menuItem->id,
+                'branch_id' => $branch->id,
+                'kitchen_station_id' => $station->id,
+            ]);
+        }
+
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01ITEMKDSORDER00000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 2,
+        ]);
+
+        foreach ([$food, $drink] as $index => $menuItem) {
+            $orders->addItem($order, $waiter, [
+                'client_line_id' => '01ITEMKDSLINE0000000000000'.$index,
+                'menu_item_id' => $menuItem->id,
+                'quantity' => 1,
+            ]);
+        }
+
+        $orders->submit($order, $waiter, 'item-kds-round-1');
+        $ticket = KitchenTicket::query()->firstOrFail();
+        $items = $ticket->items()->orderBy('id')->get();
+
+        $first = $kitchen->startItem($items[0], $waiter);
+        $this->assertSame(KitchenTicketItem::STATUS_PREPARING, $first->status);
+        $this->assertSame(KitchenTicket::STATUS_PREPARING, $ticket->fresh()->status);
+        $this->assertSame(Order::STATUS_PREPARING, $order->fresh()->status);
+
+        $kitchen->readyItem($first, $waiter);
+        $this->assertSame(KitchenTicket::STATUS_PREPARING, $ticket->fresh()->status);
+
+        $second = $kitchen->startItem($items[1], $waiter);
+        $kitchen->readyItem($second, $waiter);
+
+        $this->assertSame(KitchenTicket::STATUS_READY, $ticket->fresh()->status);
+        $this->assertSame(Order::STATUS_READY, $order->fresh()->status);
+        $this->assertNotNull($items[0]->fresh()->ready_at);
+        $this->assertNotNull($items[1]->fresh()->ready_at);
+    }
+
+    public function test_expo_endpoint_is_derived_from_ready_production_items(): void
+    {
+        $tenant = $this->createTenant('restaurant-expo', 'expo.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $branch, $food] = $this->seedRestaurant();
+        app(RestaurantSettingsService::class)->put([
+            'expo_enabled' => true,
+        ]);
+
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01EXPOORDER00000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($order, $waiter, [
+            'client_line_id' => '01EXPOLINE000000000000000001',
+            'menu_item_id' => $food->id,
+            'quantity' => 1,
+        ]);
+        $orders->submit($order, $waiter, 'expo-round-1');
+
+        $ticket = KitchenTicket::query()->firstOrFail();
+        $kitchen->start($ticket, $waiter);
+        $kitchen->ready($ticket->fresh(), $waiter);
+
+        $response = $this->actingAs($waiter, 'sanctum')
+            ->getJson('http://expo.test/api/v1/kitchen/expo');
+
+        $response->assertOk()
+            ->assertJsonPath('data.0.order_id', $order->id)
+            ->assertJsonPath('data.0.ready_to_serve', true)
+            ->assertJsonPath('data.0.ready_count', 1);
     }
 
     /**
