@@ -226,6 +226,63 @@ void main() {
     expect(credentials.session?.activeChannel, ConnectionChannel.cloud);
   });
 
+  test('automatic mode falls back to cloud when LAN terminal is not paired', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      heartbeatError: const ApiException(
+        code: 'unauthenticated',
+        message: 'Terminal is not paired.',
+        statusCode: 401,
+      ),
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 2,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final credentials = _MemoryCredentials(
+      _session(
+        connectionMode: ConnectionMode.automatic,
+        activeChannel: ConnectionChannel.cloud,
+        baseUrl: 'https://restaurant.test',
+        localBaseUrl: 'http://192.168.1.20:8787',
+        cloudBaseUrl: 'https://restaurant.test',
+        tenantId: 'tenant-1',
+      ),
+    );
+    final resolver = ConnectionResolver(
+      probe: _FakeProbe(<String, ServerHealth>{
+        'http://192.168.1.20:8787': const ServerHealth(
+          baseUrl: 'http://192.168.1.20:8787',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Desktop',
+        ),
+        'https://restaurant.test': const ServerHealth(
+          baseUrl: 'https://restaurant.test',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Cloud',
+        ),
+      }),
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: credentials,
+      leaseVerifier: const _AlwaysValidLease(),
+      connectionResolver: resolver,
+    );
+
+    await engine.syncNow();
+
+    expect(api.heartbeatCount, 1);
+    expect(api.pullBaseUrls, <String>['https://restaurant.test']);
+    expect(store.cursors['cloud'], 2);
+    expect(store.states['active_connection'], 'cloud');
+  });
+
   test('automatic mode returns to LAN after cloud fallback', () async {
     final store = _MemorySyncStore(pending: <OutboxMutation>[]);
     final credentials = _MemoryCredentials(
