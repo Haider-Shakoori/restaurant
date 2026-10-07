@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -179,7 +180,7 @@ internal static class OperationalActionViews
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
 
-        var settingsService = new LocalServer.LocalRestaurantSettingsService(factory);
+        var settingsService = new LocalRestaurantSettingsService(factory);
         var settings = await settingsService.GetAsync();
 
         var tickets = await db.KitchenTickets
