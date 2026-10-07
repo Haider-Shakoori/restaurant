@@ -125,6 +125,7 @@ public sealed class LocalDatabaseFactory
             ("kitchen_ticket_items", "VoidedAt", "TEXT NULL"),
             ("kitchen_ticket_items", "VoidReason", "TEXT NULL"),
             ("kitchen_ticket_items", "RefireOfKitchenItemId", "TEXT NULL"),
+            ("kitchen_ticket_items", "RefireReason", "TEXT NULL"),
             ("inventory_consumptions", "ProductionKey", "TEXT NULL"),
             ("inventory_consumptions", "OrderItemId", "TEXT NULL"),
             ("inventory_consumptions", "KitchenTicketItemId", "TEXT NULL"),
@@ -238,6 +239,10 @@ public sealed class LocalDatabaseFactory
                 ON inventory_consumptions (OrderId);
             CREATE INDEX IF NOT EXISTS IX_inventory_consumptions_KitchenTicketItemId
                 ON inventory_consumptions (KitchenTicketItemId);
+
+            DROP INDEX IF EXISTS IX_kitchen_ticket_items_OrderItemId;
+            CREATE INDEX IF NOT EXISTS IX_kitchen_ticket_items_OrderItemId
+                ON kitchen_ticket_items (OrderItemId);
 
             DROP INDEX IF EXISTS IX_kitchen_tickets_OrderId_KitchenStationId;
             CREATE UNIQUE INDEX IF NOT EXISTS IX_kitchen_tickets_KotRoundId_KitchenStationId
