@@ -119,6 +119,7 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
+        bool $paired,
     ): array {
         $business->refresh();
 
@@ -150,6 +151,7 @@ class LicenseService
             $deviceName,
             $platform,
             $appVersion,
+            false,
         );
     }
 
@@ -201,6 +203,7 @@ class LicenseService
             $deviceName,
             $platform,
             $appVersion,
+            true,
         );
     }
 
@@ -218,7 +221,7 @@ class LicenseService
         ?string $appVersion,
     ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
-            function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion): array {
+            function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion, $paired): array {
                 $existing = DeviceActivation::query()
                     ->where('business_id', $business->id)
                     ->where('device_uid', $deviceUid)
@@ -283,7 +286,7 @@ class LicenseService
                         'device_uid' => $deviceUid,
                         'platform' => $platform,
                         'app_version' => $appVersion,
-                        'paired' => $mobile,
+                        'paired' => $paired,
                     ],
                 );
 
