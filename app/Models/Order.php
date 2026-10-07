@@ -53,6 +53,14 @@ class Order extends Model
         self::STATUS_BILLED,
     ];
 
+    public const KITCHEN_EDITABLE_STATUSES = [
+        self::STATUS_DRAFT,
+        self::STATUS_SUBMITTED,
+        self::STATUS_PREPARING,
+        self::STATUS_READY,
+        self::STATUS_SERVED,
+    ];
+
     protected $connection = 'tenant';
 
     protected function casts(): array
@@ -85,6 +93,11 @@ class Order extends Model
     public function events(): HasMany
     {
         return $this->hasMany(OrderEvent::class)->orderBy('occurred_at');
+    }
+
+    public function kotRounds(): HasMany
+    {
+        return $this->hasMany(KotRound::class)->orderBy('round_number');
     }
 
     public function kitchenTickets(): HasMany
