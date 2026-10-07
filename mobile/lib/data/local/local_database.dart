@@ -352,8 +352,19 @@ class LocalDatabase implements SyncStore {
       if (data is Map<Object?, Object?>) {
         final typed = Map<String, Object?>.from(data);
         final entityType = result['entity_type']?.toString();
+        final source = typed['source'];
+        final target = typed['target'];
+
+        if (source is Map<Object?, Object?>) {
+          await _upsertOrderSnapshot(txn, Map<String, Object?>.from(source));
+        }
+        if (target is Map<Object?, Object?>) {
+          await _upsertOrderSnapshot(txn, Map<String, Object?>.from(target));
+        }
+
         final order = switch (entityType) {
           'order_item' || 'kitchen_ticket_item' => typed['order'],
+          _ when source != null || target != null => null,
           _ => typed,
         };
 
@@ -574,6 +585,223 @@ class LocalDatabase implements SyncStore {
         payload: <String, Object?>{
           'kitchen_ticket_item_id': kitchenTicketItemId,
           'reason': reason,
+        },
+      );
+    });
+  }
+
+  Future<void> transferOrderTable({
+    required String localOrderId,
+    required String targetTableId,
+    required String mutationId,
+  }) async {
+    await _db.transaction((txn) async {
+      final orderRows = await txn.query(
+        'orders',
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[localOrderId],
+        limit: 1,
+      );
+
+      if (orderRows.isEmpty) {
+        throw StateError('Order not found.');
+      }
+
+      final currentTableId = orderRows.first['table_id']?.toString();
+
+      if (currentTableId == null || currentTableId.isEmpty) {
+        throw StateError('Only dine-in orders can be transferred.');
+      }
+
+      await txn.update(
+        'orders',
+        <String, Object?>{
+          'table_id': targetTableId,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[localOrderId],
+      );
+
+      await txn.update(
+        'dining_tables',
+        <String, Object?>{'status': 'available'},
+        where: 'id = ?',
+        whereArgs: <Object?>[currentTableId],
+      );
+      await txn.update(
+        'dining_tables',
+        <String, Object?>{'status': 'occupied'},
+        where: 'id = ?',
+        whereArgs: <Object?>[targetTableId],
+      );
+
+      await _enqueue(
+        txn,
+        mutationId: mutationId,
+        operation: 'order.table.transfer',
+        payload: <String, Object?>{
+          'client_order_id': localOrderId,
+          'target_table_id': targetTableId,
+        },
+      );
+    });
+  }
+
+  Future<void> moveUnsentOrderItem({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+    required String localLineId,
+    required String targetLocalLineId,
+    required int quantity,
+    required String mutationId,
+  }) async {
+    await _db.transaction((txn) async {
+      final rows = await txn.query(
+        'order_items',
+        where: 'local_order_id = ? AND local_line_id = ?',
+        whereArgs: <Object?>[sourceLocalOrderId, localLineId],
+        limit: 1,
+      );
+
+      if (rows.isEmpty) {
+        throw StateError('Order item not found.');
+      }
+
+      final line = rows.first;
+      final totalQuantity = (line['quantity'] as num?)?.toInt() ?? 0;
+      final dispatched = (line['dispatched_quantity'] as num?)?.toInt() ?? 0;
+      final unsent = totalQuantity - dispatched;
+
+      if (quantity < 1 || quantity > unsent) {
+        throw StateError('Only unsent quantity can be moved.');
+      }
+
+      final unitPrice = line['unit_price']!.toString();
+
+      await txn.insert('order_items', <String, Object?>{
+        ...line,
+        'local_line_id': targetLocalLineId,
+        'client_line_id': targetLocalLineId,
+        'server_id': null,
+        'local_order_id': targetLocalOrderId,
+        'quantity': quantity,
+        'dispatched_quantity': 0,
+        'line_total': _multiplyMoney(unitPrice, quantity),
+        'status': 'pending',
+      });
+
+      final remaining = totalQuantity - quantity;
+
+      if (remaining == 0) {
+        await txn.delete(
+          'order_items',
+          where: 'local_line_id = ?',
+          whereArgs: <Object?>[localLineId],
+        );
+      } else {
+        await txn.update(
+          'order_items',
+          <String, Object?>{
+            'quantity': remaining,
+            'line_total': _multiplyMoney(unitPrice, remaining),
+          },
+          where: 'local_line_id = ?',
+          whereArgs: <Object?>[localLineId],
+        );
+      }
+
+      await _recalculateOrderTxn(txn, sourceLocalOrderId);
+      await _recalculateOrderTxn(txn, targetLocalOrderId);
+
+      await _enqueue(
+        txn,
+        mutationId: mutationId,
+        operation: 'order.item.move',
+        payload: <String, Object?>{
+          'source_client_order_id': sourceLocalOrderId,
+          'target_client_order_id': targetLocalOrderId,
+          'client_line_id': line['client_line_id']?.toString() ?? localLineId,
+          'target_client_line_id': targetLocalLineId,
+          'quantity': quantity,
+        },
+      );
+    });
+  }
+
+  Future<void> mergeOrders({
+    required String sourceLocalOrderId,
+    required String targetLocalOrderId,
+    required String mutationId,
+  }) async {
+    await _db.transaction((txn) async {
+      final sourceLines = await txn.query(
+        'order_items',
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[sourceLocalOrderId],
+      );
+
+      if (sourceLines.any(
+        (line) => ((line['dispatched_quantity'] as num?)?.toInt() ?? 0) > 0,
+      )) {
+        throw StateError(
+          'Orders with dispatched kitchen production cannot be fully merged.',
+        );
+      }
+
+      final sourceOrders = await txn.query(
+        'orders',
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[sourceLocalOrderId],
+        limit: 1,
+      );
+
+      if (sourceOrders.isEmpty) {
+        throw StateError('Source order not found.');
+      }
+
+      for (final line in sourceLines) {
+        await txn.update(
+          'order_items',
+          <String, Object?>{'local_order_id': targetLocalOrderId},
+          where: 'local_line_id = ?',
+          whereArgs: <Object?>[line['local_line_id']],
+        );
+      }
+
+      final sourceTableId = sourceOrders.first['table_id']?.toString();
+
+      if (sourceTableId != null && sourceTableId.isNotEmpty) {
+        await txn.update(
+          'dining_tables',
+          <String, Object?>{'status': 'available'},
+          where: 'id = ?',
+          whereArgs: <Object?>[sourceTableId],
+        );
+      }
+
+      await txn.update(
+        'orders',
+        <String, Object?>{
+          'status': 'cancelled',
+          'subtotal': '0.00',
+          'total': '0.00',
+          'closed_at': DateTime.now().toUtc().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[sourceLocalOrderId],
+      );
+
+      await _recalculateOrderTxn(txn, targetLocalOrderId);
+
+      await _enqueue(
+        txn,
+        mutationId: mutationId,
+        operation: 'order.merge',
+        payload: <String, Object?>{
+          'source_client_order_id': sourceLocalOrderId,
+          'target_client_order_id': targetLocalOrderId,
         },
       );
     });
@@ -1038,6 +1266,36 @@ class LocalDatabase implements SyncStore {
         whereArgs: <Object?>[row['table_id']],
       );
     }
+  }
+
+  Future<void> _recalculateOrderTxn(
+    Transaction txn,
+    String localOrderId,
+  ) async {
+    final rows = await txn.query(
+      'order_items',
+      columns: const <String>['line_total'],
+      where: 'local_order_id = ?',
+      whereArgs: <Object?>[localOrderId],
+    );
+
+    var subtotalMinor = 0;
+    for (final row in rows) {
+      subtotalMinor += _toMinor(row['line_total']!.toString());
+    }
+
+    final subtotal = _fromMinor(subtotalMinor);
+
+    await txn.update(
+      'orders',
+      <String, Object?>{
+        'subtotal': subtotal,
+        'total': subtotal,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'local_order_id = ?',
+      whereArgs: <Object?>[localOrderId],
+    );
   }
 
   Future<void> _enqueue(
