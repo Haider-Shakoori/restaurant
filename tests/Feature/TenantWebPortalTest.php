@@ -187,6 +187,103 @@ class TenantWebPortalTest extends TestCase
         }
     }
 
+    public function test_new_web_order_retry_does_not_duplicate_order_lines_or_kot_round(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+
+        tenancy()->initialize($tenant);
+
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Owner',
+            'email' => 'retry-owner@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+
+        $branch = RestaurantBranch::query()->create([
+            'code' => 'MAIN',
+            'name' => 'Main Branch',
+            'is_active' => true,
+        ]);
+
+        $area = DiningArea::query()->create([
+            'branch_id' => $branch->id,
+            'name' => 'Main Hall',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $table = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-01',
+            'name' => 'Table 1',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        $category = MenuCategory::query()->create([
+            'name' => 'Menu',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $item = MenuItem::query()->create([
+            'menu_category_id' => $category->id,
+            'sku' => 'FOOD-RETRY',
+            'name' => 'Retry Meal',
+            'price' => '125.00',
+            'is_available' => true,
+            'sort_order' => 1,
+        ]);
+
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'retry-owner@example.test',
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $payload = [
+            'client_order_id' => 'web-order-retry-001',
+            'client_mutation_id' => 'web-kot-retry-001',
+            'service_type' => Order::SERVICE_DINE_IN,
+            'dining_table_id' => $table->id,
+            'guest_count' => 2,
+            'submit_action' => 'kitchen',
+            'lines' => [[
+                'client_line_id' => 'web-line-retry-001',
+                'menu_item_id' => $item->id,
+                'quantity' => 2,
+            ]],
+        ];
+
+        $this->post("http://{$domain}/orders/take", $payload)
+            ->assertRedirect('/orders');
+
+        $this->post("http://{$domain}/orders/take", $payload)
+            ->assertRedirect('/orders');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $order = Order::query()
+                ->with(['items', 'kotRounds.tickets.items'])
+                ->where('client_order_id', 'web-order-retry-001')
+                ->sole();
+
+            $this->assertSame(1, Order::query()->count());
+            $this->assertCount(1, $order->items);
+            $this->assertCount(1, $order->kotRounds);
+            $this->assertSame(2, $order->kotRounds->first()->tickets->flatMap->items->sum('quantity'));
+            $this->assertSame('250.00', $order->total);
+        } finally {
+            tenancy()->end();
+        }
+    }
+
     public function test_owner_can_add_later_web_kot_round_to_active_order_without_resending_old_items(): void
     {
         [$tenant, $domain] = $this->createActiveTenant();
