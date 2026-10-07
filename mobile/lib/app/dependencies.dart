@@ -49,6 +49,7 @@ class AppDependencies {
       store: database,
       credentials: credentials,
       leaseVerifier: leaseVerifier,
+      connectionResolver: connectionResolver,
     );
     final syncCoordinator = SyncCoordinator(engine: syncEngine);
     final orders = OfflineOrderRepository(
