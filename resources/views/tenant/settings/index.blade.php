@@ -34,6 +34,7 @@
                         <th class="px-3 py-2">Platform</th>
                         <th class="px-3 py-2">Status</th>
                         <th class="px-3 py-2">Last seen</th>
+                        <th class="px-3 py-2 text-right">Action</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -43,10 +44,22 @@
                             <td class="px-3 py-3">{{ strtoupper($device->platform) }}</td>
                             <td class="px-3 py-3">{{ ucfirst($device->status->value) }}</td>
                             <td class="px-3 py-3 text-slate-500">{{ $device->last_seen_at?->diffForHumans() ?? 'Never' }}</td>
+                            <td class="px-3 py-3 text-right">
+                                @if (in_array(strtolower($device->platform), ['android', 'ios'], true) && $device->status->value === 'active')
+                                    <form method="POST" action="/settings/devices/{{ $device->id }}/revoke" onsubmit="return confirm('Revoke this waiter mobile activation?');">
+                                        @csrf
+                                        <button class="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50">
+                                            Revoke mobile
+                                        </button>
+                                    </form>
+                                @else
+                                    <span class="text-xs text-slate-400">—</span>
+                                @endif
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="4" class="px-3 py-5 text-center text-slate-500">No activated devices yet.</td>
+                            <td colspan="5" class="px-3 py-5 text-center text-slate-500">No activated devices yet.</td>
                         </tr>
                     @endforelse
                 </tbody>
