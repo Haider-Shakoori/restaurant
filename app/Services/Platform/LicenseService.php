@@ -120,7 +120,8 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
-    ): array {
+    ): array
+    {
         $business->refresh();
 
         $access = $this->subscriptions->access($business);
@@ -167,7 +168,8 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
-    ): array {
+    ): array
+    {
         if (! $this->isMobilePlatform($platform)) {
             throw ValidationException::withMessages([
                 'platform' => 'Desktop pairing tokens may only activate Android or iOS waiter devices.',
@@ -220,7 +222,8 @@ class LicenseService
         string $platform,
         ?string $appVersion,
         bool $paired,
-    ): array {
+    ): array
+    {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion, $paired): array {
                 $existing = DeviceActivation::query()
@@ -346,7 +349,8 @@ class LicenseService
         string $deviceId,
         string $deviceSecret,
         ?string $appVersion = null,
-    ): array {
+    ): array
+    {
         $device = DeviceActivation::query()
             ->where('business_id', $business->id)
             ->whereKey($deviceId)
@@ -659,7 +663,8 @@ class LicenseService
         string $event,
         string $message,
         array $context = [],
-    ): void {
+    ): void
+    {
         $business->licenseEvents()->create([
             'license_key_id' => $license?->id,
             'device_activation_id' => $device?->id,
