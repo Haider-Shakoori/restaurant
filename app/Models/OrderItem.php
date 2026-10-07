@@ -18,6 +18,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'dispatched_quantity',
     'line_total',
     'notes',
+    'seat_number',
+    'course_number',
+    'course_name',
+    'modifiers_snapshot',
+    'allergy_instructions',
+    'kitchen_instructions',
     'status',
     'last_dispatched_at',
 ])]
@@ -34,6 +40,9 @@ class OrderItem extends Model
             'line_total' => 'decimal:2',
             'dispatched_quantity' => 'integer',
             'last_dispatched_at' => 'datetime',
+            'seat_number' => 'integer',
+            'course_number' => 'integer',
+            'modifiers_snapshot' => 'array',
         ];
     }
 
