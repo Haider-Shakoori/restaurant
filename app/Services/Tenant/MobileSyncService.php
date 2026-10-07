@@ -30,6 +30,7 @@ class MobileSyncService
     public function __construct(
         private readonly OrderService $orders,
         private readonly SyncDeviceService $devices,
+        private readonly RestaurantSettingsService $settings,
     ) {}
 
     public function bootstrap(TenantUser $user, DeviceActivation $device): array
@@ -57,6 +58,7 @@ class MobileSyncService
             'kitchen' => $this->kitchenSnapshot(),
             'tables' => $this->tableSnapshot(),
             'orders' => $this->activeOrderSnapshot($user),
+            'restaurant_settings' => $this->settings->all(),
         ];
     }
 
