@@ -49,18 +49,9 @@ class LicenseSigningService
 
     public function publicKey(): string
     {
-        $configured = $this->readConfiguredKey('public_key', 'public_key_path');
-
-        if ($configured !== null) {
-            $decoded = $this->decodeKeyMaterial($configured);
-
-            if (strlen($decoded) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
-                throw new RuntimeException('Configured Ed25519 public key has an invalid length.');
-            }
-
-            return $decoded;
-        }
-
+        // The private signing key is the source of truth. Deriving the public
+        // key from it prevents a stale public-key file/env value from causing
+        // every desktop/mobile lease signature to fail verification.
         return sodium_crypto_sign_publickey_from_secretkey($this->secretKey());
     }
 

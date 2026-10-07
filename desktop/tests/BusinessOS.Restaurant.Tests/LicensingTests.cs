@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using BusinessOS.Restaurant.Licensing;
 using Xunit;
@@ -22,6 +24,35 @@ public sealed class LicensingTests
         Assert.Equal("RST-TEST-TEST-TEST-TEST", root.GetProperty("license_key").GetString());
         Assert.Equal("installation-1", root.GetProperty("device_uid").GetString());
         Assert.Equal("windows", root.GetProperty("platform").GetString());
+    }
+
+    [Fact]
+    public void Lease_canonicalization_matches_server_for_unicode_and_html_sensitive_text()
+    {
+        using var payload = JsonDocument.Parse(
+            """
+            {
+              "z": "سلام/کابل & <table>",
+              "a": {
+                "value": "پښتو",
+                "quote": "\"hello\""
+              }
+            }
+            """);
+
+        var method = typeof(SignedLeaseVerifier).GetMethod(
+            "Canonicalize",
+            BindingFlags.Static | BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+
+        var canonical = (byte[])method!.Invoke(
+            null,
+            new object[] { payload.RootElement })!;
+
+        Assert.Equal(
+            "{\"a\":{\"quote\":\"\\\"hello\\\"\",\"value\":\"پښتو\"},\"z\":\"سلام/کابل & <table>\"}",
+            Encoding.UTF8.GetString(canonical));
     }
 
     [Fact]
