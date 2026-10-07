@@ -1,5 +1,9 @@
+using System.Media;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -174,51 +178,420 @@ internal static class OperationalActionViews
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
-        var rows = (await (from ticket in db.KitchenTickets.AsNoTracking()
-                           join station in db.KitchenStations.AsNoTracking() on ticket.KitchenStationId equals station.Id
-                           where ticket.Status == "queued" || ticket.Status == "preparing" || ticket.Status == "ready"
-                           select new KitchenChoice(ticket.Id, ticket.TicketNumber, station.Name, ticket.Status, ticket.QueuedAt)).ToListAsync())
-            .OrderBy(x => x.QueuedAt)
-            .ToList();
+
+        var settingsService = new LocalServer.LocalRestaurantSettingsService(factory);
+        var settings = await settingsService.GetAsync();
+
+        var tickets = await db.KitchenTickets
+            .AsNoTracking()
+            .Where(x => x.Status == "queued" ||
+                        x.Status == "active" ||
+                        x.Status == "preparing" ||
+                        x.Status == "expo" ||
+                        x.Status == "ready")
+            .OrderByDescending(x => x.Priority == "rush")
+            .ThenBy(x => x.QueuedAt)
+            .ToArrayAsync();
+
+        var ticketIds = tickets.Select(x => x.Id).ToArray();
+        var ticketItems = await db.KitchenTicketItems
+            .AsNoTracking()
+            .Where(x => ticketIds.Contains(x.KitchenTicketId) &&
+                        x.Status != "completed" &&
+                        x.Status != "voided" &&
+                        x.Status != "cancelled")
+            .ToArrayAsync();
+
+        var stationIds = tickets.Select(x => x.KitchenStationId).Distinct().ToArray();
+        var stations = await db.KitchenStations
+            .AsNoTracking()
+            .Where(x => stationIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var orderIds = tickets.Select(x => x.OrderId).Distinct().ToArray();
+        var orders = await db.Orders
+            .AsNoTracking()
+            .Where(x => orderIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var tableIds = orders.Values
+            .Where(x => !string.IsNullOrWhiteSpace(x.DiningTableId))
+            .Select(x => x.DiningTableId)
+            .Distinct()
+            .ToArray();
+        var tables = await db.DiningTables
+            .AsNoTracking()
+            .Where(x => tableIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var roundIds = tickets
+            .Where(x => !string.IsNullOrWhiteSpace(x.KotRoundId))
+            .Select(x => x.KotRoundId!)
+            .Distinct()
+            .ToArray();
+        var rounds = await db.KotRounds
+            .AsNoTracking()
+            .Where(x => roundIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, StringComparer.Ordinal);
+
+        var rows = new List<KitchenItemCard>();
+        foreach (var ticket in tickets)
+        {
+            var station = stations[ticket.KitchenStationId];
+            orders.TryGetValue(ticket.OrderId, out var order);
+            LocalKotRound? round = null;
+            if (!string.IsNullOrWhiteSpace(ticket.KotRoundId))
+            {
+                rounds.TryGetValue(ticket.KotRoundId!, out round);
+            }
+
+            var serviceLabel = order?.ServiceType switch
+            {
+                "takeaway" => $"Takeaway · {order.ServiceReference ?? order.ClientOrderId}",
+                "delivery" => $"Delivery · {order.ServiceReference ?? order.ClientOrderId}",
+                "counter" => $"Counter · {order.ServiceReference ?? order.ClientOrderId}",
+                _ when order is not null &&
+                       !string.IsNullOrWhiteSpace(order.DiningTableId) &&
+                       tables.TryGetValue(order.DiningTableId, out var table)
+                    => $"Table {table.Name}",
+                _ => "Dine-in",
+            };
+
+            foreach (var item in ticketItems.Where(x => x.KitchenTicketId == ticket.Id))
+            {
+                rows.Add(new KitchenItemCard(
+                    item.Id,
+                    ticket.Id,
+                    ticket.KotNumber ?? ticket.TicketNumber,
+                    ticket.RoundNumber,
+                    station.Id,
+                    station.Name,
+                    serviceLabel,
+                    item.ItemName,
+                    item.Quantity,
+                    item.Notes,
+                    item.AllergyInstructions,
+                    item.KitchenInstructions,
+                    ModifierText(item.ModifiersJson),
+                    item.SeatNumber,
+                    item.CourseNumber,
+                    item.CourseName,
+                    item.Status,
+                    item.Priority,
+                    ticket.QueuedAt,
+                    round?.QueueEnabled ?? true,
+                    round?.PreparingEnabled ?? true,
+                    round?.ExpoEnabled ?? false,
+                    item.RefireReason));
+            }
+        }
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new StackPanel();
-        root.Children.Add(Header("Kitchen / KOT", "Tickets arrive from desktop POS and LAN-connected waiter devices."));
-        var grid = DataGrid(rows);
-        grid.SelectionMode = DataGridSelectionMode.Single;
-        grid.Columns.Add(Column("KOT", nameof(KitchenChoice.TicketNumber), 220));
-        grid.Columns.Add(Column("Station", nameof(KitchenChoice.Station), 180));
-        grid.Columns.Add(Column("Status", nameof(KitchenChoice.Status), 120));
-        grid.Columns.Add(Column("Queued", nameof(KitchenChoice.QueuedAt), 210));
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
-        var start = Button("Start preparing"); var ready = Button("Mark ready");
-        actions.Children.Add(start); actions.Children.Add(ready);
-        var status = new TextBlock { Margin = new Thickness(12, 9, 0, 0), Foreground = System.Windows.Media.Brushes.SlateGray };
-        actions.Children.Add(status);
-        start.Click += async (_, _) =>
-        {
-            try
-            {
-                if (grid.SelectedItem is not KitchenChoice row) throw new InvalidOperationException("Select a KOT.");
-                await workflow.StartKitchenTicketAsync(row.Id);
-                status.Text = $"{row.TicketNumber} started.";
-            }
-            catch (Exception ex) { status.Text = ex.Message; }
-        };
-        ready.Click += async (_, _) =>
-        {
-            try
-            {
-                if (grid.SelectedItem is not KitchenChoice row) throw new InvalidOperationException("Select a KOT.");
-                await workflow.MarkKitchenTicketReadyAsync(row.Id);
-                status.Text = $"{row.TicketNumber} marked ready.";
-            }
-            catch (Exception ex) { status.Text = ex.Message; }
-        };
-        root.Children.Add(grid); root.Children.Add(actions);
-        return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-    }
+        root.Children.Add(Header(
+            "Kitchen / KOT",
+            "Item-level KDS. Queue and Preparing are independent; Expo appears only when enabled. Rush and aging stay visible without changing the app shell."));
 
+        var filterRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var stationChoices = new List<Choice> { new("", "All stations") };
+        stationChoices.AddRange(stations.Values
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.Name)
+            .Select(x => new Choice(x.Id, x.Name)));
+
+        var stationFilter = Combo(stationChoices, "Label");
+        stationFilter.Width = 220;
+        stationFilter.SelectedIndex = 0;
+
+        var statusFilter = new ComboBox
+        {
+            ItemsSource = new[] { "All states", "queued", "active", "preparing", "expo", "ready" },
+            SelectedIndex = 0,
+            Width = 160,
+            Height = 34,
+            Margin = new Thickness(0, 4, 8, 6),
+        };
+
+        var statusText = new TextBlock
+        {
+            Foreground = Brushes.SlateGray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(12, 10, 0, 0),
+        };
+
+        filterRow.Children.Add(stationFilter);
+        filterRow.Children.Add(statusFilter);
+        filterRow.Children.Add(statusText);
+        root.Children.Add(filterRow);
+
+        var board = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        root.Children.Add(board);
+
+        var timerBindings = new List<(TextBlock Label, Border Badge, DateTimeOffset QueuedAt, string Priority)>();
+
+        void UpdateAge(TextBlock label, Border badge, DateTimeOffset queuedAt, string priority)
+        {
+            var age = DateTimeOffset.UtcNow - queuedAt;
+            var minutes = Math.Max(0, (int)Math.Floor(age.TotalMinutes));
+            label.Text = $"{minutes:00}:{age.Seconds:00}";
+
+            if (priority == "rush" || minutes >= settings.KitchenLateMinutes)
+            {
+                badge.Background = Brushes.IndianRed;
+                label.Foreground = Brushes.White;
+            }
+            else if (minutes >= settings.KitchenWarningMinutes)
+            {
+                badge.Background = Brushes.Goldenrod;
+                label.Foreground = Brushes.White;
+            }
+            else
+            {
+                badge.Background = Brushes.Transparent;
+                label.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            }
+        }
+
+        Border BuildKitchenCard(KitchenItemCard row)
+        {
+            var panel = new StackPanel();
+            var header = new Grid();
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var title = HeaderText($"{row.KotNumber} · R{row.RoundNumber}", 16, true);
+            var meta = new TextBlock
+            {
+                Text = $"{row.Station} · {row.ServiceLabel}",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 3, 8, 0),
+            };
+            meta.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+
+            var titleStack = new StackPanel();
+            titleStack.Children.Add(title);
+            titleStack.Children.Add(meta);
+            Grid.SetColumn(titleStack, 0);
+            header.Children.Add(titleStack);
+
+            var timerText = new TextBlock
+            {
+                FontWeight = FontWeights.Bold,
+                FontSize = 14,
+                Margin = new Thickness(8, 3, 8, 3),
+            };
+            var timerBadge = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(4),
+                Child = timerText,
+                BorderThickness = new Thickness(1),
+                BorderBrush = Brushes.Transparent,
+            };
+            UpdateAge(timerText, timerBadge, row.QueuedAt, row.Priority);
+            timerBindings.Add((timerText, timerBadge, row.QueuedAt, row.Priority));
+            Grid.SetColumn(timerBadge, 1);
+            header.Children.Add(timerBadge);
+            panel.Children.Add(header);
+
+            var itemTitle = new TextBlock
+            {
+                Text = $"{row.Quantity} × {row.ItemName}",
+                FontSize = 21,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 14, 0, 6),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            itemTitle.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            panel.Children.Add(itemTitle);
+
+            var chips = new WrapPanel();
+            chips.Children.Add(KitchenChip(row.Status.ToUpperInvariant()));
+            if (row.Priority == "rush") chips.Children.Add(KitchenChip("RUSH"));
+            if (row.SeatNumber.HasValue) chips.Children.Add(KitchenChip($"Seat {row.SeatNumber.Value}"));
+            if (row.CourseNumber.HasValue)
+            {
+                chips.Children.Add(KitchenChip(
+                    $"Course {row.CourseNumber.Value}{(string.IsNullOrWhiteSpace(row.CourseName) ? "" : $" · {row.CourseName}")}"));
+            }
+            panel.Children.Add(chips);
+
+            if (!string.IsNullOrWhiteSpace(row.Modifiers))
+                panel.Children.Add(KitchenDetail("Modifiers", row.Modifiers));
+            if (!string.IsNullOrWhiteSpace(row.KitchenInstructions))
+                panel.Children.Add(KitchenDetail("Kitchen", row.KitchenInstructions));
+            if (!string.IsNullOrWhiteSpace(row.Notes))
+                panel.Children.Add(KitchenDetail("Note", row.Notes));
+            if (!string.IsNullOrWhiteSpace(row.AllergyInstructions))
+            {
+                var allergy = KitchenDetail("ALLERGY", row.AllergyInstructions);
+                allergy.Foreground = Brushes.IndianRed;
+                allergy.FontWeight = FontWeights.Bold;
+                panel.Children.Add(allergy);
+            }
+            if (!string.IsNullOrWhiteSpace(row.RefireReason))
+            {
+                var refire = KitchenDetail("REFIRE", row.RefireReason);
+                refire.Foreground = Brushes.OrangeRed;
+                refire.FontWeight = FontWeights.Bold;
+                panel.Children.Add(refire);
+            }
+
+            var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+
+            Button? primary = null;
+            Func<Task>? primaryAction = null;
+            string? success = null;
+
+            if (row.Status is "queued" or "active")
+            {
+                if (row.PreparingEnabled)
+                {
+                    primary = Button("START");
+                    primaryAction = () => workflow.StartKitchenItemAsync(row.ItemId);
+                    success = $"{row.ItemName} started.";
+                }
+                else
+                {
+                    primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
+                    primaryAction = () => workflow.MarkKitchenItemReadyAsync(row.ItemId);
+                    success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
+                }
+            }
+            else if (row.Status == "preparing")
+            {
+                primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
+                primaryAction = () => workflow.MarkKitchenItemReadyAsync(row.ItemId);
+                success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
+            }
+            else if (row.Status == "expo")
+            {
+                primary = Button("PASS EXPO");
+                primaryAction = () => workflow.PassExpoItemAsync(row.ItemId);
+                success = $"{row.ItemName} passed Expo.";
+            }
+
+            if (primary is not null && primaryAction is not null)
+            {
+                actions.Children.Add(primary);
+                primary.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        primary.IsEnabled = false;
+                        await primaryAction();
+                        statusText.Text = success ?? "Kitchen item updated.";
+                        primary.Content = "DONE";
+                    }
+                    catch (Exception ex)
+                    {
+                        primary.IsEnabled = true;
+                        statusText.Text = ex.Message;
+                    }
+                };
+            }
+
+            if (row.Status is "ready" or "expo")
+            {
+                var refire = Button("RE-FIRE");
+                actions.Children.Add(refire);
+                refire.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        refire.IsEnabled = false;
+                        await workflow.RefireKitchenItemAsync(
+                            row.ItemId,
+                            $"Desktop KDS re-fire of {row.KotNumber}");
+                        statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
+                        refire.Content = "RE-FIRED";
+                    }
+                    catch (Exception ex)
+                    {
+                        refire.IsEnabled = true;
+                        statusText.Text = ex.Message;
+                    }
+                };
+            }
+
+            panel.Children.Add(actions);
+
+            var card = Card(panel);
+            card.Width = 350;
+            card.MinHeight = 270;
+            card.Margin = new Thickness(0, 0, 12, 12);
+            if (row.Priority == "rush")
+            {
+                card.BorderBrush = Brushes.OrangeRed;
+                card.BorderThickness = new Thickness(2);
+            }
+            return card;
+        }
+
+        void RenderBoard()
+        {
+            board.Children.Clear();
+            timerBindings.Clear();
+
+            var stationId = (stationFilter.SelectedItem as Choice)?.Id ?? "";
+            var state = statusFilter.SelectedItem?.ToString() ?? "All states";
+            var filtered = rows
+                .Where(row => string.IsNullOrWhiteSpace(stationId) || row.StationId == stationId)
+                .Where(row => state == "All states" || row.Status == state)
+                .OrderByDescending(row => row.Priority == "rush")
+                .ThenBy(row => row.QueuedAt)
+                .ToArray();
+
+            foreach (var row in filtered)
+            {
+                board.Children.Add(BuildKitchenCard(row));
+            }
+
+            if (filtered.Length == 0)
+            {
+                var empty = new TextBlock
+                {
+                    Text = "No active kitchen items match this filter.",
+                    Margin = new Thickness(0, 18, 0, 18),
+                };
+                empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                board.Children.Add(empty);
+            }
+        }
+
+        stationFilter.SelectionChanged += (_, _) => RenderBoard();
+        statusFilter.SelectionChanged += (_, _) => RenderBoard();
+        RenderBoard();
+
+        if (settings.KotSoundEnabled &&
+            rows.Any(row => row.Status is "queued" or "active" &&
+                            DateTimeOffset.UtcNow - row.QueuedAt < TimeSpan.FromMinutes(1)))
+        {
+            SystemSounds.Exclamation.Play();
+        }
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        timer.Tick += (_, _) =>
+        {
+            foreach (var binding in timerBindings)
+            {
+                UpdateAge(binding.Label, binding.Badge, binding.QueuedAt, binding.Priority);
+            }
+        };
+        timer.Start();
+        root.Unloaded += (_, _) => timer.Stop();
+
+        return new ScrollViewer
+        {
+            Content = root,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+    }
 
     public static async Task<FrameworkElement> ClosingAsync()
     {
@@ -376,6 +749,82 @@ internal static class OperationalActionViews
         grid.SetResourceReference(System.Windows.Controls.DataGrid.BorderBrushProperty, "BorderBrush");
         return grid;
     }
+    private static Border KitchenChip(string text)
+    {
+        var block = new TextBlock
+        {
+            Text = text,
+            FontSize = 11,
+            FontWeight = FontWeights.Bold,
+        };
+        block.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var chip = new Border
+        {
+            Child = block,
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(8, 3, 8, 3),
+            Margin = new Thickness(0, 0, 6, 6),
+            BorderThickness = new Thickness(1),
+        };
+        chip.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush");
+        chip.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+        return chip;
+    }
+
+    private static TextBlock KitchenDetail(string label, string value)
+    {
+        var block = new TextBlock
+        {
+            Text = $"{label}: {value}",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        block.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        return block;
+    }
+
+    private static string? ModifierText(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = JsonSerializer.Deserialize<JsonElement>(json);
+            if (root.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var values = new List<string>();
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var raw = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(raw)) values.Add(raw);
+                    continue;
+                }
+
+                if (item.ValueKind == JsonValueKind.Object &&
+                    item.TryGetProperty("name", out var name) &&
+                    !string.IsNullOrWhiteSpace(name.GetString()))
+                {
+                    values.Add(name.GetString()!);
+                }
+            }
+
+            return values.Count == 0 ? null : string.Join(", ", values);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new System.Windows.Data.Binding(property), Width = width };
 
     private sealed record Choice(string Id, string Label);
@@ -383,7 +832,30 @@ internal static class OperationalActionViews
     private sealed record OrderChoice(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total);
     private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
-    private sealed record KitchenChoice(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
+    private sealed record KitchenItemCard(
+        string ItemId,
+        string TicketId,
+        string KotNumber,
+        int RoundNumber,
+        string StationId,
+        string Station,
+        string ServiceLabel,
+        string ItemName,
+        int Quantity,
+        string? Notes,
+        string? AllergyInstructions,
+        string? KitchenInstructions,
+        string? Modifiers,
+        int? SeatNumber,
+        int? CourseNumber,
+        string? CourseName,
+        string Status,
+        string Priority,
+        DateTimeOffset QueuedAt,
+        bool QueueEnabled,
+        bool PreparingEnabled,
+        bool ExpoEnabled,
+        string? RefireReason);
     private sealed record CashierSessionChoice(string Id, string Cashier, string Status, decimal OpeningCash, decimal? ExpectedCash, decimal? DeclaredCash, decimal? Variance, DateTimeOffset OpenedAt);
     private sealed record ClosingChoice(string Id, DateOnly BusinessDate, string Status, DateTimeOffset? FinalizedAt);
 }
