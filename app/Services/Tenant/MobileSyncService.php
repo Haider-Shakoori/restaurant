@@ -245,7 +245,10 @@ class MobileSyncService
     {
         $data = Validator::make($payload, [
             'client_order_id' => ['required', 'string', 'max:40'],
-            'dining_table_id' => ['required', 'string', 'max:40'],
+            'branch_id' => ['nullable', 'string', 'max:40'],
+            'service_type' => ['nullable', 'string', 'max:24'],
+            'service_reference' => ['nullable', 'string', 'max:120'],
+            'dining_table_id' => ['nullable', 'string', 'max:40'],
             'guest_count' => ['nullable', 'integer', 'min:1', 'max:100'],
             'notes' => ['nullable', 'string', 'max:2000'],
         ])->validate();
@@ -269,6 +272,13 @@ class MobileSyncService
             'menu_item_id' => ['required', 'string', 'max:40'],
             'quantity' => ['required', 'integer', 'min:1', 'max:999'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'seat_number' => ['nullable', 'integer', 'min:1', 'max:999'],
+            'course_number' => ['nullable', 'integer', 'min:1', 'max:99'],
+            'course_name' => ['nullable', 'string', 'max:80'],
+            'modifiers' => ['nullable', 'array', 'max:50'],
+            'modifiers.*.option_id' => ['required', 'string', 'max:40'],
+            'allergy_instructions' => ['nullable', 'string', 'max:1000'],
+            'kitchen_instructions' => ['nullable', 'string', 'max:1000'],
         ])->validate();
 
         $order = Order::query()
@@ -473,6 +483,9 @@ class MobileSyncService
             'id' => $order->id,
             'client_order_id' => $order->client_order_id,
             'status' => $order->status,
+            'branch_id' => $order->branch_id,
+            'service_type' => $order->service_type,
+            'service_reference' => $order->service_reference,
             'guest_count' => $order->guest_count,
             'notes' => $order->notes,
             'subtotal' => $order->subtotal,
@@ -481,7 +494,7 @@ class MobileSyncService
             'submitted_at' => $order->submitted_at?->toIso8601String(),
             'served_at' => $order->served_at?->toIso8601String(),
             'closed_at' => $order->closed_at?->toIso8601String(),
-            'table' => $this->singleTableSnapshot($order->table),
+            'table' => $order->table ? $this->singleTableSnapshot($order->table) : null,
             'waiter' => [
                 'id' => $order->waiter->id,
                 'public_id' => $order->waiter->public_id,
@@ -496,6 +509,13 @@ class MobileSyncService
                 'quantity' => $item->quantity,
                 'line_total' => $item->line_total,
                 'notes' => $item->notes,
+                'seat_number' => $item->seat_number,
+                'course_number' => $item->course_number,
+                'course_name' => $item->course_name,
+                'modifiers_snapshot' => $item->modifiers_snapshot,
+                'allergy_instructions' => $item->allergy_instructions,
+                'kitchen_instructions' => $item->kitchen_instructions,
+                'dispatched_quantity' => $item->dispatched_quantity,
                 'status' => $item->status,
             ])->all(),
             'kitchen_tickets' => $order->kitchenTickets->map(fn ($ticket) => [
