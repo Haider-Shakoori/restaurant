@@ -78,7 +78,7 @@ class SessionService {
       signedLease: lease,
       publicKey: publicKey,
       expectedDeviceId: deviceId,
-      expectedTenantId: target.tenantId,
+      expectedTenantId: activationTarget.tenantId,
     );
 
     if (!verified.valid) {
