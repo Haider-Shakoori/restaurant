@@ -8,7 +8,6 @@ use App\Models\TenantUser;
 use App\Services\Tenant\KitchenService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 
 class TenantWebKitchenController extends Controller
 {
