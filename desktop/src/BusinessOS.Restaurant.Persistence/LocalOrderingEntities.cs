@@ -19,6 +19,9 @@ public sealed class LocalOrder
     public required string Id { get; set; }
     public required string ClientOrderId { get; set; }
     public required string DiningTableId { get; set; }
+    public string? BranchId { get; set; }
+    public string ServiceType { get; set; } = "dine_in";
+    public string? ServiceReference { get; set; }
     public long WaiterId { get; set; }
     public required string WaiterPublicId { get; set; }
     public required string WaiterName { get; set; }
