@@ -38,6 +38,7 @@ use App\Http\Controllers\Tenant\SyncBootstrapController;
 use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
+use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
@@ -104,6 +105,8 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
             Route::middleware('tenant.role:owner,admin')->group(function (): void {
                 Route::get('/users', [TenantPortalController::class, 'users'])->name('tenant.web.users');
                 Route::get('/settings', [TenantPortalController::class, 'settings'])->name('tenant.web.settings');
+                Route::post('/settings/devices/{deviceActivation}/revoke', [TenantDeviceController::class, 'revoke'])
+                    ->name('tenant.web.devices.revoke');
 
                 Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
