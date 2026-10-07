@@ -26,8 +26,7 @@ class LicenseService
     /**
      * @return array{license: LicenseKey, raw_key: string}
      */
-    public function generate(Business $business, AdminUser $admin): array
-    {
+    public function generate(Business $business, AdminUser $admin): array {
         $business->refresh();
 
         $access = $this->subscriptions->access($business);
@@ -78,8 +77,7 @@ class LicenseService
         );
     }
 
-    public function revoke(LicenseKey $license, AdminUser $admin, string $reason = 'License revoked.'): void
-    {
+    public function revoke(LicenseKey $license, AdminUser $admin, string $reason = 'License revoked.'): void {
         DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($license, $admin, $reason): void {
                 if ($license->status === LicenseStatus::Revoked) {
@@ -120,8 +118,7 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
-    ): array
-    {
+    ): array {
         $business->refresh();
 
         $access = $this->subscriptions->access($business);
@@ -168,8 +165,7 @@ class LicenseService
         ?string $deviceName,
         string $platform,
         ?string $appVersion,
-    ): array
-    {
+    ): array {
         if (! $this->isMobilePlatform($platform)) {
             throw ValidationException::withMessages([
                 'platform' => 'Desktop pairing tokens may only activate Android or iOS waiter devices.',
@@ -222,8 +218,7 @@ class LicenseService
         string $platform,
         ?string $appVersion,
         bool $paired,
-    ): array
-    {
+    ): array {
         return DB::connection(config('tenancy.database.central_connection'))->transaction(
             function () use ($business, $license, $features, $deviceUid, $deviceName, $platform, $appVersion, $paired): array {
                 $existing = DeviceActivation::query()
@@ -349,8 +344,7 @@ class LicenseService
         string $deviceId,
         string $deviceSecret,
         ?string $appVersion = null,
-    ): array
-    {
+    ): array {
         $device = DeviceActivation::query()
             ->where('business_id', $business->id)
             ->whereKey($deviceId)
@@ -382,8 +376,7 @@ class LicenseService
         return $this->issueLease($device->fresh(['licenseKey', 'business']));
     }
 
-    public function revokeDevice(DeviceActivation $device, AdminUser $admin): void
-    {
+    public function revokeDevice(DeviceActivation $device, AdminUser $admin): void {
         if ($device->status === DeviceStatus::Revoked) {
             return;
         }
@@ -406,8 +399,7 @@ class LicenseService
     public function revokeMobileDeviceForTenant(
         DeviceActivation $device,
         TenantUser $user,
-    ): void
-    {
+    ): void {
         if (! $this->isMobilePlatform((string) $device->platform)) {
             throw ValidationException::withMessages([
                 'device' => 'Only waiter mobile activations can be revoked from restaurant settings.',
@@ -440,8 +432,7 @@ class LicenseService
     /**
      * @return array<string, mixed>
      */
-    public function issueLease(DeviceActivation $device): array
-    {
+    public function issueLease(DeviceActivation $device): array {
         $business = $device->business()->firstOrFail();
         $access = $this->subscriptions->access($business);
 
@@ -579,8 +570,7 @@ class LicenseService
         return $default > 0 ? $default : null;
     }
 
-    private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void
-    {
+    private function revokeActiveLicenses(Business $business, AdminUser $admin, string $reason): void {
         $licenses = $business->licenseKeys()
             ->where('status', LicenseStatus::Active)
             ->get();
@@ -664,8 +654,7 @@ class LicenseService
         string $event,
         string $message,
         array $context = [],
-    ): void
-    {
+    ): void {
         $business->licenseEvents()->create([
             'license_key_id' => $license?->id,
             'device_activation_id' => $device?->id,
