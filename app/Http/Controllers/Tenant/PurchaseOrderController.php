@@ -84,16 +84,23 @@ class PurchaseOrderController extends Controller
         ReceivePurchaseOrderRequest $request,
         PurchaseOrder $purchaseOrder,
         ProcurementService $procurement,
-    ): JsonResponse {
+    ): JsonResponse|RedirectResponse {
         /** @var TenantUser $user */
         $user = $request->user();
 
+        $receipt = $procurement->receive(
+            $purchaseOrder,
+            $user,
+            $request->validated(),
+        );
+
+        if ($request->routeIs('tenant.web.purchasing.orders.receive')) {
+            return redirect('/purchasing')
+                ->with('status', 'Goods receipt '.$receipt->receipt_number.' posted. Inventory has been updated.');
+        }
+
         return response()->json([
-            'data' => $procurement->receive(
-                $purchaseOrder,
-                $user,
-                $request->validated(),
-            ),
+            'data' => $receipt,
         ], 201);
     }
 }
