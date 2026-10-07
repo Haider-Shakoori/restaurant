@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'kitchen_ticket_id',
@@ -81,5 +82,10 @@ class KitchenTicketItem extends Model
     public function refireOf(): BelongsTo
     {
         return $this->belongsTo(self::class, 'refire_of_kitchen_ticket_item_id');
+    }
+
+    public function wasteEvents(): HasMany
+    {
+        return $this->hasMany(ProductionWasteEvent::class, 'kitchen_ticket_item_id');
     }
 }
