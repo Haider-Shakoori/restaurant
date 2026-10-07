@@ -67,38 +67,69 @@
 
                 @if ($business->provisioning_state->value === 'ready')
                     <section class="rounded-2xl border border-slate-200 bg-white p-6">
-                        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                            <div>
-                                <h2 class="font-bold">Restaurant web access</h2>
-                                <p class="mt-1 text-sm text-slate-500">
-                                    Create or reset the owner login for
-                                    <span class="font-mono text-xs">{{ $business->tenant?->domains->first()?->domain ?? 'the tenant domain' }}</span>.
-                                </p>
-                            </div>
-                            <form method="POST" action="/platform/restaurants/{{ $business->id }}/owner-access/reset"
-                                  onsubmit="return confirm('Create a new temporary owner password? The previous owner password will stop working.')">
-                                @csrf
-                                <button @disabled(! $business->email)
-                                        class="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">
-                                    Create / Reset Owner Login
-                                </button>
-                            </form>
+                        <div>
+                            <p class="text-xs font-bold uppercase tracking-[0.16em] text-amber-700">Tenant Owner Access</p>
+                            <h2 class="mt-1 text-lg font-black text-slate-950">Assign first-login credentials</h2>
+                            <p class="mt-2 text-sm leading-6 text-slate-500">
+                                Set the owner username/email and a temporary password for
+                                <span class="font-mono text-xs">{{ $business->tenant?->domains->first()?->domain ?? 'the tenant domain' }}</span>.
+                                Saving this form replaces the previous owner password immediately.
+                            </p>
                         </div>
 
-                        @if (! $business->email)
-                            <p class="mt-3 text-sm font-semibold text-amber-700">Add the restaurant owner email in Commercial details first.</p>
+                        @if ($errors->has('owner_access') || $errors->has('owner_email') || $errors->has('temporary_password'))
+                            <div class="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                                {{ $errors->first('owner_access') ?: $errors->first('owner_email') ?: $errors->first('temporary_password') }}
+                            </div>
                         @endif
+
+                        <form method="POST" action="/platform/restaurants/{{ $business->id }}/owner-access/reset"
+                              class="mt-5 grid gap-4 lg:grid-cols-2"
+                              onsubmit="return confirm('Save these owner credentials? The previous owner password will stop working immediately.')">
+                            @csrf
+
+                            <label class="lg:col-span-2">
+                                <span class="text-sm font-bold text-slate-700">Owner username / email</span>
+                                <input name="owner_email" type="email" required autocomplete="off"
+                                       value="{{ old('owner_email', $business->email) }}"
+                                       placeholder="owner@example.com"
+                                       class="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                                <span class="mt-1 block text-xs text-slate-500">This email is the username used at the restaurant login page.</span>
+                            </label>
+
+                            <label>
+                                <span class="text-sm font-bold text-slate-700">New temporary password</span>
+                                <input name="temporary_password" type="password" autocomplete="new-password"
+                                       placeholder="Leave blank to auto-generate"
+                                       class="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                                <span class="mt-1 block text-xs text-slate-500">Minimum 8 characters with letters and numbers.</span>
+                            </label>
+
+                            <label>
+                                <span class="text-sm font-bold text-slate-700">Confirm temporary password</span>
+                                <input name="temporary_password_confirmation" type="password" autocomplete="new-password"
+                                       placeholder="Repeat temporary password"
+                                       class="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                            </label>
+
+                            <div class="lg:col-span-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                <p class="text-xs leading-5 text-slate-500">Leave both password fields blank if you want BusinessOS to generate a secure temporary password for you.</p>
+                                <button class="shrink-0 rounded-xl bg-slate-950 px-5 py-3 text-sm font-black text-white hover:bg-slate-800">
+                                    Save Owner Credentials
+                                </button>
+                            </div>
+                        </form>
 
                         @if (session('owner_credentials'))
                             @php($credentials = session('owner_credentials'))
                             <div class="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                                <p class="font-black text-emerald-900">Temporary owner credentials — copy these now</p>
-                                <div class="mt-3 grid gap-2 text-sm sm:grid-cols-3">
-                                    <div><span class="block text-xs uppercase text-emerald-700">Login URL</span><span class="font-mono break-all">https://{{ $credentials['domain'] }}/login</span></div>
-                                    <div><span class="block text-xs uppercase text-emerald-700">Email</span><span class="font-mono break-all">{{ $credentials['email'] }}</span></div>
-                                    <div><span class="block text-xs uppercase text-emerald-700">Temporary password</span><span class="font-mono break-all">{{ $credentials['password'] }}</span></div>
+                                <p class="font-black text-emerald-900">Owner credentials updated — copy these now</p>
+                                <div class="mt-3 grid gap-3 text-sm lg:grid-cols-3">
+                                    <div class="rounded-lg bg-white/70 p-3"><span class="block text-xs font-bold uppercase text-emerald-700">Login URL</span><span class="mt-1 block break-all font-mono">https://{{ $credentials['domain'] }}/login</span></div>
+                                    <div class="rounded-lg bg-white/70 p-3"><span class="block text-xs font-bold uppercase text-emerald-700">Username / Email</span><span class="mt-1 block break-all font-mono">{{ $credentials['email'] }}</span></div>
+                                    <div class="rounded-lg bg-white/70 p-3"><span class="block text-xs font-bold uppercase text-emerald-700">Temporary Password</span><span class="mt-1 block break-all font-mono text-base font-black">{{ $credentials['password'] }}</span></div>
                                 </div>
-                                <p class="mt-3 text-xs text-emerald-800">This password is shown only in this response. Reset owner access again if it is lost.</p>
+                                <p class="mt-3 text-xs text-emerald-800">For security, the readable password is shown only after this update. You can assign another temporary password here at any time.</p>
                             </div>
                         @endif
                     </section>
