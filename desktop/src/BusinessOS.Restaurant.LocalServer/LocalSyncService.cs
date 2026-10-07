@@ -243,6 +243,7 @@ public sealed class LocalSyncService
                 "order.item.add" => await AddOrderItemAsync(db, principal, mutation, cancellationToken),
                 "order.submit" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
                 "order.kot.send" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
+                "course.fire" => await FireCourseAsync(db, principal, mutation, cancellationToken),
                 _ => throw new LocalSyncConflictException(
                     "unsupported_operation",
                     "Unsupported offline operation."),
@@ -625,6 +626,104 @@ public sealed class LocalSyncService
         {
             return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
         }
+
+        return Accepted(
+            mutation,
+            "kot_round",
+            round.Id,
+            null,
+            new
+            {
+                round = LocalKitchenService.RoundSnapshot(round),
+                order = snapshot,
+            });
+    }
+
+    private async Task<Dictionary<string, object?>> FireCourseAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+
+        var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
+        var courseNumber = RequiredInt(mutation.Payload, "course_number");
+        if (courseNumber is < 1 or > 99)
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                "course_number must be between 1 and 99.");
+        }
+
+        var order = await db.Orders
+            .SingleOrDefaultAsync(value => value.ClientOrderId == clientOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing",
+                "A referenced server record does not exist yet.");
+        AuthorizeOrder(principal, order);
+
+        if (order.Status is "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "Courses cannot be fired after the order is financially closed or cancelled.");
+        }
+
+        var heldItems = await db.OrderItems
+            .Where(value =>
+                value.OrderId == order.Id &&
+                value.Status == "held" &&
+                value.CourseNumber == courseNumber)
+            .OrderBy(value => value.CreatedAtUtc)
+            .ToArrayAsync(cancellationToken);
+
+        if (heldItems.Length == 0)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict",
+                "This course has no held items waiting to be fired.");
+        }
+
+        foreach (var item in heldItems)
+        {
+            item.Status = "pending";
+            item.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        var settings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
+        var round = await _kitchen.CreateRoundAsync(
+            db,
+            order,
+            principal,
+            mutation.MutationId,
+            settings,
+            cancellationToken);
+
+        order.Status = "submitted";
+        order.SubmittedAt ??= DateTimeOffset.UtcNow;
+        order.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+
+        await _kitchen.DispatchRoundAsync(db, order, round, heldItems, principal, cancellationToken);
+
+        LocalOperationsControlService.AddAudit(
+            db,
+            principal,
+            "kitchen",
+            "course.fired",
+            order.BranchId,
+            "kot_round",
+            round.Id,
+            new
+            {
+                order_id = order.Id,
+                course_number = courseNumber,
+                round_number = round.RoundNumber,
+            });
+
+        var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId, snapshot);
 
         return Accepted(
             mutation,
