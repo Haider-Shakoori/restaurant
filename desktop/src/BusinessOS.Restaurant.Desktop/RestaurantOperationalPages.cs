@@ -305,6 +305,20 @@ internal static class RestaurantOperationalPages
             "Local restaurant network",
             $"{diagnostics.StatusMessage}\n\nCloud: {diagnostics.CloudStatus}\n\nWaiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid."));
 
+        var pairing = new TextBox
+        {
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 84,
+            Margin = new Thickness(0, 0, 12, 12),
+            Padding = new Thickness(12)
+        };
+        pairing.SetBinding(TextBox.TextProperty, new Binding(nameof(LanDiagnosticsViewModel.PairingDetails)));
+        panel.Children.Add(Section(
+            "Waiter app connection",
+            "Automatic mode prefers the restaurant LAN. If LAN is unavailable, mobile and Desktop reconcile through the cloud when both have internet. Offline changes remain queued until a route returns.",
+            pairing));
+
         var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
 
         var refresh = new Button { Content = "Refresh status", MinWidth = 130, Height = 38, Margin = new Thickness(0, 0, 10, 0) };
