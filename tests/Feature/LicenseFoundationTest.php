@@ -257,6 +257,64 @@ class LicenseFoundationTest extends TestCase
             ->assertJsonValidationErrors('device_uid');
     }
 
+    public function test_central_desktop_resolver_finds_tenant_from_license_key_without_returning_raw_key(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness();
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $response = $this->postJson('http://localhost/api/v1/desktop/license/resolve', [
+            'license_key' => $license['raw_key'],
+        ])->assertOk()
+            ->assertJsonPath('tenant_base_url', 'https://'.$domain)
+            ->assertJsonPath('license.version', 1)
+            ->assertJsonPath('license.last4', substr($license['raw_key'], -4));
+
+        $this->assertArrayNotHasKey('raw_key', $response->json());
+        $this->assertArrayNotHasKey('license_key', $response->json());
+    }
+
+    public function test_windows_license_binds_to_first_computer_but_can_reactivate_same_installation(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness(['max_devices' => '5']);
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $first = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'restaurant-desktop-bound-001',
+            'device_name' => 'Main Restaurant PC',
+            'platform' => 'windows',
+            'app_version' => '1.0.0',
+        ])->assertCreated();
+
+        $this->assertNotNull($business->fresh()->first_activated_at);
+
+        $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'restaurant-desktop-bound-002',
+            'device_name' => 'Another Restaurant PC',
+            'platform' => 'windows',
+            'app_version' => '1.0.0',
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors('license_key');
+
+        $samePc = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'restaurant-desktop-bound-001',
+            'device_name' => 'Main Restaurant PC',
+            'platform' => 'windows',
+            'app_version' => '1.0.1',
+        ])->assertCreated();
+
+        $this->assertSame($first->json('device.id'), $samePc->json('device.id'));
+        $this->assertSame(
+            1,
+            $business->fresh()->devices()
+                ->where('status', DeviceStatus::Active)
+                ->where('platform', 'windows')
+                ->count(),
+        );
+    }
+
     public function test_license_rotation_revokes_old_license_and_device_credentials(): void
     {
         [$business, , $domain] = $this->createActiveBusiness();
