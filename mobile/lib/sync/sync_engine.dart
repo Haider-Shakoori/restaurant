@@ -12,7 +12,7 @@ class SyncEngine {
     required SyncStore store,
     required CredentialStore credentials,
     required LeaseValidator leaseVerifier,
-    required ConnectionResolver connectionResolver,
+    ConnectionResolver? connectionResolver,
   }) : _api = api,
        _store = store,
        _credentials = credentials,
@@ -23,7 +23,7 @@ class SyncEngine {
   final SyncStore _store;
   final CredentialStore _credentials;
   final LeaseValidator _leaseVerifier;
-  final ConnectionResolver _connectionResolver;
+  final ConnectionResolver? _connectionResolver;
 
   bool _running = false;
 
@@ -142,9 +142,11 @@ class SyncEngine {
 
   Future<SessionCredentials> _resolveActiveChannel(SessionCredentials session) async {
     if (session.connectionMode != ConnectionMode.automatic) return session;
+    final resolver = _connectionResolver;
+    if (resolver == null) return session;
 
     try {
-      final target = await _connectionResolver.resolve(
+      final target = await resolver.resolve(
         mode: ConnectionMode.automatic,
         localUrl: session.localBaseUrl,
         cloudUrl: session.cloudBaseUrl,
