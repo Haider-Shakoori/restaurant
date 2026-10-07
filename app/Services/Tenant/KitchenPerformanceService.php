@@ -4,7 +4,6 @@ namespace App\Services\Tenant;
 
 use App\Models\KitchenTicketItem;
 use App\Models\KotDispatchRound;
-use App\Models\ProductionWasteEvent;
 use Carbon\CarbonImmutable;
 
 class KitchenPerformanceService
