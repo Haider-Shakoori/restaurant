@@ -148,7 +148,7 @@ class KitchenService
                         continue;
                     }
 
-                    $ticket->items()->create([
+                    $productionItem = $ticket->items()->create([
                         'order_item_id' => $item->id,
                         'item_name' => $item->item_name,
                         'quantity' => $quantity,
@@ -161,6 +161,15 @@ class KitchenService
                         'kitchen_instructions' => $item->kitchen_instructions,
                         'status' => $initialState,
                     ]);
+
+                    $this->inventory->reserveProduction($productionItem, $actor);
+
+                    if (
+                        ! $workflow['kitchen_queue_enabled']
+                        && ! $workflow['preparing_stage_enabled']
+                    ) {
+                        $this->inventory->commitProduction($productionItem, $actor);
+                    }
 
                     $item->update([
                         'dispatched_quantity' => (int) $item->dispatched_quantity + $quantity,
@@ -214,6 +223,10 @@ class KitchenService
             ]);
         }
 
+        foreach ($ticket->items as $productionItem) {
+            $this->inventory->commitProduction($productionItem, $actor);
+        }
+
         return $this->transition(
             $ticket,
             $actor,
@@ -234,6 +247,14 @@ class KitchenService
             : ($workflow['kitchen_queue_enabled']
                 ? [KitchenTicket::STATUS_QUEUED]
                 : [KitchenTicket::STATUS_ACTIVE]);
+
+        if (! $workflow['preparing_stage_enabled']) {
+            $ticket->loadMissing('items');
+
+            foreach ($ticket->items as $productionItem) {
+                $this->inventory->commitProduction($productionItem, $actor);
+            }
+        }
 
         return $this->transition(
             $ticket,
@@ -319,6 +340,8 @@ class KitchenService
             ]);
         }
 
+        $this->inventory->commitProduction($item, $actor);
+
         return $this->transitionItem(
             $item,
             $actor,
@@ -340,6 +363,10 @@ class KitchenService
             : ($workflow['kitchen_queue_enabled']
                 ? [KitchenTicketItem::STATUS_QUEUED]
                 : [KitchenTicketItem::STATUS_ACTIVE]);
+
+        if (! $workflow['preparing_stage_enabled']) {
+            $this->inventory->commitProduction($item, $actor);
+        }
 
         return $this->transitionItem(
             $item,
