@@ -49,6 +49,41 @@ public sealed class LocalDatabaseFactory
         await using var db = Create();
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await EnsureOrderingSchemaAsync(db, cancellationToken);
+        await EnsureMenuImageColumnAsync(cancellationToken);
+    }
+
+    private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(menu_items);";
+
+        var hasImageUrl = false;
+        await using (var reader = await pragma.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(
+                        reader.GetString(1),
+                        "ImageUrl",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    hasImageUrl = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasImageUrl)
+        {
+            return;
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE menu_items ADD COLUMN ImageUrl TEXT NULL;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task EnsureOrderingSchemaAsync(
