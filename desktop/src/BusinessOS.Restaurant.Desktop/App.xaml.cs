@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Windows;
 using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
+using BusinessOS.Restaurant.Desktop.Appearance;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
@@ -19,18 +20,70 @@ public partial class App : System.Windows.Application
     private CloudReconciliationProcessor? _cloudReconciliation;
     private HttpClient? _cloudReconciliationHttpClient;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        try
+        {
+            if (await InstallerLicenseBridge.TryHandleAsync(e.Args))
+            {
+                Shutdown(0);
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "installer-license-bridge");
+            Shutdown(2);
+            return;
+        }
+
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        ApplyStoredAppearance();
+
+        var licensing = new RestaurantLicenseCoordinator();
+        RestaurantLicenseStatus licenseStatus;
+
+        try
+        {
+            licenseStatus = await licensing.GetStatusAsync();
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "license-state");
+            licenseStatus = RestaurantLicenseStatus.Missing;
+        }
+
+        if (!licenseStatus.IsValid)
+        {
+            var activation = new ActivationWindow(licensing);
+            var activated = activation.ShowDialog();
+
+            if (activated != true)
+            {
+                Shutdown();
+                return;
+            }
+        }
 
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
 
         _ = InitializeServicesSafelyAsync();
+    }
+
+    private static void ApplyStoredAppearance()
+    {
+        var settings = new AppearanceSettingsStore().Load();
+        var theme = Enum.TryParse<AppearanceTheme>(settings.Theme, true, out var parsed)
+            ? parsed
+            : AppearanceTheme.Glass;
+        ThemeManager.Apply(theme);
     }
 
     private async Task InitializeServicesSafelyAsync()
