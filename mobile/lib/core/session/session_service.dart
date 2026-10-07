@@ -131,7 +131,10 @@ class SessionService {
     }
 
     final bootstrap = await _api.syncBootstrap(session);
-    await _database.applyBootstrap(bootstrap);
+    await _database.applyBootstrap(
+      bootstrap,
+      cursorScope: session.activeChannel.name,
+    );
 
     return activationTarget;
   }
