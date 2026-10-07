@@ -372,8 +372,8 @@ internal static class OperationalActionViews
             BorderThickness = new Thickness(1),
             AlternationCount = 2,
         };
-        grid.SetResourceReference(DataGrid.BackgroundProperty, "SurfaceBrush");
-        grid.SetResourceReference(DataGrid.BorderBrushProperty, "BorderBrush");
+        grid.SetResourceReference(System.Windows.Controls.DataGrid.BackgroundProperty, "SurfaceBrush");
+        grid.SetResourceReference(System.Windows.Controls.DataGrid.BorderBrushProperty, "BorderBrush");
         return grid;
     }
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new System.Windows.Data.Binding(property), Width = width };
