@@ -64,6 +64,25 @@ jobs:
           if ($fw -notmatch 'Profile Domain,Private') { throw "Firewall profile scope regression." }
           if ($fw -match 'Profile Public') { throw "Public firewall exposure is forbidden by default." }
 
+      - name: Smoke-test packaged Desktop startup
+        shell: pwsh
+        run: |
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          $process.Refresh()
+          if ($process.HasExited) {
+            $logRoot = Join-Path $env:LOCALAPPDATA "BusinessOS\Restaurant\logs"
+            if (Test-Path $logRoot) {
+              Get-ChildItem $logRoot -Filter "desktop-*.log" |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 1 |
+                ForEach-Object { Get-Content $_.FullName -Tail 200 }
+            }
+            throw "Packaged Restaurant Desktop exited during startup smoke test."
+          }
+          Stop-Process -Id $process.Id -Force
+
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4
         with:
