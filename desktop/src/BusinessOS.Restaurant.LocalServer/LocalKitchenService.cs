@@ -732,6 +732,9 @@ public sealed class LocalKitchenService
             else if (reservation?.Status == "committed")
             {
                 producedItems++;
+                kitchenItem.WastedAt ??= now;
+                kitchenItem.WasteReason ??= reason;
+                kitchenItem.WastedByUserId ??= actor.UserId;
             }
 
             kitchenItem.Status = "voided";
@@ -770,6 +773,7 @@ public sealed class LocalKitchenService
                 kitchen_items = kitchenItems.Length,
                 released_reservations = releasedReservations,
                 produced_items_not_returned = producedItems,
+                waste_records_created = producedItems,
             });
 
         await db.SaveChangesAsync(cancellationToken);
