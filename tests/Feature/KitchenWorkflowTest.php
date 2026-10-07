@@ -390,6 +390,107 @@ class KitchenWorkflowTest extends TestCase
             ->assertJsonPath('data.0.ready_count', 1);
     }
 
+    public function test_void_before_production_preserves_history_and_cancels_only_that_production(): void
+    {
+        $tenant = $this->createTenant('restaurant-void', 'void.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, , $food] = $this->seedRestaurant();
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01VOIDORDER000000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($order, $waiter, [
+            'client_line_id' => '01VOIDLINE0000000000000000001',
+            'menu_item_id' => $food->id,
+            'quantity' => 1,
+        ]);
+        $orders->submit($order, $waiter, 'void-round-1');
+
+        $production = KitchenTicketItem::query()->firstOrFail();
+        $voided = $kitchen->voidItem($production, $waiter, 'Guest changed mind');
+
+        $this->assertSame(KitchenTicketItem::STATUS_VOIDED, $voided->status);
+        $this->assertSame('Guest changed mind', $voided->void_reason);
+        $this->assertNotNull($voided->voided_at);
+        $this->assertSame(KitchenTicket::STATUS_CANCELLED, $voided->ticket->fresh()->status);
+        $this->assertSame(1, KitchenTicketItem::query()->count());
+    }
+
+    public function test_refire_is_retry_safe_and_creates_new_round_without_rewriting_original(): void
+    {
+        $tenant = $this->createTenant('restaurant-refire', 'refire.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, , $food] = $this->seedRestaurant();
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01REFIREORDER000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($order, $waiter, [
+            'client_line_id' => '01REFIRELINE0000000000000001',
+            'menu_item_id' => $food->id,
+            'quantity' => 1,
+        ]);
+        $orders->submit($order, $waiter, 'refire-original-round');
+
+        $original = KitchenTicketItem::query()->firstOrFail();
+        $original = $kitchen->startItem($original, $waiter);
+        $original = $kitchen->readyItem($original, $waiter);
+
+        $refire = $kitchen->refireItem($original, $waiter, 'Dropped plate', 'refire-op-001');
+        $retry = $kitchen->refireItem($original, $waiter, 'Dropped plate', 'refire-op-001');
+
+        $this->assertSame($refire->id, $retry->id);
+        $this->assertSame($original->id, $refire->refire_of_kitchen_ticket_item_id);
+        $this->assertSame(2, KotDispatchRound::query()->count());
+        $this->assertSame(2, KitchenTicket::query()->count());
+        $this->assertSame(2, KitchenTicketItem::query()->count());
+        $this->assertSame('Dropped plate', $refire->production_reason);
+        $this->assertNotSame($original->id, $refire->id);
+    }
+
+    public function test_ready_item_can_be_recalled_without_restoring_consumed_stock(): void
+    {
+        $tenant = $this->createTenant('restaurant-recall', 'recall.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, , $food] = $this->seedRestaurant();
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01RECALLORDER000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($order, $waiter, [
+            'client_line_id' => '01RECALLLINE0000000000000001',
+            'menu_item_id' => $food->id,
+            'quantity' => 1,
+        ]);
+        $orders->submit($order, $waiter, 'recall-round-1');
+
+        $production = KitchenTicketItem::query()->firstOrFail();
+        $production = $kitchen->startItem($production, $waiter);
+        $production = $kitchen->readyItem($production, $waiter);
+
+        $recalled = $kitchen->recallItem($production, $waiter, 'Needs garnish correction');
+
+        $this->assertSame(KitchenTicketItem::STATUS_PREPARING, $recalled->status);
+        $this->assertSame('Needs garnish correction', $recalled->recall_reason);
+        $this->assertNotNull($recalled->recalled_at);
+        $this->assertSame(Order::STATUS_PREPARING, $order->fresh()->status);
+    }
+
     /**
      * @return array{TenantUser, DiningTable, RestaurantBranch, MenuItem, MenuItem}
      */
