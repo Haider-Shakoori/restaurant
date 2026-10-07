@@ -1336,61 +1336,90 @@ public sealed class LocalSyncService
         JsonElement payload,
         CancellationToken cancellationToken)
     {
-        if (!payload.TryGetProperty("modifiers", out var modifiers) ||
-            modifiers.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            return new ResolvedModifiers(null, 0m);
-        }
+        var linkedGroupIds = await db.MenuItemModifierGroups
+            .Where(value => value.MenuItemId == menuItemId)
+            .OrderBy(value => value.SortOrder)
+            .Select(value => value.ModifierGroupId)
+            .ToArrayAsync(cancellationToken);
 
-        if (modifiers.ValueKind != JsonValueKind.Array)
-        {
-            throw new LocalSyncConflictException("invalid_payload", "modifiers must be an array.");
-        }
+        var groups = linkedGroupIds.Length == 0
+            ? []
+            : await db.ModifierGroups
+                .Where(value => linkedGroupIds.Contains(value.Id) && value.IsActive)
+                .AsNoTracking()
+                .ToArrayAsync(cancellationToken);
 
         var optionIds = new List<string>();
-        foreach (var selected in modifiers.EnumerateArray())
+        if (payload.TryGetProperty("modifiers", out var modifiers) &&
+            modifiers.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
         {
-            if (selected.ValueKind != JsonValueKind.Object ||
-                !selected.TryGetProperty("option_id", out var optionIdProperty) ||
-                optionIdProperty.ValueKind != JsonValueKind.String ||
-                string.IsNullOrWhiteSpace(optionIdProperty.GetString()))
+            if (modifiers.ValueKind != JsonValueKind.Array)
             {
-                throw new LocalSyncConflictException("invalid_payload", "Each modifier requires option_id.");
+                throw new LocalSyncConflictException("invalid_payload", "modifiers must be an array.");
             }
 
-            var optionId = optionIdProperty.GetString()!.Trim();
-            if (optionIds.Contains(optionId, StringComparer.Ordinal))
+            foreach (var selected in modifiers.EnumerateArray())
             {
-                throw new LocalSyncConflictException("invalid_payload", "A modifier option cannot be selected twice.");
+                if (selected.ValueKind != JsonValueKind.Object ||
+                    !selected.TryGetProperty("option_id", out var optionIdProperty) ||
+                    optionIdProperty.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(optionIdProperty.GetString()))
+                {
+                    throw new LocalSyncConflictException("invalid_payload", "Each modifier requires option_id.");
+                }
+
+                var optionId = optionIdProperty.GetString()!.Trim();
+                if (optionIds.Contains(optionId, StringComparer.Ordinal))
+                {
+                    throw new LocalSyncConflictException("invalid_payload", "A modifier option cannot be selected twice.");
+                }
+
+                optionIds.Add(optionId);
             }
-
-            optionIds.Add(optionId);
         }
 
-        if (optionIds.Count == 0)
-        {
-            return new ResolvedModifiers(null, 0m);
-        }
-
-        var options = await db.ModifierOptions
-            .Where(value => optionIds.Contains(value.Id) && value.IsActive)
-            .AsNoTracking()
-            .ToArrayAsync(cancellationToken);
+        var options = optionIds.Count == 0
+            ? []
+            : await db.ModifierOptions
+                .Where(value => optionIds.Contains(value.Id) && value.IsActive)
+                .AsNoTracking()
+                .ToArrayAsync(cancellationToken);
 
         if (options.Length != optionIds.Count)
         {
             throw new LocalSyncConflictException("invalid_payload", "One or more modifier options are unavailable.");
         }
 
-        var groupIds = options.Select(value => value.ModifierGroupId).Distinct(StringComparer.Ordinal).ToArray();
-        var allowedGroups = await db.MenuItemModifierGroups
-            .Where(value => value.MenuItemId == menuItemId && groupIds.Contains(value.ModifierGroupId))
-            .Select(value => value.ModifierGroupId)
-            .ToArrayAsync(cancellationToken);
-
-        if (allowedGroups.Distinct(StringComparer.Ordinal).Count() != groupIds.Length)
+        var allowedGroupIds = groups.Select(value => value.Id).ToHashSet(StringComparer.Ordinal);
+        if (options.Any(value => !allowedGroupIds.Contains(value.ModifierGroupId)))
         {
-            throw new LocalSyncConflictException("invalid_payload", "A selected modifier does not belong to this menu item.");
+            throw new LocalSyncConflictException(
+                "invalid_payload",
+                "A selected modifier does not belong to an active modifier group for this menu item.");
+        }
+
+        foreach (var group in groups)
+        {
+            var selectedCount = options.Count(value => value.ModifierGroupId == group.Id);
+
+            if (selectedCount < group.MinSelections)
+            {
+                throw new LocalSyncConflictException(
+                    "modifier_selection_required",
+                    $"{group.Name} requires at least {group.MinSelections} selection(s).");
+            }
+
+            if (group.MaxSelections > 0 && selectedCount > group.MaxSelections)
+            {
+                throw new LocalSyncConflictException(
+                    "modifier_selection_limit",
+                    $"{group.Name} allows at most {group.MaxSelections} selection(s).");
+            }
+        }
+
+        if (optionIds.Count == 0)
+        {
+            return new ResolvedModifiers(null, 0m);
         }
 
         var byId = options.ToDictionary(value => value.Id, StringComparer.Ordinal);
