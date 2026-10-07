@@ -550,6 +550,35 @@ class LocalDatabase implements SyncStore {
     });
   }
 
+  Future<void> enqueueKitchenItemOperation({
+    required String mutationId,
+    required String operation,
+    required String kitchenTicketItemId,
+    required String reason,
+  }) async {
+    const allowed = <String>{
+      'order.item.void',
+      'order.item.refire',
+      'order.item.recall',
+    };
+
+    if (!allowed.contains(operation)) {
+      throw ArgumentError.value(operation, 'operation');
+    }
+
+    await _db.transaction((txn) async {
+      await _enqueue(
+        txn,
+        mutationId: mutationId,
+        operation: operation,
+        payload: <String, Object?>{
+          'kitchen_ticket_item_id': kitchenTicketItemId,
+          'reason': reason,
+        },
+      );
+    });
+  }
+
   Future<bool> hasUnsentItems(String localOrderId) async {
     final rows = await _db.rawQuery(
       "SELECT COUNT(*) AS total FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
