@@ -648,6 +648,7 @@ public sealed class LocalSyncService
                     sku = item.Sku,
                     name = item.Name,
                     description = item.Description,
+                    image_url = item.ImageUrl,
                     price = item.Price.ToString("0.00"),
                     currency = item.Currency,
                     sort_order = item.SortOrder,

@@ -15,7 +15,7 @@ class LocalDatabase implements SyncStore {
     final root = await getDatabasesPath();
     final database = await openDatabase(
       p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -38,6 +38,7 @@ class LocalDatabase implements SyncStore {
             sku TEXT,
             name TEXT NOT NULL,
             description TEXT,
+            image_url TEXT,
             price TEXT NOT NULL,
             sort_order INTEGER NOT NULL DEFAULT 0,
             is_available INTEGER NOT NULL DEFAULT 1
@@ -123,6 +124,13 @@ class LocalDatabase implements SyncStore {
           'CREATE INDEX order_items_order_idx ON order_items(local_order_id)',
         );
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE menu_items ADD COLUMN image_url TEXT',
+          );
+        }
+      },
     );
 
     return LocalDatabase._(database);
@@ -155,13 +163,16 @@ class LocalDatabase implements SyncStore {
   }
 
   @override
-  Future<int> syncCursor() async {
-    final value = await systemState('sync_cursor');
+  Future<int> syncCursor({required String scope}) async {
+    final value = await systemState('sync_cursor_' + scope);
     return int.tryParse(value ?? '') ?? 0;
   }
 
   @override
-  Future<void> applyBootstrap(Map<String, Object?> data) async {
+  Future<void> applyBootstrap(
+    Map<String, Object?> data, {
+    required String cursorScope,
+  }) async {
     await _db.transaction((txn) async {
       await txn.delete('menu_items');
       await txn.delete('menu_categories');
@@ -196,7 +207,7 @@ class LocalDatabase implements SyncStore {
 
       await _setSettingTxn(
         txn,
-        'sync_cursor',
+        'sync_cursor_' + cursorScope,
         ((data['cursor'] as num?)?.toInt() ?? 0).toString(),
       );
       await _setSettingTxn(txn, 'server_locked', '0');
@@ -205,7 +216,10 @@ class LocalDatabase implements SyncStore {
   }
 
   @override
-  Future<void> applyPull(Map<String, Object?> data) async {
+  Future<void> applyPull(
+    Map<String, Object?> data, {
+    required String cursorScope,
+  }) async {
     await _db.transaction((txn) async {
       for (final rawChange in data['changes'] as List<Object?>? ?? const []) {
         final change = Map<String, Object?>.from(
@@ -216,7 +230,7 @@ class LocalDatabase implements SyncStore {
 
       await _setSettingTxn(
         txn,
-        'sync_cursor',
+        'sync_cursor_' + cursorScope,
         ((data['cursor'] as num?)?.toInt() ?? 0).toString(),
       );
       await _setSettingTxn(txn, 'server_locked', '0');
@@ -669,6 +683,7 @@ class LocalDatabase implements SyncStore {
         'sku': item['sku']?.toString(),
         'name': item['name']!.toString(),
         'description': item['description']?.toString(),
+        'image_url': item['image_url']?.toString(),
         'price': item['price']!.toString(),
         'sort_order': (item['sort_order'] as num?)?.toInt() ?? 0,
         'is_available': _boolInt(

@@ -274,6 +274,7 @@ public sealed class CloudReconciliationService
 
         if (string.Equals(change.Operation, "delete", StringComparison.Ordinal))
         {
+            await ApplyCatalogDeleteAsync(db, change, cancellationToken);
             return;
         }
 
@@ -305,7 +306,279 @@ public sealed class CloudReconciliationService
             case "daily_closing":
                 await ApplyDailyClosingAsync(db, payload, localId, cancellationToken);
                 break;
+            case "menu_category":
+                await ApplyMenuCategoryAsync(db, change.EntityId, payload, cancellationToken);
+                break;
+            case "menu_item":
+                await ApplyMenuItemAsync(db, change.EntityId, payload, cancellationToken);
+                break;
+            case "dining_table":
+                await ApplyDiningTableAsync(db, change.EntityId, payload, cancellationToken);
+                break;
         }
+    }
+
+    private static async Task ApplyCatalogDeleteAsync(
+        RestaurantDbContext db,
+        CloudPullChange change,
+        CancellationToken cancellationToken)
+    {
+        switch (change.EntityType)
+        {
+            case "menu_item":
+            {
+                var item = await db.MenuItems.SingleOrDefaultAsync(
+                    value => value.Id == change.EntityId,
+                    cancellationToken);
+                if (item is not null)
+                {
+                    item.IsAvailable = false;
+                    AddLanChange(db, "menu_item", item.Id, "delete", null);
+                }
+                break;
+            }
+            case "menu_category":
+            {
+                var category = await db.MenuCategories.SingleOrDefaultAsync(
+                    value => value.Id == change.EntityId,
+                    cancellationToken);
+                if (category is not null)
+                {
+                    category.IsActive = false;
+                    AddLanChange(db, "menu_category", category.Id, "delete", null);
+                }
+                break;
+            }
+            case "dining_table":
+            {
+                var table = await db.DiningTables.SingleOrDefaultAsync(
+                    value => value.Id == change.EntityId,
+                    cancellationToken);
+                if (table is not null)
+                {
+                    table.IsActive = false;
+                    AddLanChange(db, "dining_table", table.Id, "delete", null);
+                }
+                break;
+            }
+        }
+    }
+
+    private static async Task ApplyMenuCategoryAsync(
+        RestaurantDbContext db,
+        string cloudId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        var category = await db.MenuCategories.SingleOrDefaultAsync(
+            value => value.Id == cloudId,
+            cancellationToken);
+
+        if (category is null)
+        {
+            category = new LocalMenuCategory
+            {
+                Id = cloudId,
+                Name = String(payload, "name") ?? "Menu",
+            };
+            db.MenuCategories.Add(category);
+        }
+
+        category.Name = String(payload, "name") ?? category.Name;
+        category.SortOrder = Int(payload, "sort_order", category.SortOrder);
+        category.IsActive = Bool(payload, "is_active", true);
+
+        AddLanChange(db, "menu_category", category.Id, "upsert", new
+        {
+            id = category.Id,
+            name = category.Name,
+            sort_order = category.SortOrder,
+            is_active = category.IsActive,
+        });
+    }
+
+    private static async Task ApplyMenuItemAsync(
+        RestaurantDbContext db,
+        string cloudId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        var item = await db.MenuItems.SingleOrDefaultAsync(
+            value => value.Id == cloudId,
+            cancellationToken);
+
+        if (item is null)
+        {
+            item = new LocalMenuItem
+            {
+                Id = cloudId,
+                Name = String(payload, "name") ?? "Menu item",
+            };
+            db.MenuItems.Add(item);
+        }
+
+        item.MenuCategoryId = String(payload, "menu_category_id") ?? item.MenuCategoryId;
+        item.Sku = String(payload, "sku");
+        item.Name = String(payload, "name") ?? item.Name;
+        item.Description = String(payload, "description");
+        item.ImageUrl = String(payload, "image_url");
+        item.Price = Decimal(payload, "price", item.Price);
+        item.Currency = String(payload, "currency") ?? "AFN";
+        item.SortOrder = Int(payload, "sort_order", item.SortOrder);
+        item.IsAvailable = Bool(payload, "is_available", true);
+
+        AddLanChange(db, "menu_item", item.Id, "upsert", new
+        {
+            id = item.Id,
+            menu_category_id = item.MenuCategoryId,
+            sku = item.Sku,
+            name = item.Name,
+            description = item.Description,
+            image_url = item.ImageUrl,
+            price = item.Price.ToString("0.00"),
+            currency = item.Currency,
+            sort_order = item.SortOrder,
+            is_available = item.IsAvailable,
+        });
+    }
+
+    private static async Task ApplyDiningTableAsync(
+        RestaurantDbContext db,
+        string cloudId,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        var areaId = String(payload, "dining_area_id");
+        string? areaName = null;
+        string? branchId = null;
+        string? branchName = null;
+
+        if (payload.TryGetProperty("dining_area", out var areaPayload) &&
+            areaPayload.ValueKind == JsonValueKind.Object)
+        {
+            areaId = String(areaPayload, "id") ?? areaId;
+            areaName = String(areaPayload, "name");
+
+            if (areaPayload.TryGetProperty("branch", out var branchPayload) &&
+                branchPayload.ValueKind == JsonValueKind.Object)
+            {
+                branchId = String(branchPayload, "id");
+                branchName = String(branchPayload, "name");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(areaId))
+        {
+            return;
+        }
+
+        var area = await db.DiningAreas.SingleOrDefaultAsync(
+            value => value.Id == areaId,
+            cancellationToken);
+
+        branchId ??= area?.BranchId;
+
+        if (!string.IsNullOrWhiteSpace(branchId))
+        {
+            var branch = await db.Branches.SingleOrDefaultAsync(
+                value => value.Id == branchId,
+                cancellationToken);
+            if (branch is null)
+            {
+                branch = new LocalBranch
+                {
+                    Id = branchId,
+                    Code = branchId,
+                    Name = branchName ?? branchId,
+                    IsActive = true,
+                };
+                db.Branches.Add(branch);
+            }
+            else
+            {
+                branch.Name = branchName ?? branch.Name;
+                branch.IsActive = true;
+            }
+        }
+
+        if (area is null)
+        {
+            if (string.IsNullOrWhiteSpace(branchId))
+            {
+                return;
+            }
+
+            area = new LocalDiningArea
+            {
+                Id = areaId,
+                BranchId = branchId,
+                Name = areaName ?? "Dining area",
+                IsActive = true,
+            };
+            db.DiningAreas.Add(area);
+        }
+        else
+        {
+            area.Name = areaName ?? area.Name;
+            if (!string.IsNullOrWhiteSpace(branchId))
+            {
+                area.BranchId = branchId;
+            }
+            area.IsActive = true;
+        }
+
+        var table = await db.DiningTables.SingleOrDefaultAsync(
+            value => value.Id == cloudId,
+            cancellationToken);
+        if (table is null)
+        {
+            table = new LocalDiningTable
+            {
+                Id = cloudId,
+                DiningAreaId = area.Id,
+                Code = String(payload, "code") ?? cloudId,
+                Name = String(payload, "name") ?? "Table",
+                Status = String(payload, "status") ?? "available",
+            };
+            db.DiningTables.Add(table);
+        }
+
+        table.DiningAreaId = area.Id;
+        table.Code = String(payload, "code") ?? table.Code;
+        table.Name = String(payload, "name") ?? table.Name;
+        table.Capacity = Int(payload, "capacity", table.Capacity == 0 ? 4 : table.Capacity);
+        table.Status = String(payload, "status") ?? table.Status;
+        table.IsActive = Bool(payload, "is_active", true);
+
+        AddLanChange(db, "dining_table", table.Id, "upsert", new
+        {
+            id = table.Id,
+            code = table.Code,
+            name = table.Name,
+            capacity = table.Capacity,
+            status = table.Status,
+            is_active = table.IsActive,
+            area = new { id = area.Id, name = area.Name },
+            branch = new { id = area.BranchId, name = branchName ?? area.BranchId },
+        });
+    }
+
+    private static void AddLanChange(
+        RestaurantDbContext db,
+        string entityType,
+        string entityId,
+        string operation,
+        object? data)
+    {
+        db.Changes.Add(new LocalChange
+        {
+            EntityType = entityType,
+            EntityId = entityId,
+            Operation = operation,
+            OwnerUserId = null,
+            DataJson = data is null ? null : JsonSerializer.Serialize(data),
+            OccurredAtUtc = DateTimeOffset.UtcNow,
+        });
     }
 
     private async Task ApplyOrderAsync(

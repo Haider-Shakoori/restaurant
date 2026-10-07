@@ -565,6 +565,7 @@ class MobileSyncService
                     'sku' => $item->sku,
                     'name' => $item->name,
                     'description' => $item->description,
+                    'image_url' => $item->image_url,
                     'price' => $item->price,
                     'currency' => 'AFN',
                     'sort_order' => $item->sort_order,

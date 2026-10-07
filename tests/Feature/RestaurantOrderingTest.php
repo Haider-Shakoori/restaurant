@@ -57,6 +57,7 @@ class RestaurantOrderingTest extends TestCase
         $this->assertTrue(Schema::hasTable('dining_tables'));
         $this->assertTrue(Schema::hasTable('menu_categories'));
         $this->assertTrue(Schema::hasTable('menu_items'));
+        $this->assertTrue(Schema::hasColumn('menu_items', 'image_path'));
         $this->assertTrue(Schema::hasTable('orders'));
         $this->assertTrue(Schema::hasTable('order_items'));
         $this->assertTrue(Schema::hasTable('order_events'));

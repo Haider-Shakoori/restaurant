@@ -45,7 +45,8 @@ public sealed record MenuItemSnapshot(
     [property: JsonPropertyName("price")] decimal Price,
     [property: JsonPropertyName("currency")] string Currency,
     [property: JsonPropertyName("sort_order")] int SortOrder,
-    [property: JsonPropertyName("modifier_groups")] IReadOnlyList<ModifierGroupSnapshot> ModifierGroups);
+    [property: JsonPropertyName("modifier_groups")] IReadOnlyList<ModifierGroupSnapshot> ModifierGroups,
+    [property: JsonPropertyName("image_url")] string? ImageUrl = null);
 
 public sealed record ModifierGroupSnapshot(
     [property: JsonPropertyName("id")] string Id,

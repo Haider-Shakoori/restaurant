@@ -131,6 +131,7 @@ public sealed class OperationalSnapshotStore
                 itemEntity.Sku = item.Sku;
                 itemEntity.Name = item.Name;
                 itemEntity.Description = item.Description;
+                itemEntity.ImageUrl = item.ImageUrl;
                 itemEntity.Price = item.Price;
                 itemEntity.Currency = item.Currency;
                 itemEntity.SortOrder = item.SortOrder;

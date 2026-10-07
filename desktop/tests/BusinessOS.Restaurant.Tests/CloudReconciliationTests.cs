@@ -182,6 +182,75 @@ public sealed class CloudReconciliationTests
     }
 
     [Fact]
+    public async Task Cloud_menu_image_change_is_forwarded_to_LAN_change_stream()
+    {
+        var root = CreateTemporaryDirectory();
+
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+
+            await using (var db = factory.Create())
+            {
+                db.MenuCategories.Add(new LocalMenuCategory
+                {
+                    Id = "category-1",
+                    Name = "Mains",
+                    SortOrder = 1,
+                    IsActive = true,
+                });
+                db.MenuItems.Add(new LocalMenuItem
+                {
+                    Id = "menu-1",
+                    MenuCategoryId = "category-1",
+                    Sku = "FOOD-1",
+                    Name = "Kabuli Pulao",
+                    Price = 250m,
+                    Currency = "AFN",
+                    SortOrder = 1,
+                    IsAvailable = true,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            using var http = new HttpClient(new QueueHandler(
+                Json(HttpStatusCode.OK, """
+                {"data":{"server_time":"2026-10-07T18:00:01Z","cursor":31,"has_more":false,"changes":[{"sequence":31,"entity_type":"menu_item","entity_id":"menu-1","operation":"upsert","payload":{"id":"menu-1","menu_category_id":"category-1","sku":"FOOD-1","name":"Kabuli Pulao","description":"Rice and lamb","image_url":"https://restaurant.example.test/media/menu-items/menu-1","price":"275.00","is_available":true,"sort_order":1},"occurred_at":"2026-10-07T18:00:00Z","local_links":[]}]}}
+                """)));
+
+            var service = new CloudReconciliationService(
+                factory,
+                new CloudReconciliationClient(http));
+
+            var result = await service.RunOnceAsync(Activation(), Session());
+
+            Assert.Equal(1, result.Pulled);
+            Assert.Equal(31, result.Cursor);
+
+            await using var verify = factory.Create();
+            var item = await verify.MenuItems.SingleAsync();
+            var change = await verify.Changes.SingleAsync();
+
+            Assert.Equal(275m, item.Price);
+            Assert.Equal(
+                "https://restaurant.example.test/media/menu-items/menu-1",
+                item.ImageUrl);
+            Assert.Equal("menu_item", change.EntityType);
+            Assert.Equal("menu-1", change.EntityId);
+            Assert.Equal("upsert", change.Operation);
+            Assert.Contains(
+                "\"image_url\":\"https://restaurant.example.test/media/menu-items/menu-1\"",
+                change.DataJson,
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Cloud_waiter_order_imports_lines_kot_and_print_job_idempotently()
     {
         var root = CreateTemporaryDirectory();
