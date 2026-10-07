@@ -9,8 +9,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 #[Fillable([
     'menu_category_id',
@@ -46,13 +44,7 @@ class MenuItem extends Model
             return null;
         }
 
-        $storedUrl = Storage::disk('public')->url($this->image_path);
-
-        if (Str::startsWith($storedUrl, ['http://', 'https://'])) {
-            return $storedUrl;
-        }
-
-        return url($storedUrl);
+        return url('/media/menu-items/'.$this->getKey());
     }
 
     public function category(): BelongsTo
