@@ -361,21 +361,188 @@ internal static class OperationalActionViews
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
+
         var rows = await (from table in db.DiningTables.AsNoTracking()
                           join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
                           where table.IsActive
                           orderby area.SortOrder, table.Name
-                          select new TableChoice(table.Id, area.Name, table.Code, table.Name, table.Capacity, table.Status)).ToListAsync();
+                          select new TableChoice(table.Id, area.Name, table.Code, table.Name, table.Capacity, table.Status))
+            .ToListAsync();
 
+        var activeOrders = await (
+            from order in db.Orders.AsNoTracking()
+            join table in db.DiningTables.AsNoTracking() on order.DiningTableId equals table.Id
+            where order.ServiceType == "dine_in" &&
+                  order.Status != "closed" &&
+                  order.Status != "cancelled" &&
+                  order.Status != "billed"
+            orderby order.UpdatedAtUtc descending
+            select new TableOrderChoice(
+                order.Id,
+                order.ClientOrderId,
+                table.Id,
+                table.Name,
+                order.Status,
+                order.Total))
+            .ToListAsync();
+
+        var unsentLines = await (
+            from line in db.OrderItems.AsNoTracking()
+            join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
+            where order.ServiceType == "dine_in" &&
+                  line.KotRoundId == null &&
+                  (line.Status == "pending" || line.Status == "held")
+            orderby line.CreatedAtUtc
+            select new TableSplitLineChoice(
+                order.Id,
+                line.Id,
+                line.ItemName,
+                line.Quantity,
+                line.Status))
+            .ToListAsync();
+
+        var availableTables = rows
+            .Where(x => x.Status == "available")
+            .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
+            .ToList();
+
+        var workflow = new DesktopRestaurantWorkflowService();
         var root = new StackPanel();
-        root.Children.Add(Header("Dining floor", "Live table state shared with waiter phones/tablets over LAN."));
+        root.Children.Add(Header(
+            "Dining floor",
+            "Live table state shared over LAN. Transfer, merge and split preserve KOT history; split only moves lines not yet sent to production."));
+
         var grid = DataGrid(rows);
+        grid.MinHeight = 280;
         grid.Columns.Add(Column("Area", nameof(TableChoice.Area), 160));
         grid.Columns.Add(Column("Table", nameof(TableChoice.Name), 220));
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
         root.Children.Add(grid);
+
+        var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+        operations.Children.Add(Header(
+            "Table & order operations",
+            "Transfers keep the same order. Draft merge is intentionally conservative. Split moves only unsent pending/held lines so historical KOTs are never rewritten."));
+
+        var sourceOrderBox = Combo(activeOrders, "Display");
+        var targetTableBox = Combo(availableTables, "Label");
+        var operationStatus = new TextBlock
+        {
+            Foreground = Brushes.SlateGray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+
+        operations.Children.Add(Label("Transfer order"));
+        var transferRow = new WrapPanel();
+        sourceOrderBox.Width = 300;
+        targetTableBox.Width = 260;
+        var transfer = Button("Transfer table");
+        transferRow.Children.Add(sourceOrderBox);
+        transferRow.Children.Add(targetTableBox);
+        transferRow.Children.Add(transfer);
+        operations.Children.Add(transferRow);
+
+        var mergeTarget = Combo(activeOrders, "Display");
+        var mergeSource = Combo(activeOrders, "Display");
+        mergeTarget.Width = 300;
+        mergeSource.Width = 300;
+        var merge = Button("Merge draft orders");
+        operations.Children.Add(Label("Merge orders"));
+        var mergeRow = new WrapPanel();
+        mergeRow.Children.Add(mergeTarget);
+        mergeRow.Children.Add(mergeSource);
+        mergeRow.Children.Add(merge);
+        operations.Children.Add(mergeRow);
+
+        var splitSource = Combo(activeOrders, "Display");
+        var splitTarget = Combo(availableTables, "Label");
+        splitSource.Width = 300;
+        splitTarget.Width = 260;
+        var splitItems = new ListBox
+        {
+            SelectionMode = SelectionMode.Multiple,
+            Height = 140,
+            Margin = new Thickness(0, 4, 0, 8),
+            DisplayMemberPath = "Display",
+        };
+        var split = Button("Split selected items");
+        operations.Children.Add(Label("Split unsent items to another table"));
+        var splitHeader = new WrapPanel();
+        splitHeader.Children.Add(splitSource);
+        splitHeader.Children.Add(splitTarget);
+        operations.Children.Add(splitHeader);
+        operations.Children.Add(splitItems);
+        operations.Children.Add(split);
+        operations.Children.Add(operationStatus);
+
+        splitSource.SelectionChanged += (_, _) =>
+        {
+            if (splitSource.SelectedItem is TableOrderChoice order)
+            {
+                splitItems.ItemsSource = unsentLines.Where(x => x.OrderId == order.Id).ToList();
+            }
+            else
+            {
+                splitItems.ItemsSource = Array.Empty<TableSplitLineChoice>();
+            }
+        };
+
+        transfer.Click += async (_, _) =>
+        {
+            try
+            {
+                if (sourceOrderBox.SelectedItem is not TableOrderChoice order)
+                    throw new InvalidOperationException("Select an active dine-in order.");
+                if (targetTableBox.SelectedItem is not Choice target)
+                    throw new InvalidOperationException("Select an available target table.");
+
+                await workflow.TransferOrderAsync(order.Id, target.Id);
+                operationStatus.Text = $"{order.ClientOrderId} transferred to {target.Label}. Refresh to see the new floor state.";
+            }
+            catch (Exception ex) { operationStatus.Text = ex.Message; }
+        };
+
+        merge.Click += async (_, _) =>
+        {
+            try
+            {
+                if (mergeTarget.SelectedItem is not TableOrderChoice target)
+                    throw new InvalidOperationException("Select the target order.");
+                if (mergeSource.SelectedItem is not TableOrderChoice source)
+                    throw new InvalidOperationException("Select the source order.");
+
+                await workflow.MergeDraftOrdersAsync(target.Id, source.Id);
+                operationStatus.Text = $"{source.ClientOrderId} merged into {target.ClientOrderId}.";
+            }
+            catch (Exception ex) { operationStatus.Text = ex.Message; }
+        };
+
+        split.Click += async (_, _) =>
+        {
+            try
+            {
+                if (splitSource.SelectedItem is not TableOrderChoice source)
+                    throw new InvalidOperationException("Select the source order.");
+                if (splitTarget.SelectedItem is not Choice target)
+                    throw new InvalidOperationException("Select an available target table.");
+
+                var ids = splitItems.SelectedItems
+                    .Cast<TableSplitLineChoice>()
+                    .Select(x => x.OrderItemId)
+                    .ToArray();
+                if (ids.Length == 0)
+                    throw new InvalidOperationException("Select one or more unsent lines.");
+
+                await workflow.SplitUnsentItemsAsync(source.Id, target.Id, ids);
+                operationStatus.Text = $"{ids.Length} unsent line(s) split to {target.Label}. Existing KOT history was unchanged.";
+            }
+            catch (Exception ex) { operationStatus.Text = ex.Message; }
+        };
+
+        root.Children.Add(Card(operations));
         return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
@@ -1046,6 +1213,14 @@ internal static class OperationalActionViews
     private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total);
     private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
+    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total)
+    {
+        public string Display => $"{ClientOrderId} · {Table} · {Status} · AFN {Total:N2}";
+    }
+    private sealed record TableSplitLineChoice(string OrderId, string OrderItemId, string ItemName, int Quantity, string Status)
+    {
+        public string Display => $"{Quantity} × {ItemName} · {Status}";
+    }
     private sealed record KitchenItemCard(
         string ItemId,
         string TicketId,
