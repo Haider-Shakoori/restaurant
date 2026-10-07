@@ -78,10 +78,11 @@ class PlatformTenantOwnerAccessTest extends TestCase
                 'temporary_password_confirmation' => $password,
             ])
             ->assertRedirect('http://localhost/platform/restaurants/'.$business->id)
-            ->assertSessionHas('owner_credentials', fn (array $credentials): bool =>
-                $credentials['email'] === 'owner@grill.test'
-                && $credentials['password'] === $password
-                && $credentials['domain'] === 'grill.restaurant.test'
+            ->assertSessionHas(
+                'owner_credentials',
+                fn (array $credentials): bool => $credentials['email'] === 'owner@grill.test'
+                    && $credentials['password'] === $password
+                    && $credentials['domain'] === 'grill.restaurant.test'
             );
 
         $this->assertSame('owner@grill.test', $business->fresh()->email);
