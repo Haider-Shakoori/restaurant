@@ -12,6 +12,7 @@ use App\Models\Order;
 use App\Models\RestaurantBranch;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Services\Tenant\OrderOperationsService;
 use App\Services\Tenant\OrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -221,6 +222,126 @@ class RestaurantOrderingTest extends TestCase
         $this->assertSame('Large', $line->modifiers_snapshot[0]['options'][0]['option_name']);
         $this->assertSame('Peanut allergy', $line->allergy_instructions);
         $this->assertSame('Sauce on side', $line->kitchen_instructions);
+    }
+
+    public function test_active_order_can_transfer_table_and_move_only_unsent_quantity(): void
+    {
+        $tenant = $this->createTenant('restaurant-ops', 'ops.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $menuItem] = $this->seedFloor('80.00');
+        $area = $table->diningArea;
+        $targetTable = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-02',
+            'name' => 'Table 2',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+        $thirdTable = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-03',
+            'name' => 'Table 3',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        $orders = app(OrderService::class);
+        $operations = app(OrderOperationsService::class);
+
+        $source = $orders->open($waiter, [
+            'client_order_id' => '01OPSOURCE000000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 2,
+        ]);
+        $orders->addItem($source, $waiter, [
+            'client_line_id' => '01OPLINE00000000000000000001',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 1,
+        ]);
+        $source = $orders->submit($source, $waiter, 'op-round-1');
+
+        $unsent = $orders->addItem($source, $waiter, [
+            'client_line_id' => '01OPLINE00000000000000000002',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 2,
+        ]);
+
+        $target = $orders->open($waiter, [
+            'client_order_id' => '01OPTARGET000000000000000001',
+            'dining_table_id' => $targetTable->id,
+            'guest_count' => 1,
+        ]);
+
+        $result = $operations->moveUnsentItem(
+            $source->fresh(),
+            $unsent,
+            $target,
+            $waiter,
+            1,
+        );
+
+        $this->assertSame(1, $unsent->fresh()->quantity);
+        $this->assertSame(1, $result['target_line']->quantity);
+        $this->assertSame('80.00', $source->fresh()->total);
+        $this->assertSame('80.00', $target->fresh()->total);
+
+        $transferred = $operations->transferTable($target->fresh(), $thirdTable, $waiter);
+
+        $this->assertSame($thirdTable->id, $transferred->dining_table_id);
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $targetTable->fresh()->status);
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $thirdTable->fresh()->status);
+    }
+
+    public function test_draft_orders_can_merge_without_duplicating_financial_lines(): void
+    {
+        $tenant = $this->createTenant('restaurant-merge', 'merge.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $menuItem] = $this->seedFloor('60.00');
+        $targetTable = DiningTable::query()->create([
+            'dining_area_id' => $table->dining_area_id,
+            'code' => 'T-02',
+            'name' => 'Table 2',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        $orders = app(OrderService::class);
+        $operations = app(OrderOperationsService::class);
+
+        $source = $orders->open($waiter, [
+            'client_order_id' => '01MERGESOURCE000000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($source, $waiter, [
+            'client_line_id' => '01MERGELINE00000000000000001',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 2,
+        ]);
+
+        $target = $orders->open($waiter, [
+            'client_order_id' => '01MERGETARGET000000000000001',
+            'dining_table_id' => $targetTable->id,
+            'guest_count' => 1,
+        ]);
+        $orders->addItem($target, $waiter, [
+            'client_line_id' => '01MERGELINE00000000000000002',
+            'menu_item_id' => $menuItem->id,
+            'quantity' => 1,
+        ]);
+
+        $merged = $operations->mergeOrders($source, $target, $waiter);
+
+        $this->assertSame(Order::STATUS_CANCELLED, $source->fresh()->status);
+        $this->assertSame('0.00', $source->fresh()->total);
+        $this->assertSame('180.00', $merged->total);
+        $this->assertSame(2, $merged->items()->count());
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
     }
 
     /**
