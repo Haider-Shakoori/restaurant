@@ -919,6 +919,84 @@ public sealed class KotRealignmentTests
     }
 
     [Fact]
+    public async Task Post_kot_void_after_production_marks_waste_and_does_not_return_inventory()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+
+            var stockJson = JsonSerializer.SerializeToElement(
+                await inventory.CreateItemAsync(
+                    "CHICKEN-VOID-WASTE",
+                    "Chicken Void Waste",
+                    "g",
+                    "kg",
+                    1000m,
+                    0m,
+                    Manager(),
+                    CancellationToken.None));
+            var stockId = stockJson.GetProperty("id").GetString()!;
+            await inventory.AdjustAsync(
+                "branch-1",
+                stockId,
+                1000m,
+                "OPENING-VOID-WASTE",
+                "Opening stock",
+                Manager(),
+                CancellationToken.None);
+            await inventory.CreateRecipeVersionAsync(
+                "branch-1",
+                "item-grill",
+                "Grilled Chicken",
+                [new LocalRecipeComponentRequest(stockId, 250m)],
+                Manager(),
+                CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory, inventory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD-VOID-WASTE", "LINE-VOID-WASTE", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND-VOID-WASTE", "order.kot.send", new
+            {
+                client_order_id = "ORDER-1",
+            });
+
+            string ticketId;
+            await using (var db = factory.Create())
+            {
+                ticketId = (await db.KitchenTickets.SingleAsync()).Id;
+            }
+
+            await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+
+            var result = await PushOneAsync(sync, Manager(), "VOID-AFTER-START", "order.item.void", new
+            {
+                client_order_id = "ORDER-1",
+                client_line_id = "LINE-VOID-WASTE",
+                reason = "Burned after production started",
+            });
+            Assert.Equal("accepted", result.GetProperty("status").GetString());
+
+            await using var finalDb = factory.Create();
+            var kitchenItem = await finalDb.KitchenTicketItems.SingleAsync();
+            Assert.Equal("voided", kitchenItem.Status);
+            Assert.NotNull(kitchenItem.WastedAt);
+            Assert.Equal("Burned after production started", kitchenItem.WasteReason);
+            Assert.Equal(750m, (await finalDb.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Single(await finalDb.InventoryConsumptions.ToArrayAsync());
+            Assert.Equal("committed", (await finalDb.InventoryReservations.SingleAsync()).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Waste_records_produced_loss_without_returning_stock()
     {
         var root = CreateTemporaryDirectory();
