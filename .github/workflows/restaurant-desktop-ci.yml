@@ -51,7 +51,7 @@ jobs:
         working-directory: .
         shell: pwsh
         run: |
-          python -c "from PIL import Image; p=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; im=Image.open(p); im.verify(); print(f'Validated {p}')"
+          python -c "from PIL import Image; app=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; setup=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantInstallerBackground.png'; a=Image.open(app); a.verify(); s=Image.open(setup); assert s.format == 'PNG', f'Installer background must be PNG, got {s.format}'; s.verify(); print(f'Validated {app} and installer-safe PNG {setup}')"
 
       - name: Restore
         run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
@@ -137,6 +137,47 @@ jobs:
             Select-Object -First 1
           if (-not $setup) { throw "Branded Restaurant installer was not produced." }
           if ($setup.Length -lt 1MB) { throw "Restaurant installer is unexpectedly small." }
+
+      - name: Smoke-test branded installer startup
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem "installer/output" -Filter "BusinessOS-Restaurant-Setup-*-win-x64.exe" |
+            Select-Object -First 1
+          if (-not $setup) { throw "Restaurant installer missing before runtime smoke test." }
+
+          $smokeDir = Join-Path $env:RUNNER_TEMP "BusinessOS-Restaurant-Installer-Smoke"
+          $smokeLog = Join-Path $env:RUNNER_TEMP "restaurant-installer-smoke.log"
+          Remove-Item $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item $smokeLog -Force -ErrorAction SilentlyContinue
+
+          $args = @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/SP-",
+            "/DIR=$smokeDir",
+            "/LOG=$smokeLog"
+          )
+
+          $process = Start-Process -FilePath $setup.FullName -ArgumentList $args -PassThru -Wait
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path $smokeLog) { Get-Content $smokeLog -Tail 200 }
+            throw "Branded Restaurant installer failed runtime smoke test with exit code $($process.ExitCode)."
+          }
+
+          if (Test-Path $smokeLog) {
+            $logText = Get-Content $smokeLog -Raw
+            if ($logText -match "Bitmap image is not valid") {
+              Write-Host $logText
+              throw "Installer runtime still reports an invalid bitmap image."
+            }
+          }
+
+          $installedExe = Join-Path $smokeDir "BusinessOS.Restaurant.Desktop.exe"
+          if (!(Test-Path $installedExe)) {
+            if (Test-Path $smokeLog) { Get-Content $smokeLog -Tail 200 }
+            throw "Installer runtime smoke test did not install the Restaurant executable."
+          }
 
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4
