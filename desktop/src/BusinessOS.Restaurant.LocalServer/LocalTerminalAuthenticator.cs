@@ -181,6 +181,26 @@ public sealed class LocalTerminalAuthenticator
             var name = user.GetProperty("name").GetString() ?? string.Empty;
             var role = user.GetProperty("role").GetString() ?? string.Empty;
 
+            // Import the verified cloud bootstrap before checking the local staff
+            // cache. A fresh Desktop database otherwise rejects the first mobile
+            // terminal even though the cloud already authenticated that waiter.
+            try
+            {
+                var envelope = JsonSerializer.Deserialize<OperationalBootstrapEnvelope>(
+                    root.GetRawText(),
+                    JsonOptions);
+
+                if (envelope is not null)
+                {
+                    await _snapshotStore.ApplyAsync(envelope.Data, cancellationToken);
+                }
+            }
+            catch (JsonException)
+            {
+                // The staff check below remains the final gate. An existing
+                // valid local snapshot can still authenticate if parsing fails.
+            }
+
             await _databaseFactory.EnsureCreatedAsync(cancellationToken);
             await using var db = _databaseFactory.Create();
 
@@ -260,22 +280,6 @@ public sealed class LocalTerminalAuthenticator
                     cancellationToken))
             {
                 return null;
-            }
-
-            try
-            {
-                var envelope = JsonSerializer.Deserialize<OperationalBootstrapEnvelope>(
-                    root.GetRawText(),
-                    JsonOptions);
-
-                if (envelope is not null)
-                {
-                    await _snapshotStore.ApplyAsync(envelope.Data, cancellationToken);
-                }
-            }
-            catch (JsonException)
-            {
-                // Pairing is valid even if reference-data refresh cannot be parsed.
             }
 
             return ToPrincipal(existing);
