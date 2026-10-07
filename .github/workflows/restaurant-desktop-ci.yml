@@ -146,37 +146,64 @@ jobs:
             Select-Object -First 1
           if (-not $setup) { throw "Restaurant installer missing before runtime smoke test." }
 
-          # Launch the exact branded installer normally. The regression we are
-          # guarding against ("Bitmap image is not valid") appears immediately
-          # while Inno Setup creates the wizard, before license activation.
-          $process = Start-Process -FilePath $setup.FullName -PassThru
+          # Inno Setup's bootstrap EXE launches the real wizard in a temporary
+          # child process. Inspect every matching Setup process so we validate
+          # the actual wizard/error dialog rather than only the bootstrapper.
+          $before = @(Get-Process | Select-Object -ExpandProperty Id)
+          $bootstrap = Start-Process -FilePath $setup.FullName -PassThru
           try {
             Start-Sleep -Seconds 8
-            $process.Refresh()
 
-            if ($process.HasExited) {
-              throw "Branded Restaurant installer exited during wizard startup."
+            $candidates = @(
+              Get-Process -ErrorAction SilentlyContinue |
+                Where-Object {
+                  ($before -notcontains $_.Id) -and
+                  (
+                    $_.Id -eq $bootstrap.Id -or
+                    $_.ProcessName -like "$($setup.BaseName)*" -or
+                    $_.ProcessName -like "BusinessOS-Restaurant-Setup*"
+                  )
+                }
+            )
+
+            if (-not $candidates) {
+              throw "Branded Restaurant installer did not leave a Setup process running."
             }
 
-            $title = $process.MainWindowTitle
-            Write-Host "Installer window title: '$title'"
+            $titles = @(
+              $candidates |
+                ForEach-Object {
+                  $_.Refresh()
+                  [PSCustomObject]@{
+                    Id = $_.Id
+                    ProcessName = $_.ProcessName
+                    Title = $_.MainWindowTitle
+                  }
+                }
+            )
 
-            if ([string]::IsNullOrWhiteSpace($title)) {
-              throw "Branded Restaurant installer did not create a visible wizard window."
-            }
+            $titles | Format-Table -AutoSize | Out-String | Write-Host
+            $visibleTitles = @($titles | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Title) })
 
-            if ($title -match "(?i)^Error$|Bitmap image is not valid") {
+            if ($visibleTitles | Where-Object { $_.Title -match "(?i)^Error$|Bitmap image is not valid" }) {
               throw "Installer runtime opened an error dialog instead of the setup wizard."
             }
 
-            if ($title -notmatch "(?i)BusinessOS Restaurant|Setup") {
-              throw "Unexpected installer window title: '$title'."
+            if (-not ($visibleTitles | Where-Object { $_.Title -match "(?i)BusinessOS Restaurant|Setup" })) {
+              throw "The Inno Setup child process did not expose the expected Restaurant setup window."
             }
           }
           finally {
-            if (-not $process.HasExited) {
-              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-            }
+            Get-Process -ErrorAction SilentlyContinue |
+              Where-Object {
+                ($before -notcontains $_.Id) -and
+                (
+                  $_.Id -eq $bootstrap.Id -or
+                  $_.ProcessName -like "$($setup.BaseName)*" -or
+                  $_.ProcessName -like "BusinessOS-Restaurant-Setup*"
+                )
+              } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
       - name: Upload unsigned CI release
