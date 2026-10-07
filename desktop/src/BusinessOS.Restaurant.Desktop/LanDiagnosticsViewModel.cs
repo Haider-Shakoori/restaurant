@@ -151,12 +151,21 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 TerminalSummary = "0 terminals";
                 StatusMessage = "Activate this Windows installation before enabling the local restaurant host.";
                 Terminals.Clear();
+                PairingDetails = "Pairing details are unavailable until Desktop activation is complete.";
                 return;
             }
 
             var diagnostics = await _terminalManagement.GetDiagnosticsAsync(
                 activation.Snapshot.TenantId);
             var terminals = await _terminalManagement.GetTerminalsAsync();
+            var connection = await new ConnectionSettingsStore().LoadAsync();
+            var port = connection?.LocalServerPort ?? 8787;
+            var descriptor = LocalServerDescriptor.Create(
+                new LocalServerOptions(activation.Snapshot.TenantId, port));
+            var localAddress = descriptor.BaseUrls.FirstOrDefault();
+            PairingDetails = localAddress is null
+                ? "No private LAN address is currently available. Mobile devices can use the cloud endpoint."
+                : $"Local: {localAddress}\nCloud: {connection?.TenantBaseUrl ?? activation.TenantBaseUrl}\nMode: Automatic (LAN preferred)";
 
             NetworkMode = diagnostics.NetworkMode switch
             {
