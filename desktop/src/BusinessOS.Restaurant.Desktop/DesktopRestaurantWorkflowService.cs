@@ -97,7 +97,40 @@ public sealed class DesktopRestaurantWorkflowService
         string? kitchenInstructions,
         IReadOnlyList<string>? modifierOptionIds,
         CancellationToken token = default)
+        => _ = await AddItemDetailedAsync(
+            clientOrderId,
+            menuItemId,
+            quantity,
+            notes,
+            seatNumber,
+            courseNumber,
+            courseName,
+            held,
+            priority,
+            allergyInstructions,
+            kitchenInstructions,
+            modifierOptionIds,
+            token);
+
+    public async Task SubmitOrderAsync(string clientOrderId, CancellationToken token = default)
+        => await SendKotAsync(clientOrderId, token);
+
+    public async Task<string> AddItemDetailedAsync(
+        string clientOrderId,
+        string menuItemId,
+        int quantity,
+        string? notes,
+        int? seatNumber,
+        int? courseNumber,
+        string? courseName,
+        bool held,
+        string priority,
+        string? allergyInstructions,
+        string? kitchenInstructions,
+        IReadOnlyList<string>? modifierOptionIds,
+        CancellationToken token = default)
     {
+        var clientLineId = $"LINE-{Guid.CreateVersion7():N}";
         var modifiers = (modifierOptionIds ?? [])
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => new { option_id = value })
@@ -106,7 +139,7 @@ public sealed class DesktopRestaurantWorkflowService
         var payload = JsonSerializer.SerializeToElement(new
         {
             client_order_id = clientOrderId,
-            client_line_id = $"LINE-{Guid.CreateVersion7():N}",
+            client_line_id = clientLineId,
             menu_item_id = menuItemId,
             quantity,
             notes,
@@ -120,10 +153,8 @@ public sealed class DesktopRestaurantWorkflowService
             modifiers,
         });
         await PushSingleAsync("order.item.add", payload, token);
+        return clientLineId;
     }
-
-    public async Task SubmitOrderAsync(string clientOrderId, CancellationToken token = default)
-        => await SendKotAsync(clientOrderId, token);
 
     public async Task SendKotAsync(string clientOrderId, CancellationToken token = default)
     {
