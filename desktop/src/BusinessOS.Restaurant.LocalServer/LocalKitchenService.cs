@@ -71,24 +71,19 @@ public sealed class LocalKitchenService
             return existing;
         }
 
-        var table = await db.DiningTables
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var area = await db.DiningAreas
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
+        var branchId = await ResolveBranchIdAsync(db, order, cancellationToken);
 
         var nextRound = (await db.KotRounds
             .Where(value => value.OrderId == order.Id)
             .Select(value => (int?)value.RoundNumber)
             .MaxAsync(cancellationToken) ?? 0) + 1;
 
-        var sequence = await NextKotNumberAsync(db, area.BranchId, cancellationToken);
+        var sequence = await NextKotNumberAsync(db, branchId, cancellationToken);
         var round = new LocalKotRound
         {
             Id = Guid.CreateVersion7().ToString("N"),
             OrderId = order.Id,
-            BranchId = area.BranchId,
+            BranchId = branchId,
             RoundNumber = nextRound,
             DisplayNumber = sequence.DisplayNumber,
             BusinessDate = sequence.BusinessDate,
@@ -127,11 +122,7 @@ public sealed class LocalKitchenService
             return;
         }
 
-        var table = await db.DiningTables
-            .SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
-        var area = await db.DiningAreas
-            .SingleAsync(value => value.Id == table.DiningAreaId, cancellationToken);
-        var branchId = area.BranchId;
+        var branchId = await ResolveBranchIdAsync(db, order, cancellationToken);
 
         var menuItemIds = items
             .Select(value => value.MenuItemId)
@@ -896,6 +887,33 @@ public sealed class LocalKitchenService
 
     private sealed record KotSequence(int DisplayNumber, DateOnly BusinessDate, string KotNumber);
 
+    private static async Task<string> ResolveBranchIdAsync(
+        RestaurantDbContext db,
+        LocalOrder order,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(order.BranchId))
+        {
+            return order.BranchId;
+        }
+
+        if (string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            throw new LocalSyncConflictException(
+                "dependency_missing",
+                "Order branch context is unavailable.");
+        }
+
+        var table = await db.DiningTables.SingleAsync(
+            value => value.Id == order.DiningTableId,
+            cancellationToken);
+        var area = await db.DiningAreas.SingleAsync(
+            value => value.Id == table.DiningAreaId,
+            cancellationToken);
+        order.BranchId = area.BranchId;
+        return area.BranchId;
+    }
+
     private static async Task<LocalKitchenStation> EnsureGeneralStationAsync(
         RestaurantDbContext db,
         string branchId,
@@ -934,9 +952,14 @@ public sealed class LocalKitchenService
         LocalOrder order,
         CancellationToken cancellationToken)
     {
-        var table = await db.DiningTables
-            .AsNoTracking()
-            .SingleAsync(value => value.Id == order.DiningTableId, cancellationToken);
+        LocalDiningTable? table = null;
+        if (!string.IsNullOrWhiteSpace(order.DiningTableId))
+        {
+            table = await db.DiningTables
+                .AsNoTracking()
+                .SingleOrDefaultAsync(value => value.Id == order.DiningTableId, cancellationToken);
+        }
+
         var items = await db.KitchenTicketItems
             .Where(value => value.KitchenTicketId == ticket.Id)
             .AsNoTracking()
@@ -947,7 +970,14 @@ public sealed class LocalKitchenService
         builder.AppendLine($"KOT: {ticket.KotNumber ?? ticket.TicketNumber}");
         builder.AppendLine($"ROUND: {ticket.RoundNumber}");
         builder.AppendLine($"STATION: {station.Name}");
-        builder.AppendLine($"TABLE: {table.Name} ({table.Code})");
+        builder.AppendLine(order.ServiceType switch
+        {
+            "takeaway" => $"TAKEAWAY: {order.ServiceReference ?? order.ClientOrderId}",
+            "delivery" => $"DELIVERY: {order.ServiceReference ?? order.ClientOrderId}",
+            "counter" => $"COUNTER: {order.ServiceReference ?? order.ClientOrderId}",
+            _ when table is not null => $"DINE-IN: {table.Name} ({table.Code})",
+            _ => "DINE-IN",
+        });
         builder.AppendLine($"WAITER: {order.WaiterName}");
         builder.AppendLine($"PRIORITY: {ticket.Priority.ToUpperInvariant()}");
         builder.AppendLine($"TIME: {ticket.QueuedAt:yyyy-MM-dd HH:mm:ss}");
