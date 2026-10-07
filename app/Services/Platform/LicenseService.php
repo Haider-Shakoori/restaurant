@@ -238,7 +238,7 @@ class LicenseService
 
                 if ($limit !== null && $activeOtherDevices >= $limit) {
                     throw ValidationException::withMessages([
-                        'device_uid' => "The restaurant has reached its {$limit}-".($mobile ? "mobile waiter" : "device")." activation limit.",
+                        'device_uid' => "The restaurant has reached its {$limit}-".($mobile ? 'mobile waiter' : 'device').' activation limit.',
                     ]);
                 }
 
