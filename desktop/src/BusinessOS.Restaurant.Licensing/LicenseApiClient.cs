@@ -14,16 +14,6 @@ public sealed class LicenseApiClient
         _httpClient = httpClient;
     }
 
-    public Task<DesktopLicenseResolveResponse> ResolveDesktopLicenseAsync(
-        Uri platformBaseUri,
-        string licenseKey,
-        CancellationToken cancellationToken = default) =>
-        PostAsync<DesktopLicenseResolveRequest, DesktopLicenseResolveResponse>(
-            BuildUri(platformBaseUri, "api/v1/desktop/license/resolve"),
-            new DesktopLicenseResolveRequest(licenseKey.Trim()),
-            null,
-            cancellationToken);
-
     public Task<LicensePublicKeyResponse> GetPublicKeyAsync(
         Uri tenantBaseUri,
         CancellationToken cancellationToken = default) =>
