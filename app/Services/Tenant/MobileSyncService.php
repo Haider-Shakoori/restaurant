@@ -38,8 +38,15 @@ class MobileSyncService
 
     public const OP_ORDER_ITEM_RECALL = 'order.item.recall';
 
+    public const OP_ORDER_TABLE_TRANSFER = 'order.table.transfer';
+
+    public const OP_ORDER_ITEM_MOVE = 'order.item.move';
+
+    public const OP_ORDER_MERGE = 'order.merge';
+
     public function __construct(
         private readonly OrderService $orders,
+        private readonly OrderOperationsService $orderOperations,
         private readonly KitchenService $kitchen,
         private readonly SyncDeviceService $devices,
         private readonly RestaurantSettingsService $settings,
@@ -251,6 +258,9 @@ class MobileSyncService
             self::OP_ORDER_ITEM_VOID => $this->voidProduction($user, $payload),
             self::OP_ORDER_ITEM_REFIRE => $this->refireProduction($user, $payload, $mutationId),
             self::OP_ORDER_ITEM_RECALL => $this->recallProduction($user, $payload),
+            self::OP_ORDER_TABLE_TRANSFER => $this->transferTable($user, $payload),
+            self::OP_ORDER_ITEM_MOVE => $this->moveOrderItem($user, $payload),
+            self::OP_ORDER_MERGE => $this->mergeOrders($user, $payload),
             default => throw ValidationException::withMessages([
                 'operation' => 'Unsupported offline operation.',
             ]),
@@ -440,6 +450,100 @@ class MobileSyncService
             'data' => [
                 'item' => $recalled->toArray(),
                 'order' => $this->orderSnapshot($recalled->ticket->order->fresh()),
+            ],
+        ];
+    }
+
+    private function transferTable(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'client_order_id' => ['required', 'string', 'max:40'],
+            'target_table_id' => ['required', 'string', 'max:40'],
+        ])->validate();
+
+        $order = Order::query()
+            ->where('client_order_id', $data['client_order_id'])
+            ->firstOrFail();
+        $target = DiningTable::query()->findOrFail($data['target_table_id']);
+
+        $this->authorizeOrder($user, $order);
+        $order = $this->orderOperations->transferTable($order, $target, $user);
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $order->id,
+            'client_entity_id' => $order->client_order_id,
+            'data' => $this->orderSnapshot($order),
+        ];
+    }
+
+    private function moveOrderItem(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'source_client_order_id' => ['required', 'string', 'max:40'],
+            'target_client_order_id' => ['required', 'string', 'max:40'],
+            'client_line_id' => ['required', 'string', 'max:40'],
+            'quantity' => ['required', 'integer', 'min:1'],
+        ])->validate();
+
+        $source = Order::query()
+            ->where('client_order_id', $data['source_client_order_id'])
+            ->firstOrFail();
+        $target = Order::query()
+            ->where('client_order_id', $data['target_client_order_id'])
+            ->firstOrFail();
+        $line = $source->items()
+            ->where('client_line_id', $data['client_line_id'])
+            ->firstOrFail();
+
+        $this->authorizeOrder($user, $source);
+        $this->authorizeOrder($user, $target);
+
+        $result = $this->orderOperations->moveUnsentItem(
+            $source,
+            $line,
+            $target,
+            $user,
+            (int) $data['quantity'],
+        );
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $source->id,
+            'client_entity_id' => $source->client_order_id,
+            'data' => [
+                'source' => $this->orderSnapshot($result['source']),
+                'target' => $this->orderSnapshot($result['target']),
+            ],
+        ];
+    }
+
+    private function mergeOrders(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'source_client_order_id' => ['required', 'string', 'max:40'],
+            'target_client_order_id' => ['required', 'string', 'max:40'],
+        ])->validate();
+
+        $source = Order::query()
+            ->where('client_order_id', $data['source_client_order_id'])
+            ->firstOrFail();
+        $target = Order::query()
+            ->where('client_order_id', $data['target_client_order_id'])
+            ->firstOrFail();
+
+        $this->authorizeOrder($user, $source);
+        $this->authorizeOrder($user, $target);
+
+        $target = $this->orderOperations->mergeOrders($source, $target, $user);
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $target->id,
+            'client_entity_id' => $target->client_order_id,
+            'data' => [
+                'source' => $this->orderSnapshot($source->fresh()),
+                'target' => $this->orderSnapshot($target),
             ],
         ];
     }
