@@ -137,6 +137,9 @@ public sealed class LocalRestaurantSettingsService
             db.RestaurantSettings.Remove(legacy);
         }
 
+        // Flush inside the still-open transaction so the no-tracking snapshot sees
+        // newly inserted canonical settings rather than falling back to legacy rows/defaults.
+        await db.SaveChangesAsync(cancellationToken);
         var snapshot = await GetAsync(db, cancellationToken);
         db.Changes.Add(new LocalChange
         {

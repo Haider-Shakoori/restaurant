@@ -456,9 +456,11 @@ public sealed class KotRealignmentTests
             Assert.False(await finalDb.RestaurantSettings.AnyAsync(
                 x => x.Key == LocalRestaurantSettingsService.LegacyRequireManagerVoidApprovalKey));
 
-            var outbox = await finalDb.CloudOutbox
+            var outbox = (await finalDb.CloudOutbox
+                    .Where(x => x.EntityType == "restaurant_settings")
+                    .ToArrayAsync())
                 .OrderByDescending(x => x.OccurredAtUtc)
-                .FirstAsync(x => x.EntityType == "restaurant_settings");
+                .First();
             Assert.Contains("require_manager_approval_post_kot_void", outbox.PayloadJson, StringComparison.Ordinal);
             Assert.Contains("\"negative_stock_policy\":\"warn\"", outbox.PayloadJson, StringComparison.Ordinal);
             Assert.DoesNotContain("require_manager_approval_for_post_kot_void", outbox.PayloadJson, StringComparison.Ordinal);

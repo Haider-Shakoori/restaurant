@@ -233,6 +233,8 @@ public sealed class LocalSyncService
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        const string mutationSavepoint = "before_mutation";
+        await transaction.CreateSavepointAsync(mutationSavepoint, cancellationToken);
 
         Dictionary<string, object?> result;
 
@@ -254,6 +256,11 @@ public sealed class LocalSyncService
         }
         catch (LocalSyncConflictException conflict)
         {
+            // A rejected/conflicting mutation must be idempotently recorded without
+            // committing any domain writes that occurred before the conflict surfaced.
+            await transaction.RollbackToSavepointAsync(mutationSavepoint, cancellationToken);
+            db.ChangeTracker.Clear();
+
             result = BasicResult(
                 mutation.MutationId,
                 conflict.Status,
@@ -1159,12 +1166,14 @@ public sealed class LocalSyncService
             .AsNoTracking()
             .ToArrayAsync(cancellationToken);
 
-        var tickets = await db.KitchenTickets
+        var tickets = (await db.KitchenTickets
             .Where(value => value.OrderId == order.Id)
             .OrderBy(value => value.RoundNumber)
-            .ThenBy(value => value.QueuedAt)
             .AsNoTracking()
-            .ToArrayAsync(cancellationToken);
+            .ToArrayAsync(cancellationToken))
+            .OrderBy(value => value.RoundNumber)
+            .ThenBy(value => value.QueuedAt)
+            .ToArray();
         var ticketSnapshots = new List<object>(tickets.Length);
 
         foreach (var ticket in tickets)
