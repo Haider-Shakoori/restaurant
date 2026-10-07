@@ -6,6 +6,7 @@ use App\Models\DeviceActivation;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\KitchenStation;
+use App\Models\KitchenTicketItem;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\MenuItemKitchenRoute;
@@ -27,8 +28,19 @@ class MobileSyncService
 
     public const OP_ORDER_SUBMIT = 'order.submit';
 
+    public const OP_ORDER_KOT_SEND = 'order.kot.send';
+
+    public const OP_ORDER_COURSE_FIRE = 'order.course.fire';
+
+    public const OP_ORDER_ITEM_VOID = 'order.item.void';
+
+    public const OP_ORDER_ITEM_REFIRE = 'order.item.refire';
+
+    public const OP_ORDER_ITEM_RECALL = 'order.item.recall';
+
     public function __construct(
         private readonly OrderService $orders,
+        private readonly KitchenService $kitchen,
         private readonly SyncDeviceService $devices,
         private readonly RestaurantSettingsService $settings,
     ) {}
@@ -234,7 +246,11 @@ class MobileSyncService
         return match ($operation) {
             self::OP_ORDER_OPEN => $this->openOrder($user, $payload),
             self::OP_ORDER_ITEM_ADD => $this->addOrderItem($user, $payload),
-            self::OP_ORDER_SUBMIT => $this->submitOrder($user, $payload, $mutationId),
+            self::OP_ORDER_SUBMIT, self::OP_ORDER_KOT_SEND => $this->submitOrder($user, $payload, $mutationId),
+            self::OP_ORDER_COURSE_FIRE => $this->fireCourse($user, $payload, $mutationId),
+            self::OP_ORDER_ITEM_VOID => $this->voidProduction($user, $payload),
+            self::OP_ORDER_ITEM_REFIRE => $this->refireProduction($user, $payload, $mutationId),
+            self::OP_ORDER_ITEM_RECALL => $this->recallProduction($user, $payload),
             default => throw ValidationException::withMessages([
                 'operation' => 'Unsupported offline operation.',
             ]),
@@ -319,6 +335,99 @@ class MobileSyncService
             'entity_id' => $order->id,
             'client_entity_id' => $order->client_order_id,
             'data' => $this->orderSnapshot($order),
+        ];
+    }
+
+    private function fireCourse(TenantUser $user, array $payload, string $mutationId): array
+    {
+        $data = Validator::make($payload, [
+            'client_order_id' => ['required', 'string', 'max:40'],
+            'course_number' => ['required', 'integer', 'min:1', 'max:99'],
+            'priority' => ['nullable', 'in:normal,rush'],
+        ])->validate();
+
+        $order = Order::query()
+            ->where('client_order_id', $data['client_order_id'])
+            ->firstOrFail();
+
+        $this->authorizeOrder($user, $order);
+
+        $order = $this->orders->fireCourse(
+            $order,
+            $user,
+            (int) $data['course_number'],
+            $mutationId,
+            (string) ($data['priority'] ?? 'normal'),
+        );
+
+        return [
+            'entity_type' => 'order',
+            'entity_id' => $order->id,
+            'client_entity_id' => $order->client_order_id,
+            'data' => $this->orderSnapshot($order),
+        ];
+    }
+
+    private function voidProduction(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'kitchen_ticket_item_id' => ['required', 'string', 'max:40'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ])->validate();
+
+        $item = KitchenTicketItem::query()
+            ->with('ticket.order')
+            ->findOrFail($data['kitchen_ticket_item_id']);
+
+        $this->authorizeOrder($user, $item->ticket->order);
+        $item = $this->kitchen->voidItem($item, $user, $data['reason']);
+
+        return [
+            'entity_type' => 'kitchen_ticket_item',
+            'entity_id' => $item->id,
+            'data' => $item->toArray(),
+        ];
+    }
+
+    private function refireProduction(TenantUser $user, array $payload, string $mutationId): array
+    {
+        $data = Validator::make($payload, [
+            'kitchen_ticket_item_id' => ['required', 'string', 'max:40'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ])->validate();
+
+        $item = KitchenTicketItem::query()
+            ->with('ticket.order')
+            ->findOrFail($data['kitchen_ticket_item_id']);
+
+        $this->authorizeOrder($user, $item->ticket->order);
+        $refire = $this->kitchen->refireItem($item, $user, $data['reason'], $mutationId);
+
+        return [
+            'entity_type' => 'kitchen_ticket_item',
+            'entity_id' => $refire->id,
+            'data' => $refire->toArray(),
+        ];
+    }
+
+    private function recallProduction(TenantUser $user, array $payload): array
+    {
+        $data = Validator::make($payload, [
+            'kitchen_ticket_item_id' => ['required', 'string', 'max:40'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ])->validate();
+
+        $item = KitchenTicketItem::query()
+            ->with('ticket.order')
+            ->findOrFail($data['kitchen_ticket_item_id']);
+
+        $this->authorizeOrder($user, $item->ticket->order);
+        $recalled = $this->kitchen->recallItem($item, $user, $data['reason']);
+
+        return [
+            'entity_type' => 'kitchen_ticket_item',
+            'entity_id' => $recalled->id,
+            'data' => $recalled->toArray(),
         ];
     }
 
@@ -512,6 +621,7 @@ class MobileSyncService
                 'seat_number' => $item->seat_number,
                 'course_number' => $item->course_number,
                 'course_name' => $item->course_name,
+                'course_state' => $item->course_state,
                 'modifiers_snapshot' => $item->modifiers_snapshot,
                 'allergy_instructions' => $item->allergy_instructions,
                 'kitchen_instructions' => $item->kitchen_instructions,
