@@ -13,6 +13,7 @@ use App\Http\Controllers\Tenant\DailyClosingController;
 use App\Http\Controllers\Tenant\DesktopReconciliationController;
 use App\Http\Controllers\Tenant\DiningTableController;
 use App\Http\Controllers\Tenant\ExpoController;
+use App\Http\Controllers\Tenant\FireOrderCourseController;
 use App\Http\Controllers\Tenant\InventoryItemController;
 use App\Http\Controllers\Tenant\JournalEntryController;
 use App\Http\Controllers\Tenant\KitchenRouteController;
@@ -281,6 +282,9 @@ Route::middleware($tenantMiddleware)
 
                 Route::post('/orders/{order}/submit', SubmitOrderController::class)
                     ->name('tenant.api.orders.submit');
+
+                Route::post('/orders/{order}/courses/{courseNumber}/fire', FireOrderCourseController::class)
+                    ->name('tenant.api.orders.courses.fire');
 
                 Route::post('/orders/{order}/serve', ServeOrderController::class)
                     ->name('tenant.api.orders.serve');
