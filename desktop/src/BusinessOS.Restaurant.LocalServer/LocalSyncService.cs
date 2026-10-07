@@ -600,10 +600,11 @@ public sealed class LocalSyncService
                 "This order can no longer send kitchen production.");
         }
 
-        var unsent = await db.OrderItems
+        var unsent = (await db.OrderItems
             .Where(value => value.OrderId == order.Id && value.Status == "pending")
+            .ToArrayAsync(cancellationToken))
             .OrderBy(value => value.CreatedAtUtc)
-            .ToArrayAsync(cancellationToken);
+            .ToArray();
 
         if (unsent.Length == 0)
         {
