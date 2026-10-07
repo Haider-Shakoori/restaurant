@@ -6,6 +6,7 @@ use App\Models\DiningTable;
 use App\Models\MenuItem;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\RestaurantBranch;
 use App\Models\TenantUser;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -21,7 +22,10 @@ class OrderService
         return DB::connection('tenant')->transaction(function () use ($actor, $data): Order {
             $order = $this->open($actor, [
                 'client_order_id' => $data['client_order_id'] ?? null,
-                'dining_table_id' => $data['dining_table_id'],
+                'branch_id' => $data['branch_id'] ?? null,
+                'service_type' => $data['service_type'] ?? Order::SERVICE_DINE_IN,
+                'service_reference' => $data['service_reference'] ?? null,
+                'dining_table_id' => $data['dining_table_id'] ?? null,
                 'guest_count' => $data['guest_count'] ?? 1,
                 'notes' => $data['notes'] ?? null,
             ]);
@@ -32,6 +36,12 @@ class OrderService
                     'menu_item_id' => $line['menu_item_id'],
                     'quantity' => $line['quantity'],
                     'notes' => $line['notes'] ?? null,
+                    'seat_number' => $line['seat_number'] ?? null,
+                    'course_number' => $line['course_number'] ?? null,
+                    'course_name' => $line['course_name'] ?? null,
+                    'modifiers' => $line['modifiers'] ?? [],
+                    'allergy_instructions' => $line['allergy_instructions'] ?? null,
+                    'kitchen_instructions' => $line['kitchen_instructions'] ?? null,
                 ]);
             }
 
@@ -40,6 +50,7 @@ class OrderService
             }
 
             return $order->fresh()->load([
+                'branch',
                 'table.diningArea',
                 'waiter',
                 'items',
@@ -55,36 +66,74 @@ class OrderService
                 $existing = Order::query()->where('client_order_id', $data['client_order_id'])->first();
 
                 if ($existing) {
-                    return $existing->load(['table.diningArea', 'items', 'kotRounds.tickets.station']);
+                    return $existing->load(['branch', 'table.diningArea', 'items', 'kotRounds.tickets.station']);
                 }
             }
 
-            $table = DiningTable::query()->lockForUpdate()->findOrFail($data['dining_table_id']);
+            $serviceType = $data['service_type'] ?? Order::SERVICE_DINE_IN;
 
-            if (! $table->is_active || in_array($table->status, [
-                DiningTable::STATUS_DISABLED,
-                DiningTable::STATUS_RESERVED,
-            ], true)) {
+            if (! in_array($serviceType, Order::SERVICE_TYPES, true)) {
                 throw ValidationException::withMessages([
-                    'dining_table_id' => 'This table is not currently available for walk-in ordering.',
+                    'service_type' => 'The selected restaurant service type is invalid.',
                 ]);
             }
 
-            $activeOrder = Order::query()
-                ->where('dining_table_id', $table->id)
-                ->whereIn('status', Order::ACTIVE_STATUSES)
-                ->lockForUpdate()
-                ->first();
+            $table = null;
+            $branchId = $data['branch_id'] ?? null;
 
-            if ($activeOrder) {
-                throw ValidationException::withMessages([
-                    'dining_table_id' => 'This table already has an active order.',
-                ]);
+            if ($serviceType === Order::SERVICE_DINE_IN) {
+                if (empty($data['dining_table_id'])) {
+                    throw ValidationException::withMessages([
+                        'dining_table_id' => 'A dining table is required for dine-in orders.',
+                    ]);
+                }
+
+                $table = DiningTable::query()
+                    ->with('diningArea')
+                    ->lockForUpdate()
+                    ->findOrFail($data['dining_table_id']);
+
+                if (! $table->is_active || in_array($table->status, [
+                    DiningTable::STATUS_DISABLED,
+                    DiningTable::STATUS_RESERVED,
+                ], true)) {
+                    throw ValidationException::withMessages([
+                        'dining_table_id' => 'This table is not currently available for walk-in ordering.',
+                    ]);
+                }
+
+                $activeOrder = Order::query()
+                    ->where('dining_table_id', $table->id)
+                    ->whereIn('status', Order::ACTIVE_STATUSES)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($activeOrder) {
+                    throw ValidationException::withMessages([
+                        'dining_table_id' => 'This table already has an active order.',
+                    ]);
+                }
+
+                $branchId = $table->diningArea->branch_id;
+            } else {
+                if (empty($branchId)) {
+                    throw ValidationException::withMessages([
+                        'branch_id' => 'A branch is required for takeaway, delivery and counter orders.',
+                    ]);
+                }
+
+                RestaurantBranch::query()
+                    ->whereKey($branchId)
+                    ->where('is_active', true)
+                    ->firstOrFail();
             }
 
             $order = Order::query()->create([
                 'client_order_id' => $data['client_order_id'] ?? null,
-                'dining_table_id' => $table->id,
+                'branch_id' => $branchId,
+                'service_type' => $serviceType,
+                'service_reference' => $data['service_reference'] ?? null,
+                'dining_table_id' => $table?->id,
                 'waiter_id' => $waiter->getKey(),
                 'status' => Order::STATUS_DRAFT,
                 'guest_count' => $data['guest_count'] ?? 1,
@@ -94,13 +143,18 @@ class OrderService
                 'opened_at' => now(),
             ]);
 
-            $table->update(['status' => DiningTable::STATUS_OCCUPIED]);
+            if ($table) {
+                $table->update(['status' => DiningTable::STATUS_OCCUPIED]);
+            }
 
             $this->event($order, $waiter, 'order.opened', null, Order::STATUS_DRAFT, [
-                'table_id' => $table->id,
+                'branch_id' => $branchId,
+                'table_id' => $table?->id,
+                'service_type' => $serviceType,
+                'service_reference' => $order->service_reference,
             ]);
 
-            return $order->load(['table.diningArea', 'items']);
+            return $order->load(['branch', 'table.diningArea', 'items']);
         });
     }
 
@@ -126,6 +180,7 @@ class OrderService
             }
 
             $menuItem = MenuItem::query()
+                ->with(['modifierGroups.options'])
                 ->whereKey($data['menu_item_id'])
                 ->where('is_available', true)
                 ->first();
@@ -136,8 +191,13 @@ class OrderService
                 ]);
             }
 
+            [$modifierSnapshot, $modifierDeltaMinor] = $this->resolveModifiers(
+                $menuItem,
+                (array) ($data['modifiers'] ?? []),
+            );
+
             $quantity = (int) $data['quantity'];
-            $unitPrice = (string) $menuItem->price;
+            $unitPrice = $this->fromMinor($this->toMinor((string) $menuItem->price) + $modifierDeltaMinor);
             $lineTotal = $this->multiplyMoney($unitPrice, $quantity);
 
             $line = $order->items()->create([
@@ -149,6 +209,12 @@ class OrderService
                 'dispatched_quantity' => 0,
                 'line_total' => $lineTotal,
                 'notes' => $data['notes'] ?? null,
+                'seat_number' => $data['seat_number'] ?? null,
+                'course_number' => $data['course_number'] ?? null,
+                'course_name' => $data['course_name'] ?? null,
+                'modifiers_snapshot' => $modifierSnapshot ?: null,
+                'allergy_instructions' => $data['allergy_instructions'] ?? null,
+                'kitchen_instructions' => $data['kitchen_instructions'] ?? null,
                 'status' => 'pending',
             ]);
 
@@ -163,6 +229,8 @@ class OrderService
                 'menu_item_id' => $menuItem->id,
                 'quantity' => $quantity,
                 'unsent_quantity' => $quantity,
+                'seat_number' => $line->seat_number,
+                'course_number' => $line->course_number,
             ]);
 
             return $line->fresh();
@@ -216,6 +284,7 @@ class OrderService
             $this->kitchen->dispatch($order->fresh(), $actor, $mutationId, $priority);
 
             return $order->fresh()->load([
+                'branch',
                 'table.diningArea',
                 'waiter',
                 'items',
@@ -224,6 +293,66 @@ class OrderService
                 'kitchenTickets.station',
             ]);
         });
+    }
+
+    private function resolveModifiers(MenuItem $menuItem, array $selections): array
+    {
+        $selectedIds = collect($selections)
+            ->pluck('option_id')
+            ->filter()
+            ->map(fn ($id) => (string) $id)
+            ->unique()
+            ->values();
+
+        $matched = collect();
+        $snapshot = [];
+        $deltaMinor = 0;
+
+        foreach ($menuItem->modifierGroups as $group) {
+            if (! $group->is_active) {
+                continue;
+            }
+
+            $selected = $group->options
+                ->where('is_active', true)
+                ->whereIn('id', $selectedIds)
+                ->values();
+
+            $count = $selected->count();
+
+            if ($count < $group->min_selections || $count > $group->max_selections) {
+                throw ValidationException::withMessages([
+                    'modifiers' => "Select between {$group->min_selections} and {$group->max_selections} options for {$group->name}.",
+                ]);
+            }
+
+            if ($count === 0) {
+                continue;
+            }
+
+            foreach ($selected as $option) {
+                $matched->push((string) $option->id);
+                $deltaMinor += $this->toMinor((string) $option->price_delta);
+            }
+
+            $snapshot[] = [
+                'group_id' => $group->id,
+                'group_name' => $group->name,
+                'options' => $selected->map(fn ($option) => [
+                    'option_id' => $option->id,
+                    'option_name' => $option->name,
+                    'price_delta' => $option->price_delta,
+                ])->all(),
+            ];
+        }
+
+        if ($matched->unique()->count() !== $selectedIds->count()) {
+            throw ValidationException::withMessages([
+                'modifiers' => 'One or more selected modifiers are invalid or unavailable for this menu item.',
+            ]);
+        }
+
+        return [$snapshot, $deltaMinor];
     }
 
     private function event(
@@ -246,11 +375,22 @@ class OrderService
 
     private function multiplyMoney(string $amount, int $quantity): string
     {
+        return $this->fromMinor($this->toMinor($amount) * $quantity);
+    }
+
+    private function toMinor(string $amount): int
+    {
         [$whole, $fraction] = array_pad(explode('.', $amount, 2), 2, '0');
         $fraction = substr(str_pad($fraction, 2, '0'), 0, 2);
-        $minor = ((int) $whole * 100) + (int) $fraction;
-        $total = $minor * $quantity;
 
-        return intdiv($total, 100).'.'.str_pad((string) ($total % 100), 2, '0', STR_PAD_LEFT);
+        return ((int) $whole * 100) + (int) $fraction;
+    }
+
+    private function fromMinor(int $amount): string
+    {
+        $sign = $amount < 0 ? '-' : '';
+        $absolute = abs($amount);
+
+        return $sign.intdiv($absolute, 100).'.'.str_pad((string) ($absolute % 100), 2, '0', STR_PAD_LEFT);
     }
 }
