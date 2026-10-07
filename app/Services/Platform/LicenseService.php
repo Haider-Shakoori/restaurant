@@ -9,6 +9,7 @@ use App\Models\Business;
 use App\Models\DeviceActivation;
 use App\Models\LicenseKey;
 use App\Models\OfflineLease;
+use App\Models\TenantUser;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -395,6 +396,39 @@ class LicenseService
             $admin,
             'device.revoked',
             'Device activation revoked. Existing offline leases expire at their signed expiry.',
+        );
+    }
+
+    public function revokeMobileDeviceForTenant(
+        DeviceActivation $device,
+        TenantUser $user,
+    ): void {
+        if (! $this->isMobilePlatform((string) $device->platform)) {
+            throw ValidationException::withMessages([
+                'device' => 'Only waiter mobile activations can be revoked from restaurant settings.',
+            ]);
+        }
+
+        if ($device->status === DeviceStatus::Revoked) {
+            return;
+        }
+
+        $device->update([
+            'status' => DeviceStatus::Revoked,
+            'revoked_at' => now(),
+        ]);
+
+        $this->recordEvent(
+            $device->business,
+            $device->licenseKey,
+            $device,
+            null,
+            'device.revoked_by_tenant',
+            'Waiter mobile activation revoked by restaurant management.',
+            [
+                'tenant_user_id' => $user->id,
+                'tenant_user_public_id' => $user->public_id,
+            ],
         );
     }
 
