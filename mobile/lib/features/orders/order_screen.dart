@@ -136,6 +136,227 @@ class _OrderScreenState extends State<OrderScreen> {
     }
   }
 
+  Future<String?> _askReason(String title) async {
+    final controller = TextEditingController();
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Reason',
+            hintText: 'Enter the operational reason',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isNotEmpty) {
+                Navigator.of(context).pop(value);
+              }
+            },
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+
+    controller.dispose();
+    return reason;
+  }
+
+  Future<void> _runProductionAction(
+    String action,
+    Map<String, Object?> item,
+  ) async {
+    final id = item['id']?.toString();
+    if (id == null || id.isEmpty || _working) return;
+
+    final reason = await _askReason(
+      switch (action) {
+        'void' => 'Void kitchen item',
+        'refire' => 'Re-fire kitchen item',
+        _ => 'Recall ready item',
+      },
+    );
+
+    if (reason == null) return;
+
+    setState(() => _working = true);
+
+    try {
+      switch (action) {
+        case 'void':
+          await widget.dependencies.orders.voidProduction(
+            kitchenTicketItemId: id,
+            reason: reason,
+          );
+          break;
+        case 'refire':
+          await widget.dependencies.orders.refireProduction(
+            kitchenTicketItemId: id,
+            reason: reason,
+          );
+          break;
+        case 'recall':
+          await widget.dependencies.orders.recallProduction(
+            kitchenTicketItemId: id,
+            reason: reason,
+          );
+          break;
+      }
+
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+    } on Object catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _showKotRound(Map<String, Object?> round) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) {
+        final tickets = round['tickets'] as List<Object?>? ?? const [];
+
+        return SafeArea(
+          child: FractionallySizedBox(
+            heightFactor: 0.78,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+              children: [
+                Text(
+                  (round['kot_number']?.toString() ?? 'KOT') +
+                      ' · Round ' +
+                      ((round['sequence'] as num?)?.toInt() ?? 0).toString(),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...tickets.whereType<Map<Object?, Object?>>().expand((rawTicket) {
+                  final ticket = Map<String, Object?>.from(rawTicket);
+                  final station = ticket['station'] is Map<Object?, Object?>
+                      ? Map<String, Object?>.from(
+                          ticket['station']! as Map<Object?, Object?>,
+                        )
+                      : const <String, Object?>{};
+                  final items =
+                      ticket['items'] as List<Object?>? ?? const <Object?>[];
+
+                  return <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 6),
+                      child: Text(
+                        station['name']?.toString() ?? 'Kitchen',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    ...items.whereType<Map<Object?, Object?>>().map((rawItem) {
+                      final item = Map<String, Object?>.from(rawItem);
+                      final status = item['status']?.toString() ?? 'unknown';
+
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      item['item_name']?.toString() ?? 'Item',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'x' + (item['quantity'] ?? 1).toString(),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Chip(label: Text(status)),
+                                ],
+                              ),
+                              if (item['production_reason'] != null)
+                                Text(
+                                  item['production_reason'].toString(),
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  if (!const {'voided', 'cancelled', 'completed'}
+                                      .contains(status))
+                                    OutlinedButton(
+                                      onPressed: _working
+                                          ? null
+                                          : () {
+                                              Navigator.of(context).pop();
+                                              _runProductionAction('void', item);
+                                            },
+                                      child: const Text('Void'),
+                                    ),
+                                  if (status == 'ready')
+                                    OutlinedButton(
+                                      onPressed: _working
+                                          ? null
+                                          : () {
+                                              Navigator.of(context).pop();
+                                              _runProductionAction(
+                                                'recall',
+                                                item,
+                                              );
+                                            },
+                                      child: const Text('Recall'),
+                                    ),
+                                  if (const {'ready', 'completed', 'voided'}
+                                      .contains(status))
+                                    FilledButton.tonal(
+                                      onPressed: _working
+                                          ? null
+                                          : () {
+                                              Navigator.of(context).pop();
+                                              _runProductionAction(
+                                                'refire',
+                                                item,
+                                              );
+                                            },
+                                      child: const Text('Re-fire'),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ];
+                }),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _submit() async {
     if (_working) return;
     setState(() => _working = true);
@@ -688,7 +909,7 @@ class _OrderScreenState extends State<OrderScreen> {
                   final number = round['kot_number']?.toString() ?? 'KOT';
                   final priority = round['priority']?.toString() ?? 'normal';
 
-                  return Chip(
+                  return ActionChip(
                     avatar: priority == 'rush'
                         ? const Icon(
                             Icons.bolt_rounded,
@@ -697,6 +918,7 @@ class _OrderScreenState extends State<OrderScreen> {
                           )
                         : const Icon(Icons.receipt_long_rounded, size: 16),
                     label: Text('R$sequence · $number'),
+                    onPressed: () => _showKotRound(round),
                   );
                 }).toList(),
               ),
