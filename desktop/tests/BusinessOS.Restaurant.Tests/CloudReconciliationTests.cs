@@ -317,12 +317,11 @@ public sealed class CloudReconciliationTests
             """;
 
             var responseJson =
-                $"""
-                {"data":{"server_time":"2026-10-07T05:02:00Z","cursor":21,"has_more":false,"changes":[
-                  {"sequence":20,"entity_type":"order","entity_id":"cloud-order-1","operation":"upsert","payload":{{orderPayload}},"occurred_at":"2026-10-07T05:01:00Z","local_links":[]},
-                  {"sequence":21,"entity_type":"order","entity_id":"cloud-order-1","operation":"upsert","payload":{{orderPayload}},"occurred_at":"2026-10-07T05:01:30Z","local_links":[]}
-                ]}}
-                """;
+                """{"data":{"server_time":"2026-10-07T05:02:00Z","cursor":21,"has_more":false,"changes":[{"sequence":20,"entity_type":"order","entity_id":"cloud-order-1","operation":"upsert","payload":""" +
+                orderPayload +
+                ""","occurred_at":"2026-10-07T05:01:00Z","local_links":[]},{"sequence":21,"entity_type":"order","entity_id":"cloud-order-1","operation":"upsert","payload":""" +
+                orderPayload +
+                ""","occurred_at":"2026-10-07T05:01:30Z","local_links":[]}]}}""";
 
             using var http = new HttpClient(new QueueHandler(Json(HttpStatusCode.OK, responseJson)));
             var service = new CloudReconciliationService(
