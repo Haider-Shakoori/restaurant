@@ -19,7 +19,12 @@ class SubmitOrderController extends Controller
         $user = $request->user();
 
         return response()->json([
-            'data' => $orders->submit($order, $user),
+            'data' => $orders->submit(
+                $order,
+                $user,
+                $request->header('Idempotency-Key'),
+                $request->string('priority', 'normal')->toString(),
+            ),
         ]);
     }
 }
