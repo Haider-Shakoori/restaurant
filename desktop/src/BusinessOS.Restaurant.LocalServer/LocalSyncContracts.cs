@@ -14,6 +14,10 @@ public sealed record LocalSyncMutationRequest(
     [property: JsonPropertyName("payload")] JsonElement Payload);
 
 
+public sealed record LocalKitchenRefireRequest(
+    [property: JsonPropertyName("client_refire_id")] string ClientRefireId,
+    [property: JsonPropertyName("reason")] string Reason);
+
 public sealed record LocalPrinterBindingRequest(
     [property: JsonPropertyName("printer_name")] string PrinterName,
     [property: JsonPropertyName("copies")] int Copies = 1,
