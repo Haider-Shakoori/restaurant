@@ -152,7 +152,8 @@ class TenantWebPortalTest extends TestCase
             ->assertOk()
             ->assertSee('New Order / Take Order')
             ->assertSee('Kabuli Pulao')
-            ->assertSee('Table 1');
+            ->assertSee('Table 1')
+            ->assertSee('@click="addItem(items.find(item => item.id ===', false);
 
         $this->post("http://{$domain}/orders/take", [
             'dining_table_id' => $table->id,
