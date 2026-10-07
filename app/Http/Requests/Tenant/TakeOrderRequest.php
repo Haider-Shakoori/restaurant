@@ -17,6 +17,7 @@ class TakeOrderRequest extends FormRequest
     {
         return [
             'existing_order_id' => ['nullable', 'string', 'exists:orders,id'],
+            'client_order_id' => ['nullable', 'string', 'max:80'],
             'client_mutation_id' => ['nullable', 'string', 'max:80'],
             'branch_id' => ['nullable', 'string', 'exists:branches,id'],
             'service_type' => ['required', Rule::in(Order::SERVICE_TYPES)],
