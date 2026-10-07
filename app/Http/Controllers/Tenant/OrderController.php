@@ -21,6 +21,7 @@ class OrderController extends Controller
             ->with([
                 'table.diningArea',
                 'waiter',
+                'kotRounds.tickets.station',
                 'kitchenTickets.station',
             ])
             ->withCount('items')
@@ -53,8 +54,9 @@ class OrderController extends Controller
                 'waiter',
                 'items',
                 'events',
+                'kotRounds.tickets.station',
                 'kitchenTickets.station',
-                'kitchenTickets.items',
+                'kitchenTickets.items.events',
             ]),
         ]);
     }
