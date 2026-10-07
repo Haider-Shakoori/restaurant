@@ -1,5 +1,6 @@
 import 'package:businessos_restaurant_waiter/core/api/mobile_api_client.dart';
 import 'package:businessos_restaurant_waiter/core/connection/connection_mode.dart';
+import 'package:businessos_restaurant_waiter/core/connection/connection_resolver.dart';
 import 'package:businessos_restaurant_waiter/core/models/session_credentials.dart';
 import 'package:businessos_restaurant_waiter/core/security/offline_lease_verifier.dart';
 import 'package:businessos_restaurant_waiter/core/security/secure_credential_store.dart';
@@ -169,6 +170,62 @@ void main() {
     expect(api.heartbeatCount, 1);
   });
 
+  test('automatic mode prefers LAN and immediately falls back to cloud', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      heartbeatError: const ApiException(
+        code: 'offline',
+        message: 'LAN disappeared.',
+      ),
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 1,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final credentials = _MemoryCredentials(
+      _session(
+        connectionMode: ConnectionMode.automatic,
+        activeChannel: ConnectionChannel.cloud,
+        baseUrl: 'https://restaurant.test',
+        localBaseUrl: 'http://192.168.1.20:8787',
+        cloudBaseUrl: 'https://restaurant.test',
+        tenantId: 'tenant-1',
+      ),
+    );
+    final resolver = ConnectionResolver(
+      probe: _FakeProbe(<String, ServerHealth>{
+        'http://192.168.1.20:8787': const ServerHealth(
+          baseUrl: 'http://192.168.1.20:8787',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Desktop',
+        ),
+        'https://restaurant.test': const ServerHealth(
+          baseUrl: 'https://restaurant.test',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Cloud',
+        ),
+      }),
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: credentials,
+      leaseVerifier: const _AlwaysValidLease(),
+      connectionResolver: resolver,
+    );
+
+    await engine.syncNow();
+
+    expect(api.heartbeatCount, 1);
+    expect(api.pullBaseUrls, <String>['https://restaurant.test']);
+    expect(store.states['active_connection'], 'cloud');
+    expect(credentials.session?.activeChannel, ConnectionChannel.cloud);
+  });
+
   test('network failure schedules exponential retry', () async {
     final mutation = OutboxMutation(
       id: 1,
@@ -205,8 +262,12 @@ void main() {
 }
 
 SessionCredentials _session({
+  ConnectionMode connectionMode = ConnectionMode.cloud,
   ConnectionChannel activeChannel = ConnectionChannel.cloud,
   String baseUrl = 'https://restaurant.test',
+  String? localBaseUrl,
+  String? cloudBaseUrl,
+  String? tenantId,
 }) {
   return SessionCredentials(
     baseUrl: baseUrl,
@@ -215,7 +276,11 @@ SessionCredentials _session({
     deviceSecret: 'secret',
     deviceUid: 'uid-1',
     publicKey: 'public-key',
+    connectionMode: connectionMode,
     activeChannel: activeChannel,
+    localBaseUrl: localBaseUrl,
+    cloudBaseUrl: cloudBaseUrl,
+    tenantId: tenantId,
     lease: const <String, Object?>{
       'payload': <String, Object?>{},
       'signature': 'signature',
@@ -393,14 +458,17 @@ class _FakeApi implements SyncApi {
     this.pushResponse,
     this.pushError,
     this.refreshError,
+    this.heartbeatError,
     required List<Map<String, Object?>> pullResponses,
   }) : _pullResponses = pullResponses;
 
   final Map<String, Object?>? pushResponse;
   final ApiException? pushError;
   final ApiException? refreshError;
+  final ApiException? heartbeatError;
   final List<Map<String, Object?>> _pullResponses;
   final List<int> pullCursors = <int>[];
+  final List<String> pullBaseUrls = <String>[];
   int _pullIndex = 0;
   int heartbeatCount = 0;
 
@@ -409,6 +477,10 @@ class _FakeApi implements SyncApi {
     SessionCredentials credentials,
   ) async {
     heartbeatCount += 1;
+    final error = heartbeatError;
+    if (error != null) {
+      throw error;
+    }
     return const <String, Object?>{
       'network_mode': 'healthy',
       'local_operations_allowed': true,
@@ -422,6 +494,7 @@ class _FakeApi implements SyncApi {
     int limit = 100,
   }) async {
     pullCursors.add(cursor);
+    pullBaseUrls.add(credentials.baseUrl);
     return _pullResponses[_pullIndex++];
   }
 
@@ -454,5 +527,21 @@ class _FakeApi implements SyncApi {
     SessionCredentials credentials,
   ) async {
     return const <String, Object?>{'cursor': 0};
+  }
+}
+
+
+class _FakeProbe implements ServerProbe {
+  _FakeProbe(this.healthByUrl);
+
+  final Map<String, ServerHealth> healthByUrl;
+
+  @override
+  Future<ServerHealth> probe(String baseUrl) async {
+    final health = healthByUrl[baseUrl];
+    if (health == null) {
+      throw const ApiException(code: 'offline', message: 'Unreachable.');
+    }
+    return health;
   }
 }
