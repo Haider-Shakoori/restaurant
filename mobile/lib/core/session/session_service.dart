@@ -38,7 +38,22 @@ class SessionService {
       localUrl: localUrl,
       cloudUrl: cloudUrl,
     );
-    final baseUrl = target.baseUrl;
+
+    // First-time activation and sign-in are cloud-authoritative. Once the
+    // signed device lease and user token exist, automatic mode can prefer
+    // the Desktop LAN endpoint and fail back to cloud as connectivity changes.
+    var activationTarget = target;
+    if (connectionMode == ConnectionMode.automatic &&
+        cloudUrl != null &&
+        cloudUrl.trim().isNotEmpty) {
+      activationTarget = await _connectionResolver.resolve(
+        mode: ConnectionMode.cloud,
+        localUrl: localUrl,
+        cloudUrl: cloudUrl,
+      );
+    }
+
+    final baseUrl = activationTarget.baseUrl;
     final deviceUid = await _credentials.deviceUid();
     final keyResponse = await _api.publicKey(baseUrl);
     final publicKey = keyResponse['public_key']!.toString();
@@ -82,10 +97,10 @@ class SessionService {
       publicKey: publicKey,
       lease: lease,
       connectionMode: target.mode,
-      activeChannel: target.channel,
+      activeChannel: activationTarget.channel,
       localBaseUrl: target.localBaseUrl,
       cloudBaseUrl: target.cloudBaseUrl,
-      tenantId: target.tenantId,
+      tenantId: activationTarget.tenantId,
     );
 
     final login = await _api.login(
@@ -108,7 +123,7 @@ class SessionService {
     final bootstrap = await _api.syncBootstrap(session);
     await _database.applyBootstrap(bootstrap);
 
-    return target;
+    return activationTarget;
   }
 
   Future<void> logoutLocal() async {
