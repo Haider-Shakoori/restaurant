@@ -41,8 +41,8 @@ use App\Http\Controllers\Tenant\TenantAuthController;
 use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
-use App\Http\Controllers\Tenant\TenantWebOrderController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
+use App\Http\Controllers\Tenant\TenantWebOrderController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
@@ -60,7 +60,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
         ->name('tenant.web.login.store');
 
     Route::get('/', function (Request $request, EnsureTenantSubscriptionActive $subscription) {
-        if (! $request->expectsJson()) {
+        if (!$request->expectsJson()) {
             return auth('tenant')->check() ? redirect('/dashboard') : redirect('/login');
         }
 
