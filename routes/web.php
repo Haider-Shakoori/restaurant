@@ -72,6 +72,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
                 Route::get('/operators/create', [OperatorController::class, 'create']);
                 Route::post('/operators', [OperatorController::class, 'store']);
                 Route::patch('/operators/{adminUser}/toggle', [OperatorController::class, 'toggle']);
+                Route::patch('/operators/{adminUser}/password', [OperatorController::class, 'updatePassword']);
             });
         });
     });

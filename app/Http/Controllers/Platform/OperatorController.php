@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Platform\StoreOperatorRequest;
 use App\Models\AdminUser;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 
 class OperatorController extends Controller
@@ -45,5 +46,18 @@ class OperatorController extends Controller
         $adminUser->update(['is_active' => ! $adminUser->is_active]);
 
         return back()->with('status', 'Operator status updated.');
+    }
+
+    public function updatePassword(AdminUser $adminUser): RedirectResponse
+    {
+        $validated = request()->validate([
+            'password' => ['required', 'confirmed', Password::min(10)->letters()->numbers()],
+        ]);
+
+        $adminUser->update([
+            'password' => $validated['password'],
+        ]);
+
+        return back()->with('status', 'Operator password updated.');
     }
 }

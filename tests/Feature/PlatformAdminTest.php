@@ -190,6 +190,55 @@ class PlatformAdminTest extends TestCase
         ]);
     }
 
+    public function test_super_admin_can_reset_operator_password(): void
+    {
+        $admin = AdminUser::factory()->create([
+            'role' => PlatformRole::SuperAdmin,
+            'is_active' => true,
+        ]);
+
+        $operator = AdminUser::factory()->create([
+            'role' => PlatformRole::Operator,
+            'is_active' => true,
+            'password' => Hash::make('OldPassword123'),
+        ]);
+
+        $this->actingAs($admin)
+            ->patch('http://localhost/platform/operators/'.$operator->id.'/password', [
+                'password' => 'NewPassword2026',
+                'password_confirmation' => 'NewPassword2026',
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('status', 'Operator password updated.');
+
+        $this->assertTrue(Hash::check('NewPassword2026', $operator->fresh()->password));
+
+        $this->actingAs($admin)
+            ->get('http://localhost/platform/operators')
+            ->assertOk()
+            ->assertSee('Change password');
+    }
+
+    public function test_non_super_admin_cannot_reset_operator_password(): void
+    {
+        $operator = AdminUser::factory()->create([
+            'role' => PlatformRole::Operator,
+            'is_active' => true,
+        ]);
+
+        $target = AdminUser::factory()->create([
+            'role' => PlatformRole::Support,
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($operator)
+            ->patch('http://localhost/platform/operators/'.$target->id.'/password', [
+                'password' => 'BlockedPassword2026',
+                'password_confirmation' => 'BlockedPassword2026',
+            ])
+            ->assertForbidden();
+    }
+
     public function test_super_admin_can_render_control_plane_management_screens(): void
     {
         $admin = AdminUser::factory()->create([

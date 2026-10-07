@@ -16,7 +16,7 @@ class TenantOwnerAccessService
     /**
      * @return array{email: string, password: string, domain: string|null}
      */
-    public function reset(Business $business): array
+    public function reset(Business $business, ?string $email = null, ?string $temporaryPassword = null): array
     {
         $business->loadMissing('tenant.domains');
 
@@ -24,25 +24,34 @@ class TenantOwnerAccessService
             throw new RuntimeException('Provision the restaurant before creating owner access.');
         }
 
-        if (! $business->email) {
-            throw new RuntimeException('Add an owner email address to the restaurant record first.');
+        $email = Str::lower(trim((string) ($email ?: $business->email)));
+
+        if ($email === '') {
+            throw new RuntimeException('Add an owner email address before creating owner access.');
         }
 
-        $email = Str::lower(trim($business->email));
-        $password = Str::random(14);
+        $password = $temporaryPassword ?: Str::random(14);
         $domain = $business->tenant->domains->first()?->domain;
+
+        if ($business->email !== $email) {
+            $business->forceFill(['email' => $email])->save();
+        }
 
         tenancy()->initialize($business->tenant);
 
         try {
-            $owner = TenantUser::query()->where('email', $email)->first();
+            $owner = TenantUser::query()->where('role', 'owner')->first();
+
+            if (! $owner) {
+                $owner = TenantUser::query()->where('email', $email)->first();
+            }
 
             if (! $owner) {
                 $owner = new TenantUser;
                 $owner->public_id = (string) Str::ulid();
-                $owner->email = $email;
             }
 
+            $owner->email = $email;
             $owner->name = $business->contact_name ?: $business->name.' Owner';
             $owner->phone = $business->phone;
             $owner->role = 'owner';
