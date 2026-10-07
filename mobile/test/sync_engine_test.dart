@@ -226,6 +226,59 @@ void main() {
     expect(credentials.session?.activeChannel, ConnectionChannel.cloud);
   });
 
+  test('automatic mode returns to LAN after cloud fallback', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final credentials = _MemoryCredentials(
+      _session(
+        connectionMode: ConnectionMode.automatic,
+        activeChannel: ConnectionChannel.cloud,
+        baseUrl: 'https://restaurant.test',
+        localBaseUrl: 'http://192.168.1.20:8787',
+        cloudBaseUrl: 'https://restaurant.test',
+        tenantId: 'tenant-1',
+      ),
+    );
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 1,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final resolver = ConnectionResolver(
+      probe: _FakeProbe(<String, ServerHealth>{
+        'http://192.168.1.20:8787': const ServerHealth(
+          baseUrl: 'http://192.168.1.20:8787',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Desktop',
+        ),
+        'https://restaurant.test': const ServerHealth(
+          baseUrl: 'https://restaurant.test',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Cloud',
+        ),
+      }),
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: credentials,
+      leaseVerifier: const _AlwaysValidLease(),
+      connectionResolver: resolver,
+    );
+
+    await engine.syncNow();
+
+    expect(api.heartbeatCount, 1);
+    expect(api.pullBaseUrls, <String>['http://192.168.1.20:8787']);
+    expect(store.states['active_connection'], 'local');
+    expect(credentials.session?.activeChannel, ConnectionChannel.local);
+    expect(credentials.session?.baseUrl, 'http://192.168.1.20:8787');
+  });
+
   test('network failure schedules exponential retry', () async {
     final mutation = OutboxMutation(
       id: 1,
