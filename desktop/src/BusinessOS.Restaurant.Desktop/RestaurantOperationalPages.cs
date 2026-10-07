@@ -792,7 +792,6 @@ internal static class RestaurantOperationalPages
             Text = title,
             FontSize = 10.5,
             FontWeight = FontWeights.Bold,
-            CharacterSpacing = 40,
         };
         titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
 
