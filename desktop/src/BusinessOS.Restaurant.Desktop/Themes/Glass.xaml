@@ -1,0 +1,28 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:media="clr-namespace:System.Windows.Media;assembly=PresentationCore">
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#122333" />
+    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#26071828" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#D9F8FAFC" />
+    <SolidColorBrush x:Key="SidebarBrush" Color="#D8F8FAFC" />
+    <SolidColorBrush x:Key="TopBarBrush" Color="#CFF8FAFC" />
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#2CFFFFFF" />
+    <LinearGradientBrush x:Key="CardBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#ECFFFFFF" Offset="0" />
+        <GradientStop Color="#D9F8FAFC" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#D6FFFFFF" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#E8FFFFFF" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#0B1727" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#334155" />
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#5B6B7E" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#A8D8E6F2" />
+    <SolidColorBrush x:Key="BorderStrongBrush" Color="#C2CFE0EC" />
+    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#0B82F6" />
+    <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#D8EAF6FF" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#11855B" />
+    <SolidColorBrush x:Key="SuccessSoftBrush" Color="#DDECFDF5" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#8EFFFFFF" />
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
+    <media:BlurEffect x:Key="BackgroundBlurEffect" Radius="5" />
+</ResourceDictionary>
