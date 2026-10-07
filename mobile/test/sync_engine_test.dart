@@ -308,6 +308,20 @@ class _MemoryCredentials implements CredentialStore {
       session = current.copyWith(lease: lease);
     }
   }
+
+  @override
+  Future<void> saveActiveConnection({
+    required String baseUrl,
+    required ConnectionChannel activeChannel,
+  }) async {
+    final current = session;
+    if (current != null) {
+      session = current.copyWith(
+        baseUrl: baseUrl,
+        activeChannel: activeChannel,
+      );
+    }
+  }
 }
 
 class _MemorySyncStore implements SyncStore {
