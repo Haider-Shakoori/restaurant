@@ -91,6 +91,42 @@ public sealed class RestaurantLicenseCoordinator
         }
 
         var now = DateTimeOffset.UtcNow;
+
+        // A stored activation is enough for reinstall/upgrade while its signed
+        // offline lease is valid. Only contact the server when that lease has
+        // expired; this keeps installation and startup fast on poor internet.
+        if (!LicenseManager.CanRunOffline(state, now) &&
+            state.Snapshot.SubscriptionEndsAt.ToUniversalTime() > now)
+        {
+            try
+            {
+                using var httpClient = new HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(20),
+                };
+
+                var manager = new LicenseManager(
+                    new LicenseApiClient(httpClient),
+                    new SignedLeaseVerifier(),
+                    _store,
+                    _identity);
+
+                var version = typeof(RestaurantLicenseCoordinator).Assembly
+                    .GetName().Version?.ToString(3);
+
+                state = await manager.RefreshAsync(
+                    state,
+                    version,
+                    cancellationToken);
+                now = DateTimeOffset.UtcNow;
+            }
+            catch (LicenseApiException)
+            {
+                // Local-first behavior: if the server is unreachable, the
+                // signed lease below remains the authority for offline access.
+            }
+        }
+
         var remaining = state.Snapshot.SubscriptionEndsAt.ToUniversalTime() - now;
         var days = remaining <= TimeSpan.Zero
             ? 0
@@ -98,7 +134,7 @@ public sealed class RestaurantLicenseCoordinator
 
         return new RestaurantLicenseStatus(
             true,
-            state.Snapshot.SubscriptionEndsAt.ToUniversalTime() > now,
+            LicenseManager.CanRunOffline(state, now),
             state.Snapshot.PlanName,
             state.Snapshot.SubscriptionEndsAt,
             state.Snapshot.OfflineValidUntil,
