@@ -255,6 +255,18 @@ public sealed class DesktopRestaurantWorkflowService
         CancellationToken token = default)
         => await _cashier.TransferOrderAsync(orderId, targetTableId, await CurrentPrincipalAsync(token), token);
 
+    public async Task<object> MoveUnsentItemsAsync(
+        string sourceOrderId,
+        string targetOrderId,
+        IReadOnlyList<string> orderItemIds,
+        CancellationToken token = default)
+        => await _cashier.MoveUnsentItemsAsync(
+            sourceOrderId,
+            targetOrderId,
+            orderItemIds,
+            await CurrentPrincipalAsync(token),
+            token);
+
     public async Task<object> SplitUnsentItemsAsync(
         string sourceOrderId,
         string targetTableId,
