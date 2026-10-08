@@ -191,7 +191,6 @@ class TenantPortalSetupController extends Controller
         return back()->with('status', 'Supplier created.');
     }
 
-
     public function updateUser(Request $request, TenantUser $user): RedirectResponse
     {
         $roles = ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'];
