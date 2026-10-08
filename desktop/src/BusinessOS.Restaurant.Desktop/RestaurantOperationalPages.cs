@@ -680,6 +680,11 @@ internal static class RestaurantOperationalPages
             workflowPanel));
 
         panel.Children.Add(Section(
+            "Backup, restore & local database health",
+            "Back up a consistent SQLite snapshot; staged restores apply only on the next cold launch before local services start.",
+            await BackupRestorePanelAsync()));
+
+        panel.Children.Add(Section(
             "Printing & Recovery",
             "KOT and receipt queues are independent. Interrupted spool submissions are not replayed automatically because an unconfirmed replay can cause duplicate food production.",
             await PrinterQueueRecoveryPanelAsync(workflow)));
@@ -770,6 +775,120 @@ internal static class RestaurantOperationalPages
             "Select a waiter device above to enable/disable or unpair it. Device-management actions require an Owner or Manager session. Disabling or unpairing a terminal does not disable the restaurant desktop or other LAN terminals."));
 
         return Scroll(panel);
+    }
+
+    private static async Task<FrameworkElement> BackupRestorePanelAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        var maintenance = new LocalMaintenanceService(factory);
+        var diagnostics = await maintenance.GetDiagnosticsAsync();
+
+        var panel = new StackPanel();
+        var summary = new TextBlock
+        {
+            Text = $"Integrity: {diagnostics.Integrity} · " +
+                   $"Database: {diagnostics.DatabaseBytes / 1024.0 / 1024.0:N1} MB · " +
+                   $"{diagnostics.BackupCount} backups · " +
+                   $"Restore staged: {(diagnostics.PendingRestore ? "YES" : "NO")}",
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        summary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        panel.Children.Add(summary);
+
+        var warning = new TextBlock
+        {
+            Text = "Before restoring, end the restaurant shift, stop mobile orders and " +
+                   "close all connected terminals. A restore replaces the active local " +
+                   "database at next launch; a pre-restore recovery copy is retained.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        warning.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(warning);
+
+        var buttons = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var backupButton = new Button
+        {
+            Content = "Create verified backup",
+            MinWidth = 180, Height = 40, Margin = new Thickness(0, 0, 12, 0),
+        };
+        var restoreButton = new Button
+        {
+            Content = "Stage database restore",
+            MinWidth = 180, Height = 40,
+        };
+        buttons.Children.Add(backupButton);
+        buttons.Children.Add(restoreButton);
+        panel.Children.Add(buttons);
+
+        var result = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        result.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        panel.Children.Add(result);
+
+        backupButton.Click += async (_, _) =>
+        {
+            backupButton.IsEnabled = false;
+            try
+            {
+                var backup = await maintenance.CreateBackupAsync();
+                result.Text = $"Backup saved: {backup.Path} · SHA-256: {backup.Sha256}. " +
+                              "Keep a safe copy outside this computer.";
+            }
+            catch (Exception exception)
+            {
+                result.Text = "Backup failed: " + exception.Message;
+            }
+            finally
+            {
+                backupButton.IsEnabled = true;
+            }
+        };
+
+        restoreButton.Click += async (_, _) =>
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select a verified BusinessOS Restaurant SQLite backup",
+                Filter = "SQLite backups (*.db)|*.db|All files (*.*)|*.*",
+                CheckFileExists = true,
+            };
+            if (picker.ShowDialog() != true)
+                return;
+
+            var confirmation = MessageBox.Show(
+                "Restore this backup only after the restaurant has stopped taking orders. " +
+                "It will replace the local database on the next launch. " +
+                "The app will first retain a safety copy of the current database. Continue?",
+                "Stage a restaurant restore",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirmation != MessageBoxResult.Yes)
+                return;
+
+            restoreButton.IsEnabled = false;
+            try
+            {
+                await maintenance.StageRestoreAsync(picker.FileName);
+                result.Text = "Backup validated and staged. Restart Restaurant Desktop " +
+                              "after the shift is fully stopped to apply the restore.";
+            }
+            catch (Exception exception)
+            {
+                result.Text = "Restore not staged: " + exception.Message;
+            }
+            finally
+            {
+                restoreButton.IsEnabled = true;
+            }
+        };
+
+        return panel;
     }
 
     private static async Task<FrameworkElement> PrinterQueueRecoveryPanelAsync(
