@@ -25,6 +25,7 @@ use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -616,7 +617,7 @@ class TenantWebPortalTest extends TestCase
             $this->assertSame('Updated Kitchen Member', $updated->name);
             $this->assertSame('waiter', $updated->role);
             $this->assertFalse($updated->is_active);
-            $this->assertTrue(\Illuminate\Support\Facades\Hash::check('AfterPass123', $updated->password));
+            $this->assertTrue(Hash::check('AfterPass123', $updated->password));
         } finally {
             tenancy()->end();
         }
