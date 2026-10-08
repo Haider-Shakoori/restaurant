@@ -43,6 +43,49 @@ public sealed class Batch14MaintenanceTests
     }
 
     [Fact]
+    public async Task Tampered_pending_restore_never_overwrites_existing_restaurant_database()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"bos-restore-hash-{Guid.NewGuid():N}");
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var maintenance = new LocalMaintenanceService(factory, root);
+            await factory.EnsureCreatedAsync();
+            await using (var db = factory.Create())
+            {
+                db.PairedTerminals.Add(new LocalPairedTerminal
+                {
+                    DeviceId = "device-untouched", TenantId = "tenant-1",
+                    DeviceSecretHash = "a", AccessTokenHash = "b",
+                    UserId = 1, UserPublicId = "u1", UserName = "Waiter",
+                    UserRole = "waiter", ValidatedAtUtc = DateTimeOffset.UtcNow,
+                    LastSeenAtUtc = DateTimeOffset.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var original = await maintenance.CreateBackupAsync();
+            await maintenance.StageRestoreAsync(original.Path);
+            var staged = Path.Combine(root, "restore", "pending.db");
+            // The modified staged DB must fail manifest checksum validation before
+            // any live DB file is touched, even if the altered bytes were SQLite-valid.
+            await using (var file = new FileStream(staged, FileMode.Append, FileAccess.Write))
+                await file.WriteAsync(new byte[] { 0x20 });
+
+            await Assert.ThrowsAsync<InvalidDataException>(
+                () => maintenance.ApplyPendingRestoreAsync());
+
+            await using var verify = factory.Create();
+            Assert.Equal(1, await verify.PairedTerminals.CountAsync());
+            Assert.True(File.Exists(Path.Combine(root, "restore", "pending.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Invalid_database_cannot_be_staged_for_restore()
     {
         var root=Path.Combine(Path.GetTempPath(),$"bos-b14-{Guid.NewGuid():N}"); Directory.CreateDirectory(root);
