@@ -41,9 +41,34 @@
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
                 <Setter Property="GridLinesVisibility" Value="Horizontal" />
                 <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderBrush}" />
-                <Setter Property="RowBackground" Value="#CCFFFFFF" />
-                <Setter Property="AlternatingRowBackground" Value="#AFFFFFFF" />
+                <Setter Property="RowBackground" Value="{DynamicResource GridRowBackgroundBrush}" />
+                <Setter Property="AlternatingRowBackground" Value="{DynamicResource GridAlternatingRowBackgroundBrush}" />
                 <Setter Property="HeadersVisibility" Value="Column" />
+                <Setter Property="ColumnHeaderStyle">
+                    <Setter.Value>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="{DynamicResource GridHeaderBackgroundBrush}" />
+                            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+                            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                            <Setter Property="BorderThickness" Value="0,0,1,1" />
+                            <Setter Property="Padding" Value="10,11" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                        </Style>
+                    </Setter.Value>
+                </Setter>
+                <Setter Property="RowStyle">
+                    <Setter.Value>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource GridSelectedRowBrush}" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Setter.Value>
+                </Setter>
             </Style>
         </ResourceDictionary>
     </Application.Resources>
