@@ -87,3 +87,13 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Buttons inherit transparent/opaque surfaces through the current Glass or Classic theme, with useful tooltips and touch-friendly sizing.
 - Added static regression checks for shell command binding and route reuse.
 - This is navigational convenience only; it does not establish role-based permission enforcement or prove cashier/floor/KDS golden-path acceptance.
+
+## Batch 6 — Tenant-bound operator sign-in and role-aware shell (final validation pending)
+
+- Audited a verified critical gap: main window started immediately after computer activation even though desktop operations require a DPAPI-protected operator session. Cached/cloud authentication services and authorization rules already existed.
+- Wired startup to reuse a cached tenant-bound operator session offline, or require a new online sign-in through the existing tenant authentication API before displaying the shell. First-time login saves the configured tenant URL only after a matching licensed tenant and supported operator role are verified.
+- Added a themed operator sign-in window using WPF PasswordBox (not plain-text password fields). Activation and sign-in modal windows no longer trigger premature application shutdown before the main window is assigned.
+- Exposed the current operator in the topbar and provided a switch-operator action that reconstructs the entire shell/view model on successful re-authentication.
+- Added a fail-closed route visibility and navigation policy for owner, manager, cashier, waiter and kitchen; the kitchen role lands on KOT and does not see sales-dashboard workspaces. Waiters see order entry without cashier-only billing/session controls. Existing local service authorizers are still authoritative.
+- Added tests for route policy, startup ordering, login tenant check, sidebar role visibility and PasswordBox wiring.
+- Does NOT prove enterprise-grade re-authentication or offline revocation handling; shared Windows-user kiosk policy, session expiry, device tests and the full service permission audit remain for final security and manual acceptance. No new schema, Web/Flutter changes, licensing contract changes or disabled KOT flows.
