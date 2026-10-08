@@ -9,6 +9,12 @@
     <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F4F7FB" />
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#E2E8F0" />
+    <!-- Opaque nested data surfaces in Classic mode. -->
+    <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#F2F6FB" />
+    <SolidColorBrush x:Key="GridHeaderBackgroundBrush" Color="#EAF1F9" />
+    <SolidColorBrush x:Key="GridSelectedRowBrush" Color="#DCEBFF" />
+    <SolidColorBrush x:Key="TopBarActionBrush" Color="#F0F5FB" />
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#0F172A" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#475569" />
