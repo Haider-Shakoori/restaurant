@@ -805,6 +805,72 @@ internal static class RestaurantOperationalPages
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated. Refresh Purchases to see it.");
         };
         panel.Children.Add(purchaseButton);
+        var receivePending = new Button { Content = "Receive Outstanding PO", Height = 36, MinWidth = 205, Margin = new Thickness(0, 2, 0, 8) };
+        receivePending.Click += async (_, _) =>
+        {
+            await using var lookup = factory.Create();
+            var openOrders = await lookup.PurchaseOrders.AsNoTracking()
+                .Where(x => x.Status == "ordered" || x.Status == "partially_received")
+                .OrderByDescending(x => x.OrderedAt).ToListAsync();
+            if (openOrders.Count == 0)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info, "No outstanding purchase orders.");
+                return;
+            }
+
+            var dialog = new Window { Title = "Receive Outstanding Purchase", Width = 480, Height = 275, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            form.Children.Add(new TextBlock { Text = "Purchase order", Margin = new Thickness(0, 5, 0, 5) });
+            var selected = new ComboBox { ItemsSource = openOrders, DisplayMemberPath = "PoNumber", SelectedIndex = 0, Height = 36 };
+            form.Children.Add(selected);
+            form.Children.Add(new TextBlock { Text = "Receive all outstanding quantities into inventory.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 8) });
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Receive Remaining Stock", Height = 38 };
+            string? pendingId = null;
+            LocalReceivePurchaseOrderLineRequest[]? receiptLines = null;
+            var receiptKey = "desktop-pending-" + Guid.NewGuid().ToString("N");
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (selected.SelectedItem is not LocalPurchaseOrder po)
+                        throw new InvalidOperationException("Select a purchase order.");
+
+                    save.IsEnabled = false;
+                    if (pendingId is null)
+                    {
+                        await using var lineDb = factory.Create();
+                        var lines = await lineDb.PurchaseOrderLines.AsNoTracking()
+                            .Where(x => x.PurchaseOrderId == po.Id).ToListAsync();
+                        if (lines.Any(x => x.ConversionFactor <= 0))
+                            throw new InvalidOperationException("Invalid purchase unit conversion.");
+                        var outstanding = lines.Where(x => x.OrderedBaseQuantity > x.ReceivedBaseQuantity).ToList();
+                        if (outstanding.Count == 0)
+                            throw new InvalidOperationException("No outstanding quantities on this purchase.");
+                        receiptLines = outstanding.Select(x => new LocalReceivePurchaseOrderLineRequest(
+                            x.Id, (x.OrderedBaseQuantity - x.ReceivedBaseQuantity) / x.ConversionFactor)).ToArray();
+                        pendingId = po.Id;
+                        selected.IsEnabled = false;
+                    }
+
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).ReceivePurchaseOrderAsync(
+                        pendingId, receiptLines!, receiptKey,
+                        "Outstanding purchase received through desktop", actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Outstanding purchase received. Refresh Purchases and Inventory.");
+        };
+        panel.Children.Add(receivePending);
         panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var grid = GridFor(orders); grid.MinHeight = 230;
         grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190)); grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 220));
