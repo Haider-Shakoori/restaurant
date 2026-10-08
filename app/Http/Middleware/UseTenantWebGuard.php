@@ -16,7 +16,10 @@ class UseTenantWebGuard
         // Disabling a staff member must also end an existing browser session,
         // not merely reject their next password-based login.
         $user = Auth::guard('tenant')->user();
-        if ($user !== null && ! (bool) $user->is_active) {
+        // Re-read the tenant record: an already-authenticated SessionGuard
+        // can hold an earlier copy of the user after an owner disables it.
+        $current = $user?->fresh();
+        if ($user !== null && ($current === null || ! (bool) $current->is_active)) {
             Auth::guard('tenant')->logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
