@@ -884,6 +884,18 @@ internal static class RestaurantOperationalPages
             button.BorderThickness = new Thickness(1);
             button.SetBinding(Button.CommandProperty,
                 new Binding(nameof(MainWindowViewModel.NavigateCommand)));
+            var visibilityProperty = route switch
+            {
+                "pos" => nameof(MainWindowViewModel.CanViewPos),
+                "tables" => nameof(MainWindowViewModel.CanViewTables),
+                "kitchen" => nameof(MainWindowViewModel.CanViewKitchen),
+                "inventory" => nameof(MainWindowViewModel.CanViewInventory),
+                _ => nameof(MainWindowViewModel.CanViewDashboard),
+            };
+            button.SetBinding(UIElement.VisibilityProperty, new Binding(visibilityProperty)
+            {
+                Converter = new BooleanToVisibilityConverter(),
+            });
             wrap.Children.Add(button);
         }
 
