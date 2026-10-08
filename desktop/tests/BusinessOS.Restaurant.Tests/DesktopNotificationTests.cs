@@ -32,7 +32,7 @@ public sealed class DesktopNotificationTests
         var first = feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now);
         Assert.NotNull(first);
         Assert.Null(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddSeconds(2)));
-        Assert.Equal(1, feed.History.Count);
+        Assert.Single(feed.History);
         Assert.NotNull(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddSeconds(11)));
         for (var i = 0; i < 120; i++)
             feed.Publish(DesktopNoticeLevel.Info, $"Event {i}", now.AddMinutes(i + 1));
