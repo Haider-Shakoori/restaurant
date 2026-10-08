@@ -21,6 +21,23 @@ public partial class MainWindow : Window
         UpdateBackdropVisibility(ThemeManager.Current);
     }
 
+    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (IsLoaded) ApplyResponsiveLayout();
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        // A narrow cashier display must keep route/actions accessible without
+        // top-bar collisions. The full details return automatically when resized.
+        var compact = ActualWidth < 1240;
+        OperatorBadge.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        HeaderSubtitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        SwitchOperatorButton.Content = compact ? "Switch" : "Switch operator";
+        RefreshButton.Content = compact ? "↻" : "↻  Refresh";
+        RefreshButton.ToolTip = "Refresh the current workspace";
+    }
+
     private void OnThemeChanged(AppearanceTheme theme)
     {
         // Both modes share the same layout; only Glass renders the photographic backdrop.
@@ -82,6 +99,7 @@ public partial class MainWindow : Window
     {
         if (_initialized) return;
         _initialized = true;
+        ApplyResponsiveLayout();
 
         try
         {
