@@ -454,6 +454,52 @@ internal static class RestaurantOperationalPages
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Recipe version saved. Refresh Menu to view it.");
         };
         panel.Children.Add(recipeCreate);
+        var costPreview = new Button { Content = "Recipe Food-Cost Preview", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        costPreview.Click += async (_, _) =>
+        {
+            await using var costDb = factory.Create();
+            var valuations = await costDb.InventoryValuations.AsNoTracking().ToListAsync();
+            var components = await costDb.RecipeItems.AsNoTracking().ToListAsync();
+            var ingredients = await costDb.InventoryItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var menuItems = await costDb.MenuItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var versions = await costDb.Recipes.AsNoTracking().Where(x => x.IsActive).ToListAsync();
+            var preview = versions.Select(version =>
+            {
+                var recipeItems = components.Where(x => x.RecipeId == version.Id).ToList();
+                decimal total = 0m;
+                var missing = 0;
+                foreach (var component in recipeItems)
+                {
+                    var valuation = valuations.FirstOrDefault(x =>
+                        x.BranchId == version.BranchId && x.InventoryItemId == component.InventoryItemId);
+                    if (valuation is null || !ingredients.ContainsKey(component.InventoryItemId))
+                    {
+                        missing++;
+                        continue;
+                    }
+                    total += component.QuantityBase * valuation.AverageUnitCost;
+                }
+                menuItems.TryGetValue(version.MenuItemId, out var menuItem);
+                var salePrice = menuItem?.Price ?? 0m;
+                return new
+                {
+                    Menu = menuItem?.Name ?? version.MenuItemId,
+                    version.Version,
+                    IngredientCostAfn = Math.Round(total, 2),
+                    SalePriceAfn = salePrice,
+                    GrossMarginAfn = missing == 0 ? Math.Round(salePrice - total, 2).ToString("0.00") : "N/A",
+                    MissingCosts = missing,
+                };
+            }).ToList();
+            var dialog = new Window { Title = "Recipe Food-Cost Preview (Estimated)", Width = 850, Height = 470, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var costGrid = GridFor(preview);
+            costGrid.AutoGenerateColumns = true;
+            dialog.Content = costGrid;
+            dialog.ShowDialog();
+        };
+        panel.Children.Add(costPreview);
         panel.Children.Add(grid);
         return Scroll(panel);
     }
