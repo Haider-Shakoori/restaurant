@@ -14,7 +14,15 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 $exe = Join-Path $publish "BusinessOS.Restaurant.Desktop.exe"
 if (!(Test-Path $exe)) { throw "Published desktop executable was not produced." }
 
-if ($CertificatePath) {
+# Signing is optional for development and CI. A partial signing configuration is
+# an error: never silently downgrade an intended signed release to unsigned.
+if (-not [string]::IsNullOrWhiteSpace($CertificatePath)) {
+  if (-not (Test-Path -LiteralPath $CertificatePath -PathType Leaf)) {
+    throw "Windows signing certificate file was not found."
+  }
+  if ([string]::IsNullOrWhiteSpace($CertificatePassword)) {
+    throw "Windows signing certificate password is required when a certificate is configured."
+  }
   $signtool = (Get-Command signtool.exe -ErrorAction Stop).Source
   & $signtool sign /fd SHA256 /f $CertificatePath /p $CertificatePassword /tr "http://timestamp.digicert.com" /td SHA256 $exe
   if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed." }
