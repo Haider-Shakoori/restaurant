@@ -425,6 +425,18 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
+        // The visual floor map is the primary touch view; the detailed grid
+        // remains available without duplicating the underlying table records.
+        grid.Visibility = Visibility.Collapsed;
+        var showTableList = Button("Show table list");
+        showTableList.Click += (_, _) =>
+        {
+            grid.Visibility = grid.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            showTableList.Content = grid.Visibility == Visibility.Visible
+                ? "Hide table list" : "Show table list";
+        };
+        root.Children.Add(showTableList);
         root.Children.Add(grid);
 
         var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
@@ -440,6 +452,10 @@ internal static class OperationalActionViews
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 0),
         };
+
+        root.Children.Insert(1, BuildVisualFloorBoard(
+            rows, activeOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus));
 
         operations.Children.Add(Label("Transfer order"));
         var transferRow = new WrapPanel();
@@ -1201,6 +1217,144 @@ internal static class OperationalActionViews
         };
         block.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
         return block;
+    }
+
+    private static FrameworkElement BuildVisualFloorBoard(
+        IReadOnlyList<TableChoice> tables,
+        IReadOnlyList<TableOrderChoice> activeOrders,
+        IReadOnlyList<Choice> availableTables,
+        ComboBox sourceOrderBox,
+        ComboBox targetTableBox,
+        TextBlock statusText)
+    {
+        var floor = new StackPanel { Margin = new Thickness(0, 10, 0, 12) };
+        var summary = new TextBlock
+        {
+            Text = $"{tables.Count(x => x.Status == "available")} available · " +
+                   $"{tables.Count(x => x.Status == "occupied")} occupied · " +
+                   $"{tables.Count(x => x.Status != "available" && x.Status != "occupied")} other",
+            FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        summary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        floor.Children.Add(summary);
+
+        if (tables.Count == 0)
+        {
+            floor.Children.Add(new TextBlock
+            {
+                Text = "No active dining tables yet. Configure the restaurant floor in the tenant platform.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 5, 0, 12),
+            });
+            return floor;
+        }
+
+        foreach (var area in tables.GroupBy(x => x.Area))
+        {
+            var areaTitle = new TextBlock
+            {
+                Text = area.Key, FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 6, 0, 9),
+            };
+            areaTitle.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            floor.Children.Add(areaTitle);
+
+            var tiles = new WrapPanel();
+            foreach (var table in area)
+            {
+                var order = activeOrders.FirstOrDefault(x => x.TableId == table.Id);
+                var stateBrush = table.Status switch
+                {
+                    "available" => "SuccessBrush",
+                    "occupied" => "BrandPrimaryBrush",
+                    _ => "TextMutedBrush",
+                };
+
+                var label = new TextBlock
+                {
+                    Text = table.Name,
+                    FontSize = 18,
+                    FontWeight = FontWeights.Bold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                label.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                var subtitle = new TextBlock
+                {
+                    Text = $"Table {table.Code} · {table.Capacity} seats",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 5, 0, 12),
+                };
+                subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                var state = new TextBlock
+                {
+                    Text = table.Status.ToUpperInvariant(),
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                };
+                state.SetResourceReference(TextBlock.ForegroundProperty, stateBrush);
+
+                var body = new StackPanel { Margin = new Thickness(13) };
+                body.Children.Add(label);
+                body.Children.Add(subtitle);
+                body.Children.Add(state);
+                if (order is not null)
+                {
+                    var orderCaption = new TextBlock
+                    {
+                        Text = $"{order.ClientOrderId} · AFN {order.Total:N2}",
+                        Margin = new Thickness(0, 6, 0, 0),
+                        FontSize = 10,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    };
+                    orderCaption.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                    body.Children.Add(orderCaption);
+                }
+
+                var surface = new Border
+                {
+                    Width = 190, MinHeight = 119, CornerRadius = new CornerRadius(15),
+                    BorderThickness = new Thickness(1),
+                    Child = body,
+                };
+                surface.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+                surface.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+
+                var tile = new Button
+                {
+                    Content = surface,
+                    Padding = new Thickness(0),
+                    BorderThickness = new Thickness(0),
+                    Background = Brushes.Transparent,
+                    Margin = new Thickness(0, 0, 11, 11),
+                    ToolTip = order is null
+                        ? "Available table · select as a target for transfer/split"
+                        : "Occupied table · select its active order for operations",
+                };
+                tile.Click += (_, _) =>
+                {
+                    if (order is not null)
+                    {
+                        sourceOrderBox.SelectedItem = order;
+                        statusText.Text = $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
+                    }
+                    else if (table.Status == "available")
+                    {
+                        targetTableBox.SelectedItem = availableTables.FirstOrDefault(x => x.Id == table.Id);
+                        statusText.Text = $"Selected available table {table.Name} as transfer target.";
+                    }
+                    else
+                    {
+                        statusText.Text = $"{table.Name} is {table.Status}; review the table status before assigning it.";
+                    }
+                };
+                tiles.Children.Add(tile);
+            }
+            floor.Children.Add(tiles);
+        }
+
+        return floor;
     }
 
     private static ComboBox Combo(object items, string member) => new()
