@@ -34,7 +34,7 @@ MenuImageRequest? resolveMenuImageRequest(
   Uri resolved;
   if (isRelative) {
     if (!validRoot || !source.path.startsWith('/menu-images/')) return null;
-    resolved = root!.resolveUri(source);
+    resolved = root.resolveUri(source);
   } else {
     resolved = source;
   }
@@ -47,9 +47,9 @@ MenuImageRequest? resolveMenuImageRequest(
   final isLocalImage =
       validRoot &&
       credentials != null &&
-      resolved.scheme == root?.scheme &&
-      resolved.host == root?.host &&
-      resolved.port == root?.port &&
+      resolved.scheme == root.scheme &&
+      resolved.host == root.host &&
+      resolved.port == root.port &&
       RegExp(r'^/menu-images/[A-Za-z0-9._-]+\.(png|jpe?g|webp)$',
               caseSensitive: false)
           .hasMatch(resolved.path) &&
@@ -58,7 +58,7 @@ MenuImageRequest? resolveMenuImageRequest(
 
   if (isRelative && !isLocalImage) return null;
 
-  final headers = isLocalImage && credentials != null
+  final headers = isLocalImage
       ? <String, String>{
           'Authorization': 'Bearer ${credentials.accessToken}',
           'X-Device-Id': credentials.deviceId,
