@@ -99,7 +99,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void OnDesktopNotice(DesktopNoticeLevel level, string message)
     {
-        var dispatcher = Application.Current?.Dispatcher;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.HasShutdownStarted)
             return;
         if (!dispatcher.CheckAccess())
