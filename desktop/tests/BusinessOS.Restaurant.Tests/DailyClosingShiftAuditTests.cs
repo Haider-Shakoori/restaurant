@@ -195,6 +195,44 @@ public sealed class DailyClosingShiftAuditTests
     }
 
     [Fact]
+    public async Task Closing_one_branch_is_not_blocked_by_another_branch_open_cashier_session()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var source = Snapshot();
+            var branches = source.Branches.Concat(
+                [new BranchSnapshot("branch-2", "SECOND", "Second Branch", true)]).ToArray();
+            await new OperationalSnapshotStore(factory).ApplyAsync(source with { Branches = branches });
+
+            var cashier = new LocalCashierService(factory);
+            var operations = new LocalOperationsControlService(factory);
+            await cashier.OpenSessionAsync("branch-2", 100m, Cashier(), CancellationToken.None);
+
+            var businessDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            var first = JsonSerializer.SerializeToElement(await operations.FinalizeDailyClosingAsync(
+                "branch-1", businessDate, Cashier(), CancellationToken.None));
+            Assert.Equal("finalized", first.GetProperty("status").GetString());
+            Assert.Equal("branch-1", first.GetProperty("branch_id").GetString());
+            Assert.Equal("0.00", first.GetProperty("snapshots")[0].GetProperty("payments_total").GetString());
+
+            var blocked = await Assert.ThrowsAsync<LocalSyncConflictException>(() =>
+                operations.FinalizeDailyClosingAsync(
+                    "branch-2", businessDate, Cashier(), CancellationToken.None));
+            Assert.Equal("closing_blocked", blocked.Code);
+
+            await using var db = factory.Create();
+            Assert.Single(await db.DailyClosings.ToArrayAsync());
+            Assert.Equal("branch-1", (await db.DailyClosings.SingleAsync()).BranchId);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Reopen_requires_management_and_reason()
     {
         var root = CreateTemporaryDirectory();
