@@ -379,6 +379,91 @@ public sealed class InventoryProcurementTests
     }
 
     [Fact]
+    public async Task Serving_multi_ingredient_recipe_consumes_each_component_once()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            async Task<string> AddIngredientAsync(string sku, string name, decimal opening)
+            {
+                var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                    sku, name, "g", "kg", 1000m, 0m, actor, CancellationToken.None));
+                var id = item.GetProperty("id").GetString()!;
+                await inventory.AdjustAsync("branch-1", id, opening, "OPEN-" + sku,
+                    "Opening inventory", actor, CancellationToken.None);
+                return id;
+            }
+
+            var riceId = await AddIngredientAsync("MULTI-RICE", "Multi Rice", 2000m);
+            var spiceId = await AddIngredientAsync("MULTI-SPICE", "Multi Spice", 1000m);
+            await inventory.CreateRecipeVersionAsync("branch-1", "item-1", "Two ingredient recipe",
+                [new LocalRecipeComponentRequest(riceId, 250m),
+                 new LocalRecipeComponentRequest(spiceId, 20m)],
+                actor, CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, new OperationalSnapshotStore(factory), kitchen);
+            var cashier = new LocalCashierService(factory, inventory);
+            await PushOneAsync(sync, Waiter(), "MULTI-OPEN", "order.open", new
+            {
+                client_order_id = "MULTI-ORDER",
+                dining_table_id = "table-1",
+                guest_count = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "MULTI-ADD", "order.item.add", new
+            {
+                client_order_id = "MULTI-ORDER",
+                client_line_id = "MULTI-LINE",
+                menu_item_id = "item-1",
+                quantity = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "MULTI-SUBMIT", "order.submit", new
+            {
+                client_order_id = "MULTI-ORDER",
+            });
+
+            string orderId;
+            string[] ticketIds;
+            await using (var db = factory.Create())
+            {
+                orderId = (await db.Orders.SingleAsync()).Id;
+                ticketIds = await db.KitchenTickets.Select(value => value.Id).ToArrayAsync();
+            }
+
+            foreach (var ticketId in ticketIds)
+            {
+                await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+                await kitchen.ReadyAsync(ticketId, Kitchen(), CancellationToken.None);
+            }
+
+            await cashier.ServeOrderAsync(orderId, Cashier(), CancellationToken.None);
+            await cashier.ServeOrderAsync(orderId, Cashier(), CancellationToken.None);
+
+            await using var verify = factory.Create();
+            var balances = await verify.InventoryBalances.ToDictionaryAsync(value => value.InventoryItemId);
+            Assert.Equal(1500m, balances[riceId].Quantity);
+            Assert.Equal(960m, balances[spiceId].Quantity);
+            Assert.Single(await verify.InventoryConsumptions.ToArrayAsync());
+            Assert.Equal(2, await verify.InventoryConsumptionLines.CountAsync());
+            var movements = await verify.StockMovements
+                .Where(value => value.MovementType == "consumption")
+                .ToDictionaryAsync(value => value.InventoryItemId);
+            Assert.Equal(2, movements.Count);
+            Assert.Equal(-500m, movements[riceId].QuantityDelta);
+            Assert.Equal(-40m, movements[spiceId].QuantityDelta);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Recipe_versions_deactivate_previous_version()
     {
         var root = CreateTemporaryDirectory();
