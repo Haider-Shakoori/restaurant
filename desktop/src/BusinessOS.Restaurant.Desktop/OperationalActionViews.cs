@@ -319,8 +319,25 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
         grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
-        Grid.SetColumn(form, 0); Grid.SetColumn(grid, 2);
-        root.Children.Add(Card(form)); root.Children.Add(grid);
+        var formCard = Card(form);
+        Grid.SetColumn(formCard, 0);
+        Grid.SetColumn(grid, 2);
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(formCard);
+        root.Children.Add(grid);
+        root.SizeChanged += (_, _) =>
+        {
+            // On smaller Windows displays place the POS form above the orders
+            // list. The grid retains horizontal scrolling for detailed columns.
+            var compact = root.ActualWidth < 960;
+            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(440);
+            root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
+            root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(grid, compact ? 0 : 2);
+            Grid.SetRow(grid, compact ? 1 : 0);
+            grid.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
+        };
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
