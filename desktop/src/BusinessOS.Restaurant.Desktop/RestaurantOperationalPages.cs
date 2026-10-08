@@ -266,7 +266,100 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Price", nameof(MenuRow.Price), 120));
         grid.Columns.Add(Column("Currency", nameof(MenuRow.Currency), 90));
         grid.Columns.Add(Column("Available", nameof(MenuRow.Available), 100));
-        return Section("Menu catalog", "The same local menu is served to LAN-connected waiter devices.", grid);
+        var panel = Stack();
+        panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
+        var create = new Button { Content = "+ Add Menu Item", MinWidth = 165, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += (_, _) =>
+        {
+            var dialog = new Window
+            {
+                Title = "New Menu Item",
+                Width = 500,
+                Height = 480,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var content = Stack();
+            content.Margin = new Thickness(20);
+            var categories = db.MenuCategories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToList();
+            var category = new ComboBox { ItemsSource = categories, DisplayMemberPath = "Name", SelectedIndex = categories.Count > 0 ? 0 : -1, Height = 36 };
+            var name = new TextBox { Height = 36 };
+            var sku = new TextBox { Height = 36 };
+            var price = new TextBox { Height = 36 };
+            var image = new TextBox { Height = 36, IsReadOnly = true };
+            var browse = new Button { Content = "Choose image", Height = 36 };
+            browse.Click += (_, _) =>
+            {
+                var picker = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "Images|*.png;*.jpg;*.jpeg;*.webp",
+                    Title = "Select menu image",
+                };
+                if (picker.ShowDialog(dialog) == true) image.Text = picker.FileName;
+            };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Name", name), ("SKU", sku), ("Category", category),
+                ("Price AFN", price), ("Image", image),
+            })
+            {
+                content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 7, 0, 3) });
+                content.Children.Add(entry.Input);
+            }
+            content.Children.Add(browse);
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            content.Children.Add(feedback);
+            var save = new Button { Content = "Save Menu Item", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(name.Text))
+                        throw new InvalidOperationException("Enter a menu item name.");
+                    if (!decimal.TryParse(price.Text, out var amount) || amount < 0)
+                        throw new InvalidOperationException("Enter a valid price.");
+                    save.IsEnabled = false;
+                    string? imageUrl = null;
+                    if (!string.IsNullOrWhiteSpace(image.Text))
+                    {
+                        var extension = System.IO.Path.GetExtension(image.Text).ToLowerInvariant();
+                        if (extension is not (".png" or ".jpg" or ".jpeg" or ".webp"))
+                            throw new InvalidOperationException("Unsupported image format.");
+                        var folder = System.IO.Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "BusinessOS", "Restaurant", "menu-images");
+                        System.IO.Directory.CreateDirectory(folder);
+                        var fileName = Guid.NewGuid().ToString("N") + extension;
+                        System.IO.File.Copy(image.Text, System.IO.Path.Combine(folder, fileName));
+                        imageUrl = "/menu-images/" + fileName;
+                    }
+                    await using var writeDb = factory.Create();
+                    writeDb.MenuItems.Add(new LocalMenuItem
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Name = name.Text.Trim(),
+                        Sku = string.IsNullOrWhiteSpace(sku.Text) ? null : sku.Text.Trim(),
+                        MenuCategoryId = (category.SelectedItem as LocalMenuCategory)?.Id,
+                        Price = amount,
+                        Currency = "AFN",
+                        ImageUrl = imageUrl,
+                        IsAvailable = true,
+                    });
+                    await writeDb.SaveChangesAsync();
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            content.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Menu item created. Refresh Menu to see it.");
+        };
+        panel.Children.Add(create);
+        panel.Children.Add(grid);
+        return Scroll(panel);
     }
 
     private static async Task<FrameworkElement> InventoryAsync()
