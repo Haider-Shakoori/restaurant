@@ -94,3 +94,13 @@ Repeat critical scenarios with user accounts appropriate to their actions. Do no
 - Signing status: an unsigned CI artifact must never be described as a signed production release
 
 **Release decision: BLOCKED until full GitHub CI is green and all critical hardware/manual acceptance scenarios have passed.**
+
+## Automated-only acceptance continuation — user-deferred local testing (2026-10-09)
+
+The user has deferred 4K display testing and all activities requiring local installation or hands-on operation. This changes **execution priority**, not the production-release safety gate.
+
+- **Verified on previous head:** both Restaurant Desktop CI and general CI succeeded at `b80b392315609d3094ff386586800beb93de4382`.
+- **New automated release control:** the Windows CI now independently reads its generated provenance manifest, checks `source_commit` against `GITHUB_SHA`, enforces the `unsigned_ci` label and compares both EXE and Inno Setup SHA-256 hashes to their built files. This must pass on the new PR head.
+- **Automated coverage to retain:** local KOT rounds, idempotent inventory consumption, refire, takeaway, split payments, database upgrade, printer recovery policies and authorization/source regressions. The existing `dotnet test` and general repository CI remain required; passing tests must not be described as a real-device validation.
+- **Deferred (not passed):** 4K/1080p appearance, installer activation/upgrade and data retention on an actual workstation, physical thermal printing and ambiguous print replay, real LAN waiter/offline recovery, genuine power-loss SQLite restore and the full operator-driven 30-step acceptance script.
+- **Release decision:** continue automated audits and regression fixes only. Keep PR #69 draft and do not declare production-ready or distribute an unsigned CI installer as a signed release until required real-device acceptance is completed.
