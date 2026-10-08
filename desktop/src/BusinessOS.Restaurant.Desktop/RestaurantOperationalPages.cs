@@ -400,16 +400,15 @@ internal static class RestaurantOperationalPages
         var panel = Stack();
         panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
 
-        var form = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
-        var branchBox = new ComboBox { ItemsSource = branches, DisplayMemberPath = nameof(ExpenseBranchChoice.Name), Width = 180, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var category = new TextBox { Text = "operations", Width = 140, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var description = new TextBox { Width = 240, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var amount = new TextBox { Text = "0", Width = 100, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var method = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Width = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var record = new Button { Content = "Record expense", MinWidth = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var status = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, Margin = new Thickness(8,11,0,0), TextWrapping = TextWrapping.Wrap };
-        form.Children.Add(branchBox); form.Children.Add(category); form.Children.Add(description); form.Children.Add(amount); form.Children.Add(method); form.Children.Add(record); form.Children.Add(status);
-        panel.Children.Add(form);
+        var createExpense = new Button
+        {
+            Content = "+ Create Expense",
+            MinWidth = 170,
+            Height = 42,
+            Margin = new Thickness(0, 8, 0, 14),
+            FontWeight = FontWeights.SemiBold,
+        };
+        panel.Children.Add(createExpense);
 
         var grid = GridFor(rows);
         grid.Columns.Add(Column("Date", nameof(ExpenseRow.Date), 120));
@@ -422,18 +421,112 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(grid);
 
         var workflow = new DesktopRestaurantWorkflowService();
-        record.Click += async (_, _) =>
+        createExpense.Click += async (_, _) =>
         {
+            var owner = System.Windows.Application.Current?.MainWindow;
+            var dialog = new Window
+            {
+                Title = "Create Expense",
+                Width = 520,
+                Height = 490,
+                MinWidth = 400,
+                WindowStartupLocation = owner is null
+                    ? WindowStartupLocation.CenterScreen
+                    : WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = new SolidColorBrush(Color.FromArgb(246, 248, 250, 255)),
+                WindowStyle = WindowStyle.ToolWindow,
+            };
+            if (owner is not null) dialog.Owner = owner;
+
+            var content = new StackPanel { Margin = new Thickness(24) };
+            content.Children.Add(new TextBlock
+            {
+                Text = "New restaurant expense",
+                FontSize = 23,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 14),
+            });
+            var branchBox = new ComboBox
+            {
+                ItemsSource = branches,
+                DisplayMemberPath = nameof(ExpenseBranchChoice.Name),
+                SelectedIndex = branches.Count > 0 ? 0 : -1,
+                Height = 36,
+            };
+            var category = new TextBox { Text = "operations", Height = 36 };
+            var description = new TextBox { Height = 36 };
+            var amount = new TextBox { Height = 36 };
+            var method = new ComboBox
+            {
+                ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" },
+                SelectedIndex = 0,
+                Height = 36,
+            };
+            foreach (var field in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branchBox), ("Category", category), ("Description", description),
+                ("Amount (AFN)", amount), ("Payment method", method),
+            })
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = field.Label,
+                    Margin = new Thickness(0, 7, 0, 3),
+                    FontWeight = FontWeights.Medium,
+                });
+                content.Children.Add(field.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            feedback.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            content.Children.Add(feedback);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var cancel = new Button { Content = "Cancel", MinWidth = 100, Height = 36, Margin = new Thickness(0, 0, 8, 0) };
+            var save = new Button { Content = "Save Expense", MinWidth = 135, Height = 36 };
+            cancel.Click += (_, _) => dialog.Close();
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branchBox.SelectedItem is not ExpenseBranchChoice branch)
+                        throw new InvalidOperationException("Select a branch.");
+                    if (string.IsNullOrWhiteSpace(description.Text))
+                        throw new InvalidOperationException("Enter an expense description.");
+                    if (!decimal.TryParse(amount.Text, out var value) || value <= 0)
+                        throw new InvalidOperationException("Enter a positive expense amount.");
+                    save.IsEnabled = false;
+                    await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text,
+                        value, method.SelectedItem?.ToString() ?? "cash",
+                        DateOnly.FromDateTime(DateTime.Today));
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex)
+                {
+                    feedback.Text = ex.Message;
+                    save.IsEnabled = true;
+                }
+            };
+            actions.Children.Add(cancel);
+            actions.Children.Add(save);
+            content.Children.Add(actions);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+            // Blur the underlying workspace while the modal is open, restoring
+            // its original effect even if the dialog closes unexpectedly.
+            var ownerContent = owner?.Content as UIElement;
+            var previousEffect = ownerContent?.Effect;
             try
             {
-                if (branchBox.SelectedItem is not ExpenseBranchChoice branch) throw new InvalidOperationException("Select a branch.");
-                if (string.IsNullOrWhiteSpace(description.Text)) throw new InvalidOperationException("Enter an expense description.");
-                if (!decimal.TryParse(amount.Text, out var value) || value <= 0) throw new InvalidOperationException("Enter a positive expense amount.");
-                await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text, value, method.SelectedItem?.ToString() ?? "cash", DateOnly.FromDateTime(DateTime.Today));
-                status.Text = "Expense recorded locally. Refresh the page to update the ledger.";
-                description.Clear(); amount.Text = "0";
+                if (ownerContent is not null)
+                    ownerContent.Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 9 };
+                if (dialog.ShowDialog() == true)
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
+                        "Expense saved. Refresh Expenses to see the latest ledger entry.");
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            finally
+            {
+                if (ownerContent is not null) ownerContent.Effect = previousEffect;
+            }
         };
 
         return Scroll(panel);
