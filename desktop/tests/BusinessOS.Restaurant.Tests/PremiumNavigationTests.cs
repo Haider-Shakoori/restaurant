@@ -129,10 +129,11 @@ public sealed class PremiumNavigationTests
             (string?)e.Attribute("Text") == "{Binding WorkspaceErrorMessage}");
         Assert.Contains(banner.Descendants(), e => e.Name.LocalName == "Button" &&
             (string?)e.Attribute("Command") == "{Binding RetryWorkspaceCommand}");
-        Assert.Equal("Auto", (string?)shell.Descendants().First(e =>
-            e.Name.LocalName == "Grid" && e.Descendants().Any(x => x == banner))
-            .Element(shell.Root!.Name.Namespace + "Grid.RowDefinitions")?
-            .Elements().ElementAt(1).Attribute("Height"));
+        // Select the banner's own containing Grid, not an ancestor shell Grid.
+        var contentGrid = banner.Parent ?? throw new InvalidOperationException("Missing content Grid.");
+        var rows = contentGrid.Elements().Single(e => e.Name.LocalName == "Grid.RowDefinitions")
+            .Elements().ToArray();
+        Assert.Equal("Auto", (string?)rows[1].Attribute("Height"));
 
         var workspace = shell.Descendants().Single(e => e.Name.LocalName == "ContentControl" &&
             ((string?)e.Attribute("Content"))?.Contains("CurrentPage", StringComparison.Ordinal) == true);
