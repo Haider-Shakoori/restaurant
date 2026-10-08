@@ -2003,7 +2003,8 @@ internal static class RestaurantOperationalPages
             AutoGenerateColumns = false,
             IsReadOnly = true,
             CanUserAddRows = false,
-            MinHeight = 430,
+            MinHeight = 220,
+            MaxHeight = 440,
             BorderThickness = new Thickness(1),
             AlternationCount = 2,
         };
