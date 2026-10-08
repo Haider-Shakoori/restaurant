@@ -379,7 +379,12 @@ internal static class OperationalActionViews
         var role = operatorSession?.User.Role?.Trim().ToLowerInvariant();
         if (role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier)
             page.Children.Add(Card(cashier));
-        return new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return new ScrollViewer
+        {
+            Content = page,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
     }
 
     public static async Task<FrameworkElement> TablesAsync()
