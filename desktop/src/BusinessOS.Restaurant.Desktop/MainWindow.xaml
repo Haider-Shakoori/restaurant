@@ -11,6 +11,7 @@
         UseLayoutRounding="True">
     <Window.Resources>
         <nav:NavigationRouteMatchConverter x:Key="NavigationRouteMatchConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="NavButton" TargetType="Button">
             <Setter Property="Height" Value="44" />
             <Setter Property="Margin" Value="0,2" />
@@ -163,15 +164,20 @@
                                        FontSize="10"
                                        Margin="14,0,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="⌂   Dashboard"
-                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard"
+                                    Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▣   POS &amp; Orders"
-                                    Command="{Binding NavigateCommand}" CommandParameter="pos" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="pos"
+                                    Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor"
-                                    Command="{Binding NavigateCommand}" CommandParameter="tables" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="tables"
+                                    Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="☷   Kitchen / KOT"
-                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen"
+                                    Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
-                                    Command="{Binding NavigateCommand}" CommandParameter="menu" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="menu"
+                                    Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}" />
 
                             <TextBlock Text="MANAGEMENT"
                                        Foreground="{DynamicResource TextMutedBrush}"
@@ -179,15 +185,20 @@
                                        FontSize="10"
                                        Margin="14,18,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="▤   Inventory"
-                                    Command="{Binding NavigateCommand}" CommandParameter="inventory" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="inventory"
+                                    Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▥   Purchases"
-                                    Command="{Binding NavigateCommand}" CommandParameter="purchases" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="purchases"
+                                    Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="$   Expenses"
-                                    Command="{Binding NavigateCommand}" CommandParameter="expenses" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="expenses"
+                                    Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="◉   Daily Closing"
-                                    Command="{Binding NavigateCommand}" CommandParameter="closing" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="closing"
+                                    Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▥   Reports &amp; Accounting"
-                                    Command="{Binding NavigateCommand}" CommandParameter="reports" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="reports"
+                                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}" />
 
                             <TextBlock Text="SYSTEM"
                                        Foreground="{DynamicResource TextMutedBrush}"
@@ -195,9 +206,11 @@
                                        FontSize="10"
                                        Margin="14,18,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="♙   Users &amp; Roles"
-                                    Command="{Binding NavigateCommand}" CommandParameter="users" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="users"
+                                    Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="⚙   Settings"
-                                    Command="{Binding NavigateCommand}" CommandParameter="settings" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="settings"
+                                    Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}" />
                         </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
@@ -242,6 +255,20 @@
                                            Foreground="{DynamicResource SuccessBrush}"
                                            FontWeight="SemiBold" />
                             </Border>
+                            <Border Margin="12,0,0,0" Padding="10,7"
+                                    Background="{DynamicResource TopBarActionBrush}"
+                                    CornerRadius="10">
+                                <TextBlock Text="{Binding OperatorLabel}"
+                                           MaxWidth="165"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </Border>
+                            <Button Margin="8,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="Switch operator"
+                                    ToolTip="Sign in as a different restaurant operator"
+                                    Click="OnSwitchOperatorClick" />
                             <Button Margin="10,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="{Binding ThemeButtonText}"
