@@ -23,6 +23,9 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Modal activation/sign-in windows are not the main workspace. Keep the
+        // process alive until the authenticated MainWindow is available.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         try
         {
@@ -117,6 +120,7 @@ public partial class App : System.Windows.Application
 
         var window = new MainWindow(session);
         MainWindow = window;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
         window.Show();
 
         _ = InitializeServicesSafelyAsync();
