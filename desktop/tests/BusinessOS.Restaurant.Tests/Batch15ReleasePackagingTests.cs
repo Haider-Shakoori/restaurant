@@ -56,6 +56,20 @@ public sealed class Batch15ReleasePackagingTests
     }
 
     [Fact]
+    public void Ci_distinguishes_unsigned_artifacts_and_publishes_verifiable_release_hashes()
+    {
+        var workflow = File.ReadAllText(Path.Combine(RepositoryRoot(),
+            ".github", "workflows", "restaurant-desktop-ci.yml"));
+        Assert.Contains("Generate release provenance and SHA-256 hashes", workflow);
+        Assert.Contains("Get-FileHash $exe -Algorithm SHA256", workflow);
+        Assert.Contains("Get-FileHash $setup.FullName -Algorithm SHA256", workflow);
+        Assert.Contains("source_commit=$env:GITHUB_SHA", workflow);
+        Assert.Contains("build_kind=unsigned_ci", workflow);
+        Assert.Contains("BusinessOS-Restaurant-release-checksums-ci", workflow);
+        Assert.Contains("if-no-files-found: error", workflow);
+    }
+
+    [Fact]
     public void Installer_has_no_destructive_uninstall_directives()
     {
         var installer=File.ReadAllText(Path.Combine(RepositoryRoot(),"desktop","installer","BusinessOS.Restaurant.iss"));
