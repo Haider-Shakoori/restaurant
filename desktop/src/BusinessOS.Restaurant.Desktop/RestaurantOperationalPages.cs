@@ -766,10 +766,10 @@ internal static class RestaurantOperationalPages
                             purchaseLines.Select(x => new LocalPurchaseOrderLineRequest(x.Item.Id, x.Quantity, x.UnitCost)).ToArray(),
                             "Desktop one-step purchase", actor, CancellationToken.None);
                         var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
-                        pendingPurchaseId = snapshot.GetProperty("id").GetString()
+                        var savedPurchaseId = snapshot.GetProperty("id").GetString()
                             ?? throw new InvalidOperationException("Purchase order ID was not returned.");
                         var returnedLines = snapshot.GetProperty("lines").EnumerateArray().ToArray();
-                        pendingReceiptLines = purchaseLines.Select(line =>
+                        var savedReceiptLines = purchaseLines.Select(line =>
                         {
                             var savedLine = returnedLines.Single(x =>
                                 x.GetProperty("inventory_item_id").GetString() == line.Item.Id);
@@ -777,6 +777,8 @@ internal static class RestaurantOperationalPages
                                 ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
                             return new LocalReceivePurchaseOrderLineRequest(savedId, line.Quantity);
                         }).ToArray();
+                        pendingPurchaseId = savedPurchaseId;
+                        pendingReceiptLines = savedReceiptLines;
                         branch.IsEnabled = false;
                         supplier.IsEnabled = false;
                         item.IsEnabled = false;
