@@ -16,7 +16,7 @@ public sealed class PrinterRecoveryPolicyTests
         Assert.DoesNotContain("value.Status == \"printing\"", source);
         Assert.Contains("_retryNotBefore", source);
         Assert.Contains("value.Status == \"pending\" ||", source);
-        Assert.Contains("job.Attempts < 10", source);
+        Assert.Contains("value.Attempts < 10", source);
         Assert.Contains("1 << Math.Min(Math.Max(job.Attempts, 1), 8)", source);
     }
 
