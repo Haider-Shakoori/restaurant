@@ -10,6 +10,46 @@ namespace BusinessOS.Restaurant.Tests;
 public sealed class InventoryProcurementTests
 {
     [Fact]
+    public async Task Desktop_one_step_purchase_posts_stock_and_completes_order()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "FLOUR", "Flour", "kg", "kg", 1m, 0m, actor, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "SUP-FLOUR", "Flour Supplier", null, null, null, actor, CancellationToken.None));
+            var purchase = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                "branch-1", supplier.GetProperty("id").GetString()!,
+                [new LocalPurchaseOrderLineRequest(item.GetProperty("id").GetString()!, 3m, 75m)],
+                "Desktop one-step purchase", actor, CancellationToken.None));
+            var poId = purchase.GetProperty("id").GetString()!;
+            var lineId = purchase.GetProperty("lines")[0].GetProperty("id").GetString()!;
+
+            await inventory.ReceivePurchaseOrderAsync(
+                poId, [new LocalReceivePurchaseOrderLineRequest(lineId, 3m)],
+                "desktop-receipt-" + poId, "Received through desktop purchase form",
+                actor, CancellationToken.None);
+
+            await using var db = factory.Create();
+            Assert.Equal("completed", (await db.PurchaseOrders.SingleAsync()).Status);
+            Assert.Equal(3m, (await db.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Equal(225m, (await db.InventoryValuations.SingleAsync()).Value);
+            Assert.Single(await db.GoodsReceipts.ToListAsync());
+            Assert.Single(await db.StockMovements.ToListAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Purchase_receipts_are_idempotent_and_update_weighted_average_stock()
     {
         var root = CreateTemporaryDirectory();
