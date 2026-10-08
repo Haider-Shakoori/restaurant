@@ -546,10 +546,18 @@ internal static class RestaurantOperationalPages
                     save.IsEnabled = false;
                     var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
                     var inventoryService = new LocalInventoryService(factory);
-                    await inventoryService.CreatePurchaseOrderAsync(selectedBranch.Id, selectedSupplier.Id,
+                    var created = await inventoryService.CreatePurchaseOrderAsync(selectedBranch.Id, selectedSupplier.Id,
                         new[] { new LocalPurchaseOrderLineRequest(selectedItem.Id, qty, unitCost) },
                         "Desktop one-step purchase", actor, CancellationToken.None);
-                    feedback.Text = "Purchase order created. Open purchase order receiving to post stock.";
+                    var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
+                    var poId = snapshot.GetProperty("id").GetString()
+                        ?? throw new InvalidOperationException("Purchase order ID was not returned.");
+                    var poLineId = snapshot.GetProperty("lines")[0].GetProperty("id").GetString()
+                        ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
+                    await inventoryService.ReceivePurchaseOrderAsync(poId,
+                        new[] { new LocalReceivePurchaseOrderLineRequest(poLineId, qty) },
+                        "desktop-receipt-" + poId, "Received through desktop purchase form",
+                        actor, CancellationToken.None);
                     dialog.DialogResult = true;
                 }
                 catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
@@ -557,7 +565,7 @@ internal static class RestaurantOperationalPages
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info, "Purchase order created; receiving is required before stock increases.");
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated.");
         };
         panel.Children.Add(purchaseButton);
         panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
