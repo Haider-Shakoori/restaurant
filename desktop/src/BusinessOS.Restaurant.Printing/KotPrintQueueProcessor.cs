@@ -9,6 +9,8 @@ public sealed class KotPrintQueueProcessor : IAsyncDisposable
     private readonly WindowsRawPrinter _printer;
     private CancellationTokenSource? _cancellation;
     private Task? _loop;
+    // Failed spool submissions back off without consuming ten attempts in seconds.
+    private readonly Dictionary<string, DateTimeOffset> _retryNotBefore = new(StringComparer.Ordinal);
 
     public KotPrintQueueProcessor(
         LocalDatabaseFactory databaseFactory,
@@ -68,13 +70,15 @@ public sealed class KotPrintQueueProcessor : IAsyncDisposable
         var candidates = await db.PrintJobs
             .Where(value =>
                 value.Status == "pending" ||
-                value.Status == "failed" ||
-                value.Status == "printing")
+                value.Status == "failed") // An interrupted "printing" job needs operator review; auto-replay may duplicate food.
+
             .Where(value => value.Attempts < 10)
             .AsNoTracking()
             .ToArrayAsync(cancellationToken);
 
+        var now = DateTimeOffset.UtcNow;
         var candidate = candidates
+            .Where(value => !_retryNotBefore.TryGetValue(value.Id, out var next) || next <= now)
             .OrderBy(value => value.CreatedAtUtc)
             .FirstOrDefault();
 
@@ -101,11 +105,16 @@ public sealed class KotPrintQueueProcessor : IAsyncDisposable
             job.Status = "printed";
             job.PrintedAtUtc = DateTimeOffset.UtcNow;
             job.LastError = null;
+            _retryNotBefore.Remove(job.Id);
         }
         catch (Exception exception) when (
             exception is not OperationCanceledException)
         {
             job.Status = "failed";
+            // Exponential in-process backoff (2..256 seconds). Persisted attempts
+            // still enforce the existing cap across application restarts.
+            _retryNotBefore[job.Id] = DateTimeOffset.UtcNow.AddSeconds(
+                1 << Math.Min(Math.Max(job.Attempts, 1), 8));
             job.LastError = exception.Message.Length > 1000
                 ? exception.Message[..1000]
                 : exception.Message;
