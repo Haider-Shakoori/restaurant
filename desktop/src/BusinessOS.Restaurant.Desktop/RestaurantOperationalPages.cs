@@ -383,6 +383,77 @@ internal static class RestaurantOperationalPages
         };
         panel.Children.Add(create);
         panel.Children.Add(recipes);
+        var recipeCreate = new Button { Content = "+ Create Recipe Version", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipeCreate.Click += async (_, _) =>
+        {
+            await using var lookup = factory.Create();
+            var branches = await lookup.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var menuItems = await lookup.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.Name).ToListAsync();
+            var ingredients = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var dialog = new Window { Title = "New Recipe Version", Width = 480, Height = 520, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
+            var menu = new ComboBox { ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
+            var ingredient = new ComboBox { ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Text = "1", Height = 34 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branch), ("Menu item", menu), ("Ingredient", ingredient),
+                ("Quantity in base units", quantity)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(entry.Input);
+            }
+            var components = new List<LocalRecipeComponentRequest>();
+            var summary = new TextBlock { Text = "Add at least one ingredient.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            var add = new Button { Content = "+ Add Recipe Ingredient", Height = 36 };
+            add.Click += (_, _) =>
+            {
+                if (ingredient.SelectedItem is not LocalInventoryItem selected ||
+                    !decimal.TryParse(quantity.Text, out var amount) || amount <= 0)
+                {
+                    summary.Text = "Choose an ingredient and positive quantity.";
+                    return;
+                }
+                if (components.Any(x => x.InventoryItemId == selected.Id))
+                {
+                    summary.Text = "This ingredient has already been added.";
+                    return;
+                }
+                components.Add(new LocalRecipeComponentRequest(selected.Id, amount));
+                summary.Text = string.Join("\n", components.Select(x =>
+                    ingredients.First(y => y.Id == x.InventoryItemId).Name + ": " + x.QuantityBase));
+            };
+            form.Children.Add(add);
+            form.Children.Add(summary);
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Save Recipe", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
+                        throw new InvalidOperationException("Select branch, menu item and at least one ingredient.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateRecipeVersionAsync(
+                        selectedBranch.Id, selectedMenu.Id, selectedMenu.Name, components, actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Recipe version saved. Refresh Menu to view it.");
+        };
+        panel.Children.Add(recipeCreate);
         panel.Children.Add(grid);
         return Scroll(panel);
     }
