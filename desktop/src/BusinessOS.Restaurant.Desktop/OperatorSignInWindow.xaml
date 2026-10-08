@@ -18,7 +18,7 @@
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
             <Border MaxWidth="570" Margin="28" Padding="32"
-                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
                     CornerRadius="26"
                     Background="{DynamicResource CardBackgroundBrush}"
                     BorderBrush="{DynamicResource CardBorderBrush}"
