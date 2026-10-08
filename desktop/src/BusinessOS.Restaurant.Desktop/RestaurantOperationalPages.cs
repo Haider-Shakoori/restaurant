@@ -73,6 +73,8 @@ internal static class RestaurantOperationalPages
 
         var root = new StackPanel();
 
+        root.Children.Add(DashboardQuickActions());
+
         root.Children.Add(DashboardCards(
             ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
             ("▣", "OPEN ORDERS", openOrders.ToString(), "Orders currently in progress", Color.FromRgb(14, 165, 233)),
@@ -846,6 +848,46 @@ internal static class RestaurantOperationalPages
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
         return border;
+    }
+
+    private static FrameworkElement DashboardQuickActions()
+    {
+        // Navigate through MainWindowViewModel rather than bypassing existing
+        // page loading or permissions. Commands inherit the shell DataContext.
+        var links = new (string Label, string Route, string Hint)[]
+        {
+            ("▣  New order / POS", "pos", "Open orders and cashier"),
+            ("▦  Tables & floor", "tables", "Manage dining tables"),
+            ("☷  Kitchen / KOT", "kitchen", "Review production tickets"),
+            ("▤  Inventory", "inventory", "Review ingredient alerts"),
+        };
+
+        var wrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 14) };
+        foreach (var (label, route, hint) in links)
+        {
+            var button = new Button
+            {
+                Content = label,
+                CommandParameter = route,
+                ToolTip = hint,
+                Height = 42,
+                MinWidth = 190,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 10, 8),
+                Padding = new Thickness(14, 0, 14, 0),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+            };
+            button.SetResourceReference(Button.BackgroundProperty, "TopBarActionBrush");
+            button.SetResourceReference(Button.ForegroundProperty, "TextPrimaryBrush");
+            button.SetResourceReference(Button.BorderBrushProperty, "CardBorderBrush");
+            button.BorderThickness = new Thickness(1);
+            button.SetBinding(Button.CommandProperty,
+                new Binding(nameof(MainWindowViewModel.NavigateCommand)));
+            wrap.Children.Add(button);
+        }
+
+        return wrap;
     }
 
     private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail, Color Accent)[] values)
