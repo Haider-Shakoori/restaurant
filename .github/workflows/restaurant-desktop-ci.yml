@@ -235,6 +235,27 @@ jobs:
           $manifest | Set-Content -Path $out -Encoding UTF8
           Get-Content $out | Write-Host
 
+      - name: Verify release provenance against built artifacts
+        shell: pwsh
+        run: |
+          $manifestPath = "artifacts/restaurant-release-manifest.txt"
+          if (!(Test-Path $manifestPath)) { throw "Release manifest missing." }
+          $fields = @{}
+          foreach ($line in Get-Content $manifestPath) {
+            $pair = $line -split '=', 2
+            if ($pair.Count -ne 2 -or $fields.ContainsKey($pair[0])) { throw "Invalid or duplicate release manifest entry." }
+            $fields[$pair[0]] = $pair[1]
+          }
+          if ($fields["source_commit"] -ne $env:GITHUB_SHA) { throw "Release manifest commit does not match checkout." }
+          if ($fields["build_kind"] -ne "unsigned_ci") { throw "CI release manifest must identify unsigned artifacts." }
+          if ($fields["desktop_exe"] -ne "BusinessOS.Restaurant.Desktop.exe") { throw "Unexpected desktop EXE name." }
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $setup = Join-Path "installer/output" $fields["installer"]
+          if (!(Test-Path $exe) -or !(Test-Path $setup)) { throw "Release artifact missing for manifest verification." }
+          if ($fields["desktop_exe_sha256"] -ne (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Desktop EXE hash mismatch." }
+          if ($fields["installer_sha256"] -ne (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Installer hash mismatch." }
+          Write-Host "Release manifest source commit and both artifact hashes verified."
+
       - name: Upload release checksum manifest
         uses: actions/upload-artifact@v4
         with:
