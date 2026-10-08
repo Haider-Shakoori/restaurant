@@ -211,6 +211,34 @@ jobs:
               Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Generate release provenance and SHA-256 hashes
+        shell: pwsh
+        run: |
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $setup = Get-ChildItem "installer/output" -Filter "BusinessOS-Restaurant-Setup-*-win-x64.exe" |
+            Select-Object -First 1
+          if (!(Test-Path $exe) -or !$setup) { throw "Both release outputs must exist before hashing." }
+
+          $manifest = @(
+            "project=BusinessOS Restaurant"
+            "source_commit=$env:GITHUB_SHA"
+            "build_kind=unsigned_ci"
+            "desktop_exe=BusinessOS.Restaurant.Desktop.exe"
+            "desktop_exe_sha256=$((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant())"
+            "installer=$($setup.Name)"
+            "installer_sha256=$((Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant())"
+          )
+          $out = "artifacts/restaurant-release-manifest.txt"
+          $manifest | Set-Content -Path $out -Encoding UTF8
+          Get-Content $out | Write-Host
+
+      - name: Upload release checksum manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: BusinessOS-Restaurant-release-checksums-ci
+          path: desktop/artifacts/restaurant-release-manifest.txt
+          if-no-files-found: error
+
       - name: Upload unsigned CI release
         uses: actions/upload-artifact@v4
         with:
