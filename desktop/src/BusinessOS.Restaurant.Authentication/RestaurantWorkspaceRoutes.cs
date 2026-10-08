@@ -24,7 +24,7 @@ public static class RestaurantWorkspaceRoutes
         {
             RestaurantRoles.Cashier => normalizedRoute is "dashboard" or "pos" or "tables" or "closing",
             RestaurantRoles.Waiter => normalizedRoute is "dashboard" or "pos" or "tables",
-            RestaurantRoles.Kitchen => normalizedRoute is "kitchen",
+            RestaurantRoles.Kitchen or RestaurantRoles.Expo => normalizedRoute is "kitchen",
             _ => false,
         };
     }
