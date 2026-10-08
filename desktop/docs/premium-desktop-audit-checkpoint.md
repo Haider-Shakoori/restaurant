@@ -153,3 +153,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Restore now fails closed on an incomplete staged pair and verifies the fully prepared replacement before archiving live sidecars. If the final swap fails, moved sidecars are restored alongside the unchanged live database.
 - Added regression coverage for both incomplete-pair variants and a deliberately blocked destination-copy scenario that must preserve the original WAL sentinel.
 - Windows CI and physical crash/power-loss acceptance are still required; this is not a production release claim.
+
+## Batch 12 follow-up — Latest-request-wins workspace navigation (CI acceptance pending)
+
+- Corrected a verified asynchronous race where a slow earlier route load or toolbar refresh could overwrite a newer workspace page.
+- Added a shared generation gate for page-loading intentions; refresh obtains a generation before diagnostic awaits, navigation obtains one after authorization, and both publish results only if the generation remains current.
+- Existing authorization remains the route gate; failed loads preserve the previously active page, header and route. No cancellation or rollback of restaurant operations was introduced.
+- Added real unit regressions for request supersession and out-of-order async completion plus a source-level wiring assertion.
+- Changes are Desktop-only; no database schema, restaurant production, printing, licensing or Web/Flutter changes.
+- Await new Windows CI and then perform the documented hardware/visual/golden-path acceptance before merging or distributing.

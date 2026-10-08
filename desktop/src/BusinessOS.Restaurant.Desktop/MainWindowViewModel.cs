@@ -11,6 +11,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly LanDiagnosticsViewModel _diagnostics = new();
     private readonly RestaurantLicenseCoordinator _licenses = new();
     private readonly AuthSession _session;
+    // Every navigation and refresh shares one generation; stale loads cannot replace a newer workspace.
+    private readonly NavigationRequestGate _pageRequests = new();
 
     public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
     public bool CanViewDashboard => CanView("dashboard");
@@ -64,13 +66,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task RefreshAsync()
     {
+        // Register refresh intent before the first await, including diagnostic I/O.
+        var requestId = _pageRequests.Begin();
         await RefreshDiagnosticsAsync();
+        if (!_pageRequests.IsCurrent(requestId))
+            return;
 
         // Recreate the active operational page from the local store. Preserve the visible page
         // if loading fails, and never overwrite a newer navigation that completed meanwhile.
         var route = CurrentRoute;
         var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
-        if (CurrentRoute == route)
+        if (_pageRequests.IsCurrent(requestId) && CurrentRoute == route && CanView(route))
         {
             CurrentPage = refreshedPage;
         }
@@ -100,6 +106,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (!CanView(route))
             return; // Shell visibility is not authorization: reject direct route commands too.
 
+        // A later refresh or navigation supersedes even a still-loading earlier route.
+        var requestId = _pageRequests.Begin();
+
         var (pageTitle, pageSubtitle) = route switch
         {
             "dashboard" => ("Dashboard", "Restaurant overview and today's operations"),
@@ -121,6 +130,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // successful load. If SQLite or a device is unavailable, the existing
         // page must not appear under a misleading new navigation title.
         var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+        if (!_pageRequests.IsCurrent(requestId))
+            return;
+
         PageTitle = pageTitle;
         PageSubtitle = pageSubtitle;
         CurrentPage = page;

@@ -54,6 +54,68 @@ public sealed class PremiumNavigationTests
                     viewModel.IndexOf("CurrentRoute = route;", StringComparison.Ordinal));
     }
 
+
+    [Fact]
+    public void Latest_navigation_or_refresh_request_invalidates_previously_started_loads()
+    {
+        var gate = new BusinessOS.Restaurant.Desktop.NavigationRequestGate();
+        var firstNavigation = gate.Begin();
+        Assert.True(gate.IsCurrent(firstNavigation));
+        var refresh = gate.Begin();
+        Assert.False(gate.IsCurrent(firstNavigation));
+        Assert.True(gate.IsCurrent(refresh));
+        var secondNavigation = gate.Begin();
+        Assert.False(gate.IsCurrent(refresh));
+        Assert.True(gate.IsCurrent(secondNavigation));
+        Assert.False(gate.IsCurrent(0));
+    }
+
+    [Fact]
+    public async Task A_stale_page_finishing_last_cannot_overwrite_the_new_page()
+    {
+        var gate = new BusinessOS.Restaurant.Desktop.NavigationRequestGate();
+        var firstLoader = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondLoader = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        string visiblePage = "Dashboard";
+
+        async Task LoadAsync(Task<string> load)
+        {
+            var requestId = gate.Begin();
+            var page = await load;
+            if (gate.IsCurrent(requestId))
+                visiblePage = page;
+        }
+
+        var first = LoadAsync(firstLoader.Task);
+        var second = LoadAsync(secondLoader.Task);
+        secondLoader.SetResult("Kitchen");
+        await second;
+        firstLoader.SetResult("POS");
+        await first;
+        Assert.Equal("Kitchen", visiblePage);
+    }
+
+    [Fact]
+    public void Both_navigation_and_refresh_gate_the_page_before_publishing()
+    {
+        var root = RepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "MainWindowViewModel.cs"));
+        Assert.Contains("private readonly NavigationRequestGate _pageRequests", source);
+        var refresh = source.Split("private async Task RefreshAsync()", StringSplitOptions.None)[1]
+            .Split("private async Task RefreshDiagnosticsAsync()", StringSplitOptions.None)[0];
+        var navigate = source.Split("private async Task NavigateAsync(string? key)", StringSplitOptions.None)[1];
+        Assert.Contains("var requestId = _pageRequests.Begin();", refresh);
+        Assert.Contains("var requestId = _pageRequests.Begin();", navigate);
+        Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", refresh);
+        Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", navigate);
+        Assert.Contains("_pageRequests.IsCurrent(requestId) && CurrentRoute == route", refresh);
+        Assert.True(refresh.IndexOf("_pageRequests.Begin()", StringComparison.Ordinal) <
+                    refresh.IndexOf("await RefreshDiagnosticsAsync();", StringComparison.Ordinal));
+        Assert.True(navigate.IndexOf("if (!_pageRequests.IsCurrent(requestId))", StringComparison.Ordinal) <
+                    navigate.IndexOf("PageTitle = pageTitle;", StringComparison.Ordinal));
+    }
+
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
