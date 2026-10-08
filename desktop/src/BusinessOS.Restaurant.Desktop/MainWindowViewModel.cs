@@ -1,3 +1,4 @@
+using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop.Appearance;
 using BusinessOS.Restaurant.Licensing;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -9,6 +10,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
 {
     private readonly LanDiagnosticsViewModel _diagnostics = new();
     private readonly RestaurantLicenseCoordinator _licenses = new();
+    private readonly AuthSession _session;
+
+    public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
+    public bool CanViewDashboard => CanView("dashboard");
+    public bool CanViewPos => CanView("pos");
+    public bool CanViewTables => CanView("tables");
+    public bool CanViewKitchen => CanView("kitchen");
+    public bool CanViewMenu => CanView("menu");
+    public bool CanViewInventory => CanView("inventory");
+    public bool CanViewPurchases => CanView("purchases");
+    public bool CanViewExpenses => CanView("expenses");
+    public bool CanViewClosing => CanView("closing");
+    public bool CanViewReports => CanView("reports");
+    public bool CanViewUsers => CanView("users");
+    public bool CanViewSettings => CanView("settings");
+
+    private bool CanView(string route) =>
+        RestaurantWorkspaceRoutes.CanOpen(_session.User.Role, route);
 
     [ObservableProperty] private string _pageTitle = "Dashboard";
     [ObservableProperty] private string _pageSubtitle = "Restaurant overview and today's operations";
@@ -27,8 +46,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public IRelayCommand ToggleThemeCommand { get; }
 
-    public MainWindowViewModel()
+    public MainWindowViewModel(AuthSession session)
     {
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+        CurrentRoute = RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
@@ -38,7 +59,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         // Startup loads the dashboard once; the toolbar refresh additionally reloads the active page.
         await RefreshDiagnosticsAsync();
-        await NavigateAsync("dashboard");
+        await NavigateAsync(RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role));
     }
 
     private async Task RefreshAsync()
@@ -75,7 +96,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task NavigateAsync(string? key)
     {
-        var route = key ?? "dashboard";
+        var route = key ?? RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
+        if (!CanView(route))
+            return; // Shell visibility is not authorization: reject direct route commands too.
+
         (PageTitle, PageSubtitle) = route switch
         {
             "dashboard" => ("Dashboard", "Restaurant overview and today's operations"),
