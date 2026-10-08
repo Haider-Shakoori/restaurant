@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -352,7 +353,12 @@ internal static class OperationalActionViews
 
         var page = new StackPanel();
         page.Children.Add(root);
-        page.Children.Add(Card(cashier));
+        // Waiters may enter orders but never see cashier-only billing/session
+        // controls. Local service authorization remains the final action gate.
+        var operatorSession = await new WindowsSessionStore().LoadAsync();
+        var role = operatorSession?.User.Role?.Trim().ToLowerInvariant();
+        if (role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier)
+            page.Children.Add(Card(cashier));
         return new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
