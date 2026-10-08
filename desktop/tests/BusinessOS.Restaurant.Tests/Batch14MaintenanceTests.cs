@@ -94,4 +94,60 @@ public sealed class Batch14MaintenanceTests
         await Assert.ThrowsAnyAsync<Exception>(()=>service.StageRestoreAsync(bad));
         Directory.Delete(root,true);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Incomplete_restore_staging_fails_closed_and_preserves_live_database(bool removeMarker)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"bos-incomplete-restore-{Guid.NewGuid():N}");
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var maintenance = new LocalMaintenanceService(factory, root);
+            await factory.EnsureCreatedAsync();
+            var backup = await maintenance.CreateBackupAsync();
+            await maintenance.StageRestoreAsync(backup.Path);
+            var liveBefore = await File.ReadAllBytesAsync(factory.DatabasePath);
+
+            var incompletePath = Path.Combine(root, "restore", removeMarker ? "pending.json" : "pending.db");
+            File.Delete(incompletePath);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => maintenance.ApplyPendingRestoreAsync());
+            Assert.Equal(liveBefore, await File.ReadAllBytesAsync(factory.DatabasePath));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Failed_restore_preparation_leaves_live_sqlite_sidecars_untouched()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"bos-restore-copy-failure-{Guid.NewGuid():N}");
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var maintenance = new LocalMaintenanceService(factory, root);
+            await factory.EnsureCreatedAsync();
+            var backup = await maintenance.CreateBackupAsync();
+            await maintenance.StageRestoreAsync(backup.Path);
+
+            // Block the destination copy without touching the live DB. The
+            // sidecar is a sentinel: do not open SQLite while it is present.
+            var sidecar = factory.DatabasePath + "-wal";
+            var sentinel = new byte[] { 0x11, 0x22, 0x33, 0x44 };
+            await File.WriteAllBytesAsync(sidecar, sentinel);
+            Directory.CreateDirectory(factory.DatabasePath + ".restore");
+
+            await Assert.ThrowsAnyAsync<Exception>(() => maintenance.ApplyPendingRestoreAsync());
+            Assert.Equal(sentinel, await File.ReadAllBytesAsync(sidecar));
+            Assert.True(File.Exists(Path.Combine(root, "restore", "pending.json")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }

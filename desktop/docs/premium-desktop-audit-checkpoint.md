@@ -146,3 +146,10 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added `desktop/docs/restaurant-premium-final-acceptance.md` with a 12-batch implementation matrix, automated CI/build/provenance gate and 30-step physical restaurant acceptance script.
 - Implementation batches were deliberately not gated on intermediate CI per user authorization. The final combined test and release-acceptance phase is required now.
 - **Do not merge PR #69, distribute an unsigned CI installer as production-signed, or claim the Restaurant Desktop app production-ready until final CI is green and all critical real-hardware/visual tests pass.**
+
+## Batch 12 follow-up — Restore failure safety regression
+
+- Final-gate inspection found a data-safety gap: a restore with only one of its staged files silently returned "no pending restore," and a failed replacement-file copy could occur after existing SQLite WAL/SHM sidecars had already been archived.
+- Restore now fails closed on an incomplete staged pair and verifies the fully prepared replacement before archiving live sidecars. If the final swap fails, moved sidecars are restored alongside the unchanged live database.
+- Added regression coverage for both incomplete-pair variants and a deliberately blocked destination-copy scenario that must preserve the original WAL sentinel.
+- Windows CI and physical crash/power-loss acceptance are still required; this is not a production release claim.
