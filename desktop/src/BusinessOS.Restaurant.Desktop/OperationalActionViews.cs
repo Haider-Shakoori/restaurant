@@ -1020,7 +1020,7 @@ internal static class OperationalActionViews
             var rush = visible.Count(row => row.Priority == "rush" &&
                 row.Status is not ("completed" or "ready"));
             var overdue = visible.Count(row =>
-                row.Status is "queued" or "active" or "preparing" or "expo" &&
+                (row.Status is "queued" or "active" or "preparing" or "expo") &&
                 DateTimeOffset.UtcNow - row.QueuedAt >=
                     TimeSpan.FromMinutes(settings.KitchenLateMinutes));
 
