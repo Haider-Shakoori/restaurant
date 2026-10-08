@@ -14,7 +14,7 @@ public sealed class DashboardSalesTrendTests
         var now = new DateTimeOffset(2026, 10, 8, 2, 0, 0, TimeSpan.Zero); // 06:30 Kabul
         var sales = DashboardSalesTrend.Aggregate(now, new[]
         {
-            (new DateTimeOffset(2026, 10, 7, 20, 0, 0, TimeSpan.Zero), 100m), // prior day 00:30
+            (new DateTimeOffset(2026, 10, 7, 19, 0, 0, TimeSpan.Zero), 100m), // prior day 23:30
             (new DateTimeOffset(2026, 10, 7, 20, 15, 0, TimeSpan.Zero), 250m), // 00:45 today
             (new DateTimeOffset(2026, 10, 8, 0, 30, 0, TimeSpan.Zero), 50m), // 05:00 today
             (new DateTimeOffset(2026, 10, 8, 3, 0, 0, TimeSpan.Zero), 999m), // future
