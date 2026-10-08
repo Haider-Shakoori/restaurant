@@ -44,16 +44,70 @@ public sealed class LocalMaintenanceService
         await File.WriteAllTextAsync(Path.Combine(restoreDir,"pending.json"),JsonSerializer.Serialize(new { source=Path.GetFileName(backupPath), sha256=await Sha256Async(staged,token), stagedAtUtc=DateTimeOffset.UtcNow }),token);
     }
 
-    public async Task<bool> ApplyPendingRestoreAsync(CancellationToken token=default)
+    public async Task<bool> ApplyPendingRestoreAsync(CancellationToken token = default)
     {
-        var restoreDir=Path.Combine(_root,"restore"); var staged=Path.Combine(restoreDir,"pending.db"); var marker=Path.Combine(restoreDir,"pending.json");
-        if(!File.Exists(staged) || !File.Exists(marker)) return false;
-        await ValidateDatabaseAsync(staged,token);
+        var restoreDir = Path.Combine(_root, "restore");
+        var staged = Path.Combine(restoreDir, "pending.db");
+        var marker = Path.Combine(restoreDir, "pending.json");
+        if (!File.Exists(staged) || !File.Exists(marker))
+            return false;
+
+        // Detect a swapped/tampered staging file BEFORE changing the live database.
+        // The existing marker already records this hash; the old implementation
+        // never actually verified it.
+        using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(marker, token));
+        var expected = manifest.RootElement.GetProperty("sha256").GetString();
+        var actual = await Sha256Async(staged, token);
+        if (string.IsNullOrWhiteSpace(expected) ||
+            !string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The staged restaurant backup checksum does not match its restore marker.");
+
+        await ValidateDatabaseAsync(staged, token);
         Directory.CreateDirectory(Path.GetDirectoryName(_factory.DatabasePath)!);
-        var safety=Path.Combine(_root,"backups",$"pre-restore-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}.db");
-        if(File.Exists(_factory.DatabasePath)){ Directory.CreateDirectory(Path.GetDirectoryName(safety)!); File.Copy(_factory.DatabasePath,safety,true); }
-        var temp=_factory.DatabasePath+".restore"; File.Copy(staged,temp,true); File.Move(temp,_factory.DatabasePath,true);
-        File.Delete(staged); File.Delete(marker);
+
+        var current = _factory.DatabasePath;
+        if (File.Exists(current))
+        {
+            var backupDirectory = Path.Combine(_root, "backups");
+            Directory.CreateDirectory(backupDirectory);
+            var safety = Path.Combine(backupDirectory,
+                $"pre-restore-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.db");
+
+            try
+            {
+                // Online backup includes committed WAL data; raw SQLite file copying
+                // can omit uncheckpointed transactions.
+                await using var source = _factory.CreateConnection();
+                await source.OpenAsync(token);
+                await using var target = new SqliteConnection(new SqliteConnectionStringBuilder
+                {
+                    DataSource = safety, Pooling = false,
+                }.ToString());
+                await target.OpenAsync(token);
+                source.BackupDatabase(target);
+            }
+            catch (SqliteException)
+            {
+                // An already-corrupt live database should not prevent restoring a
+                // validated backup. Preserve its bytes and sidecars for diagnostics.
+                File.Copy(current, safety, overwrite: true);
+                foreach (var suffix in new[] { "-wal", "-shm" })
+                    if (File.Exists(current + suffix))
+                        File.Copy(current + suffix, safety + suffix, overwrite: true);
+            }
+
+            // Old WAL/SHM must not be associated with the incoming restored DB.
+            // Archive rather than delete them so failed recovery stays inspectable.
+            foreach (var suffix in new[] { "-wal", "-shm" })
+                if (File.Exists(current + suffix))
+                    File.Move(current + suffix, safety + suffix, overwrite: true);
+        }
+
+        var temporary = current + ".restore";
+        File.Copy(staged, temporary, overwrite: true);
+        File.Move(temporary, current, overwrite: true);
+        File.Delete(staged);
+        File.Delete(marker);
         return true;
     }
 
