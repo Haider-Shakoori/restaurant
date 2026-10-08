@@ -72,6 +72,9 @@ jobs:
           $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
           if (!(Test-Path $exe)) { throw "Release EXE missing." }
           if ((Get-Item $exe).Length -lt 1MB) { throw "Release EXE is unexpectedly small." }
+          $signature = Get-AuthenticodeSignature -FilePath $exe
+          if ($signature.Status -ne "NotSigned") { throw "CI artifact must be unsigned; unexpected signature status: $($signature.Status)" }
+          Write-Host "Verified CI executable is unsigned (development/testing only)."
           $fw = Get-Content "installer/Configure-LanFirewall.ps1" -Raw
           if ($fw -notmatch 'Profile Domain,Private') { throw "Firewall profile scope regression." }
           if ($fw -match 'Profile Public') { throw "Public firewall exposure is forbidden by default." }
