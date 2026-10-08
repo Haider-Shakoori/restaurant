@@ -679,6 +679,11 @@ internal static class RestaurantOperationalPages
             "These settings drive the Desktop KOT/KDS state machine and are included in LAN bootstrap/settings APIs for cross-client alignment.",
             workflowPanel));
 
+        panel.Children.Add(Section(
+            "Printing & Recovery",
+            "KOT and receipt queues are independent. Interrupted spool submissions are not replayed automatically because an unconfirmed replay can cause duplicate food production.",
+            await PrinterQueueRecoveryPanelAsync(workflow)));
+
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
             ("WAITER DEVICES", diagnostics.TerminalSummary),
@@ -765,6 +770,127 @@ internal static class RestaurantOperationalPages
             "Select a waiter device above to enable/disable or unpair it. Device-management actions require an Owner or Manager session. Disabling or unpairing a terminal does not disable the restaurant desktop or other LAN terminals."));
 
         return Scroll(panel);
+    }
+
+    private static async Task<FrameworkElement> PrinterQueueRecoveryPanelAsync(
+        DesktopRestaurantWorkflowService workflow)
+    {
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        await using var db = factory.Create();
+
+        var kitchen = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .OrderBy(job => job.CreatedAtUtc)
+            .ToArrayAsync();
+        var receipts = await db.ReceiptPrintJobs.AsNoTracking()
+            .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .OrderBy(job => job.CreatedAtUtc)
+            .ToArrayAsync();
+
+        var interrupted = kitchen.Count(job => job.Status == "printing") +
+                          receipts.Count(job => job.Status == "printing");
+        var failed = kitchen.Count(job => job.Status == "failed") +
+                     receipts.Count(job => job.Status == "failed");
+        var pending = kitchen.Count(job => job.Status == "pending") +
+                      receipts.Count(job => job.Status == "pending");
+
+        var panel = new StackPanel();
+        var header = new TextBlock
+        {
+            Text = $"{pending} pending · {failed} failed · {interrupted} require physical printer review",
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        header.SetResourceReference(TextBlock.ForegroundProperty,
+            failed + interrupted > 0 ? "BrandPrimaryBrush" : "TextSecondaryBrush");
+        panel.Children.Add(header);
+
+        var instructions = new TextBlock
+        {
+            Text = "Before retrying, check whether the kitchen ticket or receipt already printed. " +
+                   "A manager-confirmed retry may print the same document again; it never creates another KOT round or bill.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        instructions.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(instructions);
+
+        var retryItems = new System.Collections.ObjectModel.ObservableCollection<PrinterIssueChoice>(
+            kitchen.Where(job => job.Status != "pending")
+                .Select(job => new PrinterIssueChoice(job.Id, false,
+                    $"KOT · {job.Status.ToUpperInvariant()} · {job.DocumentName} · {job.PrinterName}"))
+                .Concat(receipts.Where(job => job.Status != "pending")
+                    .Select(job => new PrinterIssueChoice(job.Id, true,
+                        $"RECEIPT · {job.Status.ToUpperInvariant()} · {job.DocumentName} · {job.PrinterName}"))));
+
+        var choice = new ComboBox
+        {
+            ItemsSource = retryItems,
+            DisplayMemberPath = nameof(PrinterIssueChoice.Display),
+            Width = 540,
+            MaxWidth = 540,
+            Height = 38,
+            Margin = new Thickness(0, 0, 0, 8),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        panel.Children.Add(choice);
+
+        var retry = new Button
+        {
+            Content = "Review & retry selected print",
+            Height = 38,
+            MinWidth = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            IsEnabled = retryItems.Count > 0,
+        };
+        var message = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        message.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        retry.Click += async (_, _) =>
+        {
+            if (choice.SelectedItem is not PrinterIssueChoice selected)
+            {
+                message.Text = "Select a failed or interrupted printer job.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                "Check the physical printer output first. A retry could print a duplicate " +
+                "ticket or receipt. Confirm that you have checked and want to requeue this exact job.",
+                "Confirm printer recovery",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            retry.IsEnabled = false;
+            try
+            {
+                await workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt);
+                retryItems.Remove(selected);
+                message.Text = "The existing print document was requeued and audited. " +
+                               "No new order, kitchen production or payment record was created.";
+            }
+            catch (Exception exception)
+            {
+                message.Text = exception.Message;
+            }
+            finally
+            {
+                retry.IsEnabled = retryItems.Count > 0;
+            }
+        };
+
+        panel.Children.Add(retry);
+        panel.Children.Add(message);
+        return panel;
     }
 
     private static FrameworkElement Placeholder(string route)
@@ -1450,6 +1576,8 @@ internal static class RestaurantOperationalPages
     private sealed record KitchenRow(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
     private sealed record OrderRow(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total, DateTimeOffset UpdatedAt);
     private sealed record MenuRow(string Sku, string Name, string Category, decimal Price, string Currency, bool Available);
+    private sealed record PrinterIssueChoice(string Id, bool Receipt, string Display);
+
     private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal Quantity, decimal ReorderLevel, decimal AverageCost, decimal StockValue);
     private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt, DateTimeOffset? CompletedAt);
     private sealed record SupplierRow(string Code, string Name, string? Phone, string? Email);
