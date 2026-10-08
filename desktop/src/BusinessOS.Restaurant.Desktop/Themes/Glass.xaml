@@ -17,6 +17,12 @@
     </LinearGradientBrush>
 
     <SolidColorBrush x:Key="CardBorderBrush" Color="#D8FFFFFF" />
+    <!-- Nested rows and toolbar controls remain translucent over the blurred artwork. -->
+    <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#B6F8FBFF" />
+    <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#98EDF6FF" />
+    <SolidColorBrush x:Key="GridHeaderBackgroundBrush" Color="#B0EEF5FF" />
+    <SolidColorBrush x:Key="GridSelectedRowBrush" Color="#A6D4E8FF" />
+    <SolidColorBrush x:Key="TopBarActionBrush" Color="#92F8FBFF" />
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#D4FFFFFF" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#101828" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#344054" />
