@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using BusinessOS.Restaurant.Application.OperationalData;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -38,17 +39,19 @@ internal static class RestaurantOperationalPages
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
 
-        var from = DateTimeOffset.UtcNow.Date;
-        var to = from.AddDays(1);
+        var now = DateTimeOffset.Now;
         var openOrders = await db.Orders.CountAsync(x => x.Status != "closed");
         var activeTables = await db.DiningTables.CountAsync(x => x.IsActive && x.Status != "available");
         var activeKot = await db.KitchenTickets.CountAsync(x =>
             x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
-        var sales = (await db.Bills.AsNoTracking()
-                .Select(x => new { x.IssuedAt, x.Total })
-                .ToListAsync())
-            .Where(x => x.IssuedAt >= from && x.IssuedAt < to)
-            .Sum(x => x.Total);
+        // Read only bill timestamps and totals; interpret the business day in local time.
+        // The chart uses exactly the same billed totals as the headline (never sample points).
+        var billRows = await db.Bills.AsNoTracking()
+            .Select(x => new { x.IssuedAt, x.Total })
+            .ToListAsync();
+        var salesTrend = DashboardSalesTrend.Aggregate(
+            now, billRows.Select(x => (x.IssuedAt, x.Total)));
+        var sales = salesTrend.Total;
 
         var root = new StackPanel();
 
@@ -66,8 +69,8 @@ internal static class RestaurantOperationalPages
 
         var operations = DashboardPanel(
             "Restaurant Overview",
-            "Live operational snapshot",
-            BuildOperationsOverview(sales, openOrders, activeTables, activeKot));
+            $"Hourly billed sales · {salesTrend.BusinessDay:dd MMM yyyy} (local time)",
+            BuildOperationsOverview(sales, openOrders, activeTables, activeKot, salesTrend, now.Hour));
         Grid.SetColumn(operations, 0);
         overviewGrid.Children.Add(operations);
 
@@ -999,7 +1002,9 @@ internal static class RestaurantOperationalPages
         return border;
     }
 
-    private static UIElement BuildOperationsOverview(decimal sales, int orders, int tables, int kitchen)
+    private static UIElement BuildOperationsOverview(
+        decimal sales, int orders, int tables, int kitchen,
+        DashboardDailySales salesTrend, int currentHour)
     {
         var grid = new Grid { MinHeight = 178 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1016,38 +1021,92 @@ internal static class RestaurantOperationalPages
         metrics.Children.Add(MiniMetric("Kitchen", kitchen.ToString(), Color.FromRgb(236, 72, 153)));
         grid.Children.Add(metrics);
 
-        var chart = new Grid { Margin = new Thickness(4, 6, 4, 0) };
-        for (var i = 0; i < 5; i++)
+        var trend = salesTrend.HourlyTotals.Take(currentHour + 1).ToArray();
+        var chartArea = new Grid { Height = 138, Margin = new Thickness(4, 6, 4, 0) };
+
+        if (trend.All(amount => amount <= 0))
         {
-            chart.RowDefinitions.Add(new RowDefinition());
-            var line = new Border
+            var empty = new TextBlock
             {
-                Height = 1,
-                Opacity = 0.32,
-                VerticalAlignment = VerticalAlignment.Top,
+                Text = "No billed sales yet today — the trend will appear after the first bill.",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            line.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
-            Grid.SetRow(line, i);
-            chart.Children.Add(line);
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            chartArea.Children.Add(empty);
+        }
+        else
+        {
+            // Viewbox scales real hourly totals to the current dashboard width.
+            // An empty business day never draws a fake upward line.
+            var plot = new Canvas { Width = 700, Height = 118, ClipToBounds = true };
+            for (var i = 0; i < 4; i++)
+            {
+                var guide = new Line
+                {
+                    X1 = 14, X2 = 686,
+                    Y1 = 20 + i * 29, Y2 = 20 + i * 29,
+                    StrokeThickness = 1, Opacity = 0.26,
+                };
+                guide.SetResourceReference(Shape.StrokeProperty, "BorderBrush");
+                plot.Children.Add(guide);
+            }
+
+            var peak = trend.Max();
+            var points = new PointCollection();
+            for (var hour = 0; hour < trend.Length; hour++)
+            {
+                var x = trend.Length == 1 ? 350 : 16 + hour * (668.0 / (trend.Length - 1));
+                var y = 108 - 86 * (double)(Math.Max(0m, trend[hour]) / peak);
+                points.Add(new Point(x, y));
+            }
+
+            if (points.Count > 1)
+            {
+                plot.Children.Add(new Polyline
+                {
+                    Points = points,
+                    Stroke = new SolidColorBrush(Color.FromRgb(47, 107, 255)),
+                    StrokeThickness = 3,
+                    StrokeLineJoin = PenLineJoin.Round,
+                });
+            }
+
+            var lastPoint = points[^1];
+            var marker = new Ellipse
+            {
+                Width = 9, Height = 9,
+                Fill = new SolidColorBrush(Color.FromRgb(47, 107, 255)),
+                Stroke = Brushes.White,
+                StrokeThickness = 1.5,
+            };
+            Canvas.SetLeft(marker, lastPoint.X - 4.5);
+            Canvas.SetTop(marker, lastPoint.Y - 4.5);
+            plot.Children.Add(marker);
+            chartArea.Children.Add(new Viewbox { Child = plot, Stretch = Stretch.Fill });
         }
 
-        var baseline = new Polyline
+        var chartStack = new StackPanel();
+        chartStack.Children.Add(chartArea);
+        var timeLabels = new Grid { Margin = new Thickness(5, 0, 5, 0) };
+        timeLabels.Children.Add(new TextBlock
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(59, 130, 246)),
-            StrokeThickness = 2.2,
-            StrokeLineJoin = PenLineJoin.Round,
-            Points = new PointCollection
-            {
-                new(0, 104), new(70, 100), new(140, 101), new(210, 94),
-                new(280, 92), new(350, 82), new(420, 86), new(490, 70),
-                new(560, 74), new(630, 58), new(700, 61)
-            },
-            Stretch = Stretch.Fill,
-            Margin = new Thickness(0, 8, 0, 10),
-        };
-        chart.Children.Add(baseline);
-        Grid.SetRow(chart, 1);
-        grid.Children.Add(chart);
+            Text = "00:00",
+            FontSize = 10,
+            Foreground = Brushes.SlateGray,
+        });
+        timeLabels.Children.Add(new TextBlock
+        {
+            Text = $"{currentHour:00}:00 · local time",
+            FontSize = 10,
+            Foreground = Brushes.SlateGray,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        });
+        chartStack.Children.Add(timeLabels);
+        Grid.SetRow(chartStack, 1);
+        grid.Children.Add(chartStack);
 
         return grid;
     }
