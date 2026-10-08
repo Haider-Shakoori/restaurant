@@ -71,3 +71,11 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added pure domain regression tests for branch separation, empty inventory, out-of-stock ordering, and threshold boundary conditions.
 - No changes to Laravel, Flutter, purchasing, pricing, stock movement, KOT, or existing SQLite schema.
 - Next acceptance gate: .NET tests, Windows publish/installer smoke tests, then green GitHub Actions before starting another batch.
+
+## Batch 4 — Theme-consistent nested surfaces (deferred final acceptance)
+
+- Confirmed the photo backdrop, Glass/Classic switch, and shared card brushes already exist. Did not replace the supplied restaurant background.
+- Removed fixed white WPF DataGrid row paint from the shared application style; nested row, alternate row, header, selected row and topbar action brushes now resolve by theme.
+- The Glass palette uses translucent nested surfaces. Classic defines opaque counterparts, while dynamic resources allow live theme switching without recreating the data or resetting operational state.
+- Added theme parity tests and a high-quality image scaling setting for the existing blurred backdrop.
+- No changes to restaurant data, KOT, role privileges, or licensing. Windows 1080p/4K screenshot acceptance still required.
