@@ -37,7 +37,7 @@ public sealed class InventoryProcurementTests
                 actor, CancellationToken.None);
 
             await using var db = factory.Create();
-            Assert.Equal("completed", (await db.PurchaseOrders.SingleAsync()).Status);
+            Assert.Equal("received", (await db.PurchaseOrders.SingleAsync()).Status);
             Assert.Equal(3m, (await db.InventoryBalances.SingleAsync()).Quantity);
             Assert.Equal(225m, (await db.InventoryValuations.SingleAsync()).Value);
             Assert.Single(await db.GoodsReceipts.ToListAsync());
