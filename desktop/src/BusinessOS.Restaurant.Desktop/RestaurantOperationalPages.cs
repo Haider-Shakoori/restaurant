@@ -283,7 +283,8 @@ internal static class RestaurantOperationalPages
             if (owner is not null) dialog.Owner = owner;
             var content = Stack();
             content.Margin = new Thickness(20);
-            var categories = db.MenuCategories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToList();
+            using var categoryDb = factory.Create();
+            var categories = categoryDb.MenuCategories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToList();
             var category = new ComboBox { ItemsSource = categories, DisplayMemberPath = "Name", SelectedIndex = categories.Count > 0 ? 0 : -1, Height = 36 };
             var name = new TextBox { Height = 36 };
             var sku = new TextBox { Height = 36 };
@@ -457,6 +458,8 @@ internal static class RestaurantOperationalPages
                         Id = Guid.NewGuid().ToString("N"),
                         Name = name.Text.Trim(), Sku = sku.Text.Trim(),
                         BaseUnit = unit.SelectedItem?.ToString() ?? "kg",
+                        PurchaseUnit = unit.SelectedItem?.ToString() ?? "kg",
+                        PurchaseToBaseFactor = 1m,
                         ReorderLevel = level, IsActive = true,
                     });
                     await writeDb.SaveChangesAsync();
