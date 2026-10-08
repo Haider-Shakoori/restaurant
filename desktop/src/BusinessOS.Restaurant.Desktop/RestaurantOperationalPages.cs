@@ -386,7 +386,68 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Reorder", nameof(InventoryRow.ReorderLevel), 100));
         grid.Columns.Add(Column("Avg cost AFN", nameof(InventoryRow.AverageCost), 120));
         grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
-        return Section("Inventory", "Restaurant ingredients, on-hand stock, valuation and recipe consumption remain available without internet.", grid);
+        var panel = Stack();
+        panel.Children.Add(Card("Inventory", "Local ingredients, stock balances and recipe consumption."));
+        var create = new Button { Content = "+ Add Ingredient", MinWidth = 160, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += (_, _) =>
+        {
+            var dialog = new Window
+            {
+                Title = "Add Ingredient",
+                Width = 450,
+                Height = 400,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var content = Stack();
+            content.Margin = new Thickness(20);
+            var name = new TextBox { Height = 36 };
+            var sku = new TextBox { Height = 36 };
+            var unit = new ComboBox { ItemsSource = new[] { "kg", "g", "l", "ml", "pcs" }, SelectedIndex = 0, Height = 36 };
+            var reorder = new TextBox { Text = "0", Height = 36 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Ingredient name", name), ("SKU", sku), ("Base unit", unit), ("Reorder level", reorder),
+            })
+            {
+                content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                content.Children.Add(entry.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            content.Children.Add(feedback);
+            var save = new Button { Content = "Save Ingredient", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(sku.Text))
+                        throw new InvalidOperationException("Enter ingredient name and SKU.");
+                    if (!decimal.TryParse(reorder.Text, out var level) || level < 0)
+                        throw new InvalidOperationException("Enter a non-negative reorder level.");
+                    save.IsEnabled = false;
+                    await using var writeDb = factory.Create();
+                    writeDb.InventoryItems.Add(new LocalInventoryItem
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Name = name.Text.Trim(), Sku = sku.Text.Trim(),
+                        BaseUnit = unit.SelectedItem?.ToString() ?? "kg",
+                        ReorderLevel = level, IsActive = true,
+                    });
+                    await writeDb.SaveChangesAsync();
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            content.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created. Refresh Inventory to see it.");
+        };
+        panel.Children.Add(create);
+        panel.Children.Add(grid);
+        return Scroll(panel);
     }
 
     private static async Task<FrameworkElement> PurchasesAsync()
