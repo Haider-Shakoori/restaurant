@@ -19,6 +19,10 @@ public sealed class OperatorShellWiringTests
                     app.IndexOf("new MainWindow(session)", StringComparison.Ordinal));
         Assert.Contains("ShutdownMode.OnExplicitShutdown", app);
         Assert.Contains("ShutdownMode.OnMainWindowClose", app);
+        Assert.Contains("ApplyPendingRestoreAsync()", app);
+        Assert.True(app.IndexOf("ApplyPendingRestoreAsync()", StringComparison.Ordinal) <
+                    app.IndexOf("new MainWindow(session)", StringComparison.Ordinal));
+
     }
 
     [Fact]
