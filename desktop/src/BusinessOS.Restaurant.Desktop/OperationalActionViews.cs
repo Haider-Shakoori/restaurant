@@ -735,7 +735,21 @@ internal static class OperationalActionViews
             catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
-        root.Children.Add(Card(operations));
+        // Keep the floor board prominent; advanced order operations are
+        // available on demand instead of making the default page excessively long.
+        var advancedOperations = Card(operations);
+        advancedOperations.Visibility = Visibility.Collapsed;
+        var toggleAdvanced = Button("Show transfer / merge / split");
+        toggleAdvanced.Margin = new Thickness(0, 10, 0, 6);
+        toggleAdvanced.Click += (_, _) =>
+        {
+            advancedOperations.Visibility = advancedOperations.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            toggleAdvanced.Content = advancedOperations.Visibility == Visibility.Visible
+                ? "Hide transfer / merge / split" : "Show transfer / merge / split";
+        };
+        root.Children.Add(toggleAdvanced);
+        root.Children.Add(advancedOperations);
         return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
