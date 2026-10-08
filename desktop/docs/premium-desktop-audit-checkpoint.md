@@ -79,3 +79,11 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - The Glass palette uses translucent nested surfaces. Classic defines opaque counterparts, while dynamic resources allow live theme switching without recreating the data or resetting operational state.
 - Added theme parity tests and a high-quality image scaling setting for the existing blurred backdrop.
 - No changes to restaurant data, KOT, role privileges, or licensing. Windows 1080p/4K screenshot acceptance still required.
+
+## Batch 5 — Dashboard restaurant quick actions (final acceptance pending)
+
+- Added quick actions for POS & orders, tables & floor, kitchen/KOT, and inventory directly above the premium dashboard KPIs.
+- Each action invokes the existing MainWindow shell navigation command with the existing route key, retaining the same page load and future authorization boundary as sidebar navigation. No duplicate order, kitchen or stock logic was created.
+- Buttons inherit transparent/opaque surfaces through the current Glass or Classic theme, with useful tooltips and touch-friendly sizing.
+- Added static regression checks for shell command binding and route reuse.
+- This is navigational convenience only; it does not establish role-based permission enforcement or prove cashier/floor/KDS golden-path acceptance.
