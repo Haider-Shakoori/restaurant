@@ -13,8 +13,9 @@
     <ProjectReference Include="../../src/BusinessOS.Restaurant.Sync/BusinessOS.Restaurant.Sync.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <!-- Compile the pure Desktop navigation gate directly so its race behavior is unit-testable without WPF. -->
+    <!-- Compile pure Desktop helpers without loading a WPF window in the test host. -->
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/NavigationRequestGate.cs" Link="NavigationRequestGate.cs" />
+    <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DashboardChartLayout.cs" Link="DashboardChartLayout.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

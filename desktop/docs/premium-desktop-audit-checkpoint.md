@@ -162,3 +162,14 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added real unit regressions for request supersession and out-of-order async completion plus a source-level wiring assertion.
 - Changes are Desktop-only; no database schema, restaurant production, printing, licensing or Web/Flutter changes.
 - Await new Windows CI and then perform the documented hardware/visual/golden-path acceptance before merging or distributing.
+
+## 4K maximized-display graphics correction (CI acceptance pending)
+
+- Report: graphics become distorted when Restaurant Desktop is maximized on a 4K display.
+- Audited existing per-monitor-v2 DPI manifest and high-quality background scaling; both were already in place and are preserved.
+- The dashboard trend was built in a fixed 700×118 canvas inside a Viewbox with `Stretch.Fill`. Replaced this with a canvas that recomputes horizontal plot coordinates at the actual width while leaving stroke thickness, marker size and vertical scale stable.
+- Constrained the oversized maximized workspace to 1900 WPF device-independent pixels while keeping smaller displays fluid; no application-wide `LayoutTransform` / `RenderTransform` is used.
+- Cached **only** the blurred decorative Glass backdrop at half render scale to bound 4K background shader cost; foreground UI/text remains unscaled and uncached.
+- Added coordinate and XAML/source regression tests for 4K-width responsive behavior.
+- No changes to order entry, KOT/KDS semantics, data, database schema, licensing, backend APIs, Laravel or Flutter.
+- Hardware acceptance still required: Windows 4K at 100/150/200% DPI, maximize/restore, Glass/Classic, external monitor DPI transition, receipt/kitchen devices.

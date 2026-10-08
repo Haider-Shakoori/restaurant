@@ -76,10 +76,17 @@
     </Window.Resources>
 
     <Grid>
+        <!-- Cache only the already-blurred decorative artwork at reduced render scale.
+             On 4K monitors the full-window shader otherwise allocates an enormous
+             intermediate surface; foreground text and controls remain vector-sharp. -->
         <Image x:Name="RestaurantBackdrop" Source="Assets/RestaurantGlassBackground.jpg"
                Stretch="UniformToFill"
                RenderOptions.BitmapScalingMode="HighQuality"
-               Effect="{DynamicResource BackgroundBlurEffect}" />
+               Effect="{DynamicResource BackgroundBlurEffect}">
+            <Image.CacheMode>
+                <BitmapCache RenderAtScale="0.5" />
+            </Image.CacheMode>
+        </Image>
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
 
         <Grid>
@@ -291,7 +298,12 @@
                         BorderThickness="0"
                         CornerRadius="0"
                         Padding="14">
-                    <ContentControl Content="{Binding CurrentPage}" />
+                    <!-- Constrain very wide 4K pages without scaling the visual tree.
+                         Smaller resolutions retain their full available width. -->
+                    <ContentControl Content="{Binding CurrentPage}"
+                                    HorizontalAlignment="Stretch"
+                                    MaxWidth="1900"
+                                    SnapsToDevicePixels="True" />
                 </Border>
             </Grid>
         </Grid>

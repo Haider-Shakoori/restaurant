@@ -1465,42 +1465,43 @@ internal static class RestaurantOperationalPages
         }
         else
         {
-            // Viewbox scales real hourly totals to the current dashboard width.
-            // An empty business day never draws a fake upward line.
-            var plot = new Canvas { Width = 700, Height = 118, ClipToBounds = true };
+            // Draw vectors in logical WPF units instead of scaling a fixed-width
+            // Viewbox. On 4K, Stretch.Fill distorted strokes and circular markers.
+            var plot = new Canvas
+            {
+                Height = 118,
+                ClipToBounds = true,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            var guides = new List<Line>();
             for (var i = 0; i < 4; i++)
             {
                 var guide = new Line
                 {
-                    X1 = 14, X2 = 686,
-                    Y1 = 20 + i * 29, Y2 = 20 + i * 29,
-                    StrokeThickness = 1, Opacity = 0.26,
+                    X1 = 14,
+                    Y1 = 20 + i * 29,
+                    Y2 = 20 + i * 29,
+                    StrokeThickness = 1,
+                    Opacity = 0.26,
                 };
                 guide.SetResourceReference(Shape.StrokeProperty, "BorderBrush");
+                guides.Add(guide);
                 plot.Children.Add(guide);
             }
 
             var peak = trend.Max();
-            var points = new PointCollection();
-            for (var hour = 0; hour < trend.Length; hour++)
+            Polyline? trendLine = null;
+            if (trend.Length > 1)
             {
-                var x = trend.Length == 1 ? 350 : 16 + hour * (668.0 / (trend.Length - 1));
-                var y = 108 - 86 * (double)(Math.Max(0m, trend[hour]) / peak);
-                points.Add(new Point(x, y));
-            }
-
-            if (points.Count > 1)
-            {
-                plot.Children.Add(new Polyline
+                trendLine = new Polyline
                 {
-                    Points = points,
                     Stroke = new SolidColorBrush(Color.FromRgb(47, 107, 255)),
                     StrokeThickness = 3,
                     StrokeLineJoin = PenLineJoin.Round,
-                });
+                };
+                plot.Children.Add(trendLine);
             }
 
-            var lastPoint = points[^1];
             var marker = new Ellipse
             {
                 Width = 9, Height = 9,
@@ -1508,10 +1509,32 @@ internal static class RestaurantOperationalPages
                 Stroke = Brushes.White,
                 StrokeThickness = 1.5,
             };
-            Canvas.SetLeft(marker, lastPoint.X - 4.5);
-            Canvas.SetTop(marker, lastPoint.Y - 4.5);
             plot.Children.Add(marker);
-            chartArea.Children.Add(new Viewbox { Child = plot, Stretch = Stretch.Fill });
+
+            void UpdateChartGeometry()
+            {
+                if (plot.ActualWidth <= 0) return;
+                var width = plot.ActualWidth;
+                foreach (var guide in guides)
+                    guide.X2 = DashboardChartLayout.GuideEnd(width);
+
+                var points = new PointCollection();
+                for (var hour = 0; hour < trend.Length; hour++)
+                {
+                    var x = DashboardChartLayout.HourX(hour, trend.Length, width);
+                    var y = 108 - 86 * (double)(Math.Max(0m, trend[hour]) / peak);
+                    points.Add(new Point(x, y));
+                }
+
+                if (trendLine is not null)
+                    trendLine.Points = points;
+                var lastPoint = points[^1];
+                Canvas.SetLeft(marker, lastPoint.X - marker.Width / 2);
+                Canvas.SetTop(marker, lastPoint.Y - marker.Height / 2);
+            }
+
+            plot.SizeChanged += (_, _) => UpdateChartGeometry();
+            chartArea.Children.Add(plot);
         }
 
         var chartStack = new StackPanel();
