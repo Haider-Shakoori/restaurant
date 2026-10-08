@@ -25,7 +25,8 @@ public sealed class PremiumGlassThemeTests
         {
             var opaque = BrushColor(classic, key);
             var translucent = BrushColor(glass, key);
-            Assert.StartsWith("#FF", opaque, StringComparison.OrdinalIgnoreCase);
+            Assert.True(opaque.Length == 7 || (opaque.Length == 9 && opaque.StartsWith("#FF", StringComparison.OrdinalIgnoreCase)),
+                $"Classic nested brush {key} must be fully opaque, got {opaque}");
             Assert.StartsWith("#", translucent);
             Assert.Equal(9, translucent.Length); // #AARRGGBB
             Assert.False(translucent.StartsWith("#FF", StringComparison.OrdinalIgnoreCase));
@@ -49,7 +50,7 @@ public sealed class PremiumGlassThemeTests
         var image = main.Descendants().Single(e =>
             e.Name.LocalName == "Image" && (string?)e.Attribute(X + "Name") == "RestaurantBackdrop");
         Assert.Equal("UniformToFill", (string?)image.Attribute("Stretch"));
-        Assert.Equal("HighQuality", image.Attributes().Single(a => a.Name.LocalName == "BitmapScalingMode").Value);
+        Assert.Equal("HighQuality", image.Attributes().Single(a => a.Name.LocalName == "RenderOptions.BitmapScalingMode").Value);
     }
 
     private static string BrushColor(XDocument document, string key) =>
