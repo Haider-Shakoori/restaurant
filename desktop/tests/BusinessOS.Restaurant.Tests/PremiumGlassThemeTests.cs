@@ -53,6 +53,44 @@ public sealed class PremiumGlassThemeTests
         Assert.Equal("HighQuality", image.Attributes().Single(a => a.Name.LocalName == "RenderOptions.BitmapScalingMode").Value);
     }
 
+    [Fact]
+    public void Responsive_windows_and_login_preserve_glass_background_and_navigation_controls()
+    {
+        var main = Load("MainWindow.xaml");
+        Assert.Equal("Maximized", (string?)main.Root?.Attribute("WindowState"));
+        Assert.Equal("OnWindowSizeChanged", (string?)main.Root?.Attribute("SizeChanged"));
+        Assert.Contains(main.Descendants(), x => x.Name.LocalName == "Border" &&
+            (string?)x.Attribute(X + "Name") == "OperatorBadge");
+        Assert.Contains(main.Descendants(), x => x.Name.LocalName == "Button" &&
+            (string?)x.Attribute(X + "Name") == "SwitchOperatorButton");
+
+        var login = Load("OperatorSignInWindow.xaml");
+        Assert.Contains(login.Descendants(), x => x.Name.LocalName == "ScrollViewer");
+        Assert.Contains(login.Descendants(), x => x.Name.LocalName == "PasswordBox" &&
+            (string?)x.Attribute(X + "Name") == "PasswordInput");
+
+        var glass = Load("Themes", "Glass.xaml");
+        var backdropBlur = glass.Descendants().Single(x => x.Name.LocalName == "BlurEffect" &&
+            (string?)x.Attribute(X + "Key") == "BackgroundBlurEffect");
+        Assert.Equal("24", (string?)backdropBlur.Attribute("Radius"));
+
+        var desktop = File.ReadAllText(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(
+            Path.Combine(RepositoryRoot(), "desktop", "src", "BusinessOS.Restaurant.Desktop", "MainWindow.xaml")))!,
+            "MainWindow.xaml.cs"));
+        Assert.Contains("ApplyResponsiveLayout()", desktop, StringComparison.Ordinal);
+        var manifest = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "app.manifest"));
+        Assert.Contains("PerMonitorV2", manifest, StringComparison.Ordinal);
+    }
+
+    private static string RepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "desktop")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("Repository root not found.");
+    }
+
     private static string BrushColor(XDocument document, string key) =>
         (string?)document.Descendants().Single(e =>
             e.Name.LocalName == "SolidColorBrush" && (string?)e.Attribute(X + "Key") == key)
