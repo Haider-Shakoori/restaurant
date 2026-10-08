@@ -572,6 +572,137 @@ class TenantWebPortalTest extends TestCase
         $this->assertNotNull($device->fresh()->revoked_at);
     }
 
+    public function test_owner_can_update_staff_and_disabled_user_cannot_log_in(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+        tenancy()->initialize($tenant);
+
+        $owner = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Owner',
+            'email' => 'staff-manager@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+        $staff = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Kitchen Member',
+            'email' => 'staff-disabled@example.test',
+            'password' => 'BeforePass123',
+            'is_active' => true,
+            'role' => 'kitchen',
+        ]);
+        $staffId = $staff->id;
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => $owner->email,
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $this->patch("http://{$domain}/users/{$staffId}", [
+            'name' => 'Updated Kitchen Member',
+            'email' => 'staff-disabled@example.test',
+            'phone' => '',
+            'role' => 'waiter',
+            'is_active' => 0,
+            'password' => 'AfterPass123',
+        ])->assertRedirect()->assertSessionHas('status');
+
+        tenancy()->initialize($tenant);
+        try {
+            $updated = TenantUser::query()->findOrFail($staffId);
+            $this->assertSame('Updated Kitchen Member', $updated->name);
+            $this->assertSame('waiter', $updated->role);
+            $this->assertFalse($updated->is_active);
+            $this->assertTrue(\Illuminate\Support\Facades\Hash::check('AfterPass123', $updated->password));
+        } finally {
+            tenancy()->end();
+        }
+
+        $this->post("http://{$domain}/logout")->assertRedirect('/login');
+        $this->post("http://{$domain}/login", [
+            'email' => 'staff-disabled@example.test',
+            'password' => 'AfterPass123',
+        ])->assertSessionHasErrors('email');
+    }
+
+    public function test_last_active_owner_cannot_be_disabled_or_demoted(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+        tenancy()->initialize($tenant);
+        $owner = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Only Owner',
+            'email' => 'only-owner@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+        $ownerId = $owner->id;
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'only-owner@example.test',
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $this->patch("http://{$domain}/users/{$ownerId}", [
+            'name' => 'Only Owner',
+            'email' => 'only-owner@example.test',
+            'role' => 'owner',
+            'is_active' => 0,
+        ])->assertSessionHasErrors('role');
+
+        $this->patch("http://{$domain}/users/{$ownerId}", [
+            'name' => 'Only Owner',
+            'email' => 'only-owner@example.test',
+            'role' => 'manager',
+            'is_active' => 1,
+        ])->assertSessionHasErrors('role');
+
+        tenancy()->initialize($tenant);
+        try {
+            $owner = TenantUser::query()->findOrFail($ownerId);
+            $this->assertTrue($owner->is_active);
+            $this->assertSame('owner', $owner->role);
+        } finally {
+            tenancy()->end();
+        }
+    }
+
+    public function test_inactive_staff_session_is_revoked_before_accessing_portal(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+        tenancy()->initialize($tenant);
+        $staff = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Manager',
+            'email' => 'manager-disabled@example.test',
+            'password' => 'ManagerPass123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        $staffId = $staff->id;
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'manager-disabled@example.test',
+            'password' => 'ManagerPass123',
+        ])->assertRedirect('/dashboard');
+
+        tenancy()->initialize($tenant);
+        try {
+            TenantUser::query()->findOrFail($staffId)->update(['is_active' => false]);
+        } finally {
+            tenancy()->end();
+        }
+
+        $this->get("http://{$domain}/dashboard")->assertRedirect('/login');
+        $this->get("http://{$domain}/dashboard")->assertRedirect('/login');
+    }
+
     /**
      * @return array{Tenant, string}
      */
