@@ -40,8 +40,11 @@ internal static class RestaurantOperationalPages
         await using var db = factory.Create();
 
         var now = DateTimeOffset.Now;
-        var openOrders = await db.Orders.CountAsync(x => x.Status != "closed");
-        var activeTables = await db.DiningTables.CountAsync(x => x.IsActive && x.Status != "available");
+        // Cancelled orders and unavailable/reserved tables are not active service.
+        var openOrders = await db.Orders.CountAsync(x =>
+            x.Status != "closed" && x.Status != "cancelled");
+        var activeTables = await db.DiningTables.CountAsync(x =>
+            x.IsActive && x.Status == "occupied");
         var activeKot = await db.KitchenTickets.CountAsync(x =>
             x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
         // Read only bill timestamps and totals; interpret the business day in local time.
@@ -52,6 +55,21 @@ internal static class RestaurantOperationalPages
         var salesTrend = DashboardSalesTrend.Aggregate(
             now, billRows.Select(x => (x.IssuedAt, x.Total)));
         var sales = salesTrend.Total;
+
+        // Read-only, branch-aware inventory alerts from the same local database as
+        // the Inventory screen. No synthetic zero balances for uninitialized branches.
+        var stockBalances = await (
+            from balance in db.InventoryBalances.AsNoTracking()
+            join item in db.InventoryItems.AsNoTracking()
+                on balance.InventoryItemId equals item.Id
+            join branch in db.Branches.AsNoTracking()
+                on balance.BranchId equals branch.Id
+            where item.IsActive && branch.IsActive
+            select new DashboardStockBalance(
+                branch.Name, item.Name, item.BaseUnit, balance.Quantity, item.ReorderLevel))
+            .ToListAsync();
+        var stockAlerts = DashboardStockAlerts.Find(stockBalances);
+        var trackedReorderBalances = stockBalances.Count(row => row.ReorderLevel > 0m);
 
         var root = new StackPanel();
 
@@ -123,6 +141,12 @@ internal static class RestaurantOperationalPages
         lowerGrid.Children.Add(kitchenPanel);
 
         root.Children.Add(lowerGrid);
+        root.Children.Add(DashboardPanel(
+            "Stock Alerts",
+            stockAlerts.Count > 0
+                ? $"{stockAlerts.Count} branch ingredient balance(s) at or below reorder level"
+                : "Active branch inventory thresholds",
+            BuildStockAlertSummary(stockAlerts, stockBalances.Count, trackedReorderBalances)));
         root.Children.Add(DashboardPanel(
             "Live Operations",
             "Desktop, LAN and offline health",
@@ -957,6 +981,75 @@ internal static class RestaurantOperationalPages
             Color = Color.FromRgb(20, 38, 61),
         };
         return border;
+    }
+
+    private static UIElement BuildStockAlertSummary(
+        IReadOnlyList<DashboardStockAlert> alerts, int balanceCount, int configuredCount)
+    {
+        var stack = new StackPanel();
+        if (balanceCount == 0 || configuredCount == 0 || alerts.Count == 0)
+        {
+            var description = balanceCount == 0
+                ? "No active branch stock balances have been loaded."
+                : configuredCount == 0
+                    ? "Set reorder levels for ingredients to enable stock alerts."
+                    : "No ingredients are currently at or below their reorder levels.";
+            var empty = new TextBlock
+            {
+                Text = description,
+                FontSize = 12,
+                Margin = new Thickness(2, 3, 2, 6),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            stack.Children.Add(empty);
+            return stack;
+        }
+
+        foreach (var alert in alerts.Take(5))
+        {
+            var row = new Grid { Margin = new Thickness(2, 3, 2, 8) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var item = new TextBlock
+            {
+                Text = $"{alert.ItemName}  ·  {alert.BranchName}",
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 14, 0),
+            };
+            item.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+            var shortage = new TextBlock
+            {
+                Text = $"{alert.Quantity:N2} / {alert.ReorderLevel:N2} {alert.BaseUnit}",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+            };
+            shortage.SetResourceReference(TextBlock.ForegroundProperty,
+                alert.Quantity <= 0m ? "BrandPrimaryBrush" : "TextSecondaryBrush");
+
+            row.Children.Add(item);
+            Grid.SetColumn(shortage, 1);
+            row.Children.Add(shortage);
+            stack.Children.Add(row);
+        }
+
+        if (alerts.Count > 5)
+        {
+            var remaining = new TextBlock
+            {
+                Text = $"+ {alerts.Count - 5} more branch ingredient alert(s) · open Inventory to review all balances.",
+                FontSize = 11,
+                Margin = new Thickness(2, 2, 2, 0),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            remaining.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            stack.Children.Add(remaining);
+        }
+        return stack;
     }
 
     private static Border DashboardPanel(string title, string subtitle, UIElement content)
