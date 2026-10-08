@@ -530,6 +530,9 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
         var panel = Stack();
         panel.Children.Add(Card("Inventory", "Local ingredients, stock balances and recipe consumption."));
+        var lowStockCount = rows.Count(x => x.ReorderLevel > 0 && x.Quantity <= x.ReorderLevel);
+        if (lowStockCount > 0)
+            panel.Children.Add(Card("Reorder alert", lowStockCount + " ingredients are at or below their reorder levels. Check their stock balances before the next service."));
         var create = new Button { Content = "+ Add Ingredient", MinWidth = 160, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
         create.Click += (_, _) =>
         {
@@ -537,9 +540,9 @@ internal static class RestaurantOperationalPages
             {
                 Title = "Add Ingredient",
                 Width = 450,
-                Height = 400,
+                Height = 490,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ResizeMode = ResizeMode.NoResize,
+                ResizeMode = ResizeMode.CanResize,
             };
             var owner = System.Windows.Application.Current?.MainWindow;
             if (owner is not null) dialog.Owner = owner;
@@ -547,11 +550,21 @@ internal static class RestaurantOperationalPages
             content.Margin = new Thickness(20);
             var name = new TextBox { Height = 36 };
             var sku = new TextBox { Height = 36 };
-            var unit = new ComboBox { ItemsSource = new[] { "kg", "g", "l", "ml", "pcs" }, SelectedIndex = 0, Height = 36 };
+            var units = new[] { "kg", "g", "l", "ml", "pcs" };
+            var unit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
+            var purchaseUnit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
+            var factor = new TextBox { Text = "1", Height = 36 };
+            unit.SelectionChanged += (_, _) =>
+            {
+                if (purchaseUnit.SelectedItem?.ToString() == unit.SelectedItem?.ToString())
+                    factor.Text = "1";
+            };
             var reorder = new TextBox { Text = "0", Height = 36 };
             foreach (var entry in new (string Label, FrameworkElement Input)[]
             {
-                ("Ingredient name", name), ("SKU", sku), ("Base unit", unit), ("Reorder level", reorder),
+                ("Ingredient name", name), ("SKU", sku), ("Base unit (stock)", unit),
+                ("Purchase unit", purchaseUnit),
+                ("Base units per one purchase unit", factor), ("Reorder level (base unit)", reorder),
             })
             {
                 content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
@@ -568,18 +581,17 @@ internal static class RestaurantOperationalPages
                         throw new InvalidOperationException("Enter ingredient name and SKU.");
                     if (!decimal.TryParse(reorder.Text, out var level) || level < 0)
                         throw new InvalidOperationException("Enter a non-negative reorder level.");
+                    if (!decimal.TryParse(factor.Text, out var conversion) || conversion <= 0)
+                        throw new InvalidOperationException("Enter a positive purchase-to-base unit conversion factor.");
+                    if (unit.SelectedItem?.ToString() == purchaseUnit.SelectedItem?.ToString() && conversion != 1m)
+                        throw new InvalidOperationException("The conversion factor must be 1 when purchase and stock units match.");
                     save.IsEnabled = false;
-                    await using var writeDb = factory.Create();
-                    writeDb.InventoryItems.Add(new LocalInventoryItem
-                    {
-                        Id = Guid.NewGuid().ToString("N"),
-                        Name = name.Text.Trim(), Sku = sku.Text.Trim(),
-                        BaseUnit = unit.SelectedItem?.ToString() ?? "kg",
-                        PurchaseUnit = unit.SelectedItem?.ToString() ?? "kg",
-                        PurchaseToBaseFactor = 1m,
-                        ReorderLevel = level, IsActive = true,
-                    });
-                    await writeDb.SaveChangesAsync();
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateItemAsync(
+                        sku.Text.Trim(), name.Text.Trim(),
+                        unit.SelectedItem?.ToString() ?? "kg",
+                        purchaseUnit.SelectedItem?.ToString() ?? "kg",
+                        conversion, level, actor, CancellationToken.None);
                     dialog.DialogResult = true;
                 }
                 catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
