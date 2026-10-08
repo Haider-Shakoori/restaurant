@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
+import '../../core/models/session_credentials.dart';
+import 'menu_image_request.dart';
 
 class OrderScreen extends StatefulWidget {
   const OrderScreen({
@@ -23,6 +25,7 @@ class OrderScreen extends StatefulWidget {
 
 class _OrderScreenState extends State<OrderScreen> {
   Map<String, Object?>? _order;
+  SessionCredentials? _imageSession;
   List<Map<String, Object?>> _items = const [];
   List<Map<String, Object?>> _categories = const [];
   Map<String, List<Map<String, Object?>>> _menu = const {};
@@ -40,6 +43,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> _refresh() async {
     final db = widget.dependencies.database;
+    final imageSession = await widget.dependencies.credentials.readSession();
     final order = await db.order(widget.localOrderId);
     final items = await db.orderItems(widget.localOrderId);
     final categories = await db.menuCategories();
@@ -58,6 +62,7 @@ class _OrderScreenState extends State<OrderScreen> {
 
     setState(() {
       _order = order;
+      _imageSession = imageSession;
       _items = items;
       _categories = categories;
       _menu = menu;
@@ -1076,6 +1081,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     width: double.infinity,
                     child: _MenuItemImage(
                       imageUrl: item['image_url']?.toString(),
+                      credentials: _imageSession,
                     ),
                   ),
                 ),
@@ -1447,18 +1453,20 @@ class _OrderScreenState extends State<OrderScreen> {
 }
 
 class _MenuItemImage extends StatelessWidget {
-  const _MenuItemImage({required this.imageUrl});
+  const _MenuItemImage({required this.imageUrl, required this.credentials});
 
   final String? imageUrl;
+  final SessionCredentials? credentials;
 
   @override
   Widget build(BuildContext context) {
-    final url = imageUrl?.trim() ?? '';
+    final request = resolveMenuImageRequest(imageUrl, credentials);
 
-    if (url.isEmpty) return _placeholder(context);
+    if (request == null) return _placeholder(context);
 
     return Image.network(
-      url,
+      request.url,
+      headers: request.headers,
       fit: BoxFit.cover,
       errorBuilder: (context, error, stackTrace) => _placeholder(context),
     );
