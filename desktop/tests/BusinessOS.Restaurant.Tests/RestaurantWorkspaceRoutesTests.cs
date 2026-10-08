@@ -13,6 +13,8 @@ public sealed class RestaurantWorkspaceRoutesTests
     [InlineData("waiter", "tables", true)]
     [InlineData("waiter", "closing", false)]
     [InlineData("kitchen", "kitchen", true)]
+    [InlineData("expo", "kitchen", true)]
+    [InlineData("expo", "pos", false)]
     [InlineData("kitchen", "dashboard", false)]
     [InlineData("kitchen", "pos", false)]
     [InlineData("unknown", "settings", false)]
@@ -27,7 +29,7 @@ public sealed class RestaurantWorkspaceRoutesTests
     [Fact]
     public void Each_valid_operator_enters_an_authorized_workspace()
     {
-        foreach (var role in new[] { "owner", "manager", "cashier", "waiter", "kitchen" })
+        foreach (var role in new[] { "owner", "manager", "cashier", "waiter", "kitchen", "expo" })
         {
             var start = RestaurantWorkspaceRoutes.DefaultRoute(role);
             Assert.True(RestaurantWorkspaceRoutes.CanOpen(role, start));
