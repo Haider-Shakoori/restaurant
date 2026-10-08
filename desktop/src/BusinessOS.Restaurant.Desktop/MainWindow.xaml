@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:nav="clr-namespace:BusinessOS.Restaurant.Desktop"
         Title="BusinessOS — Restaurant"
-        Width="1600" Height="920"
-        MinWidth="1180" MinHeight="720"
-        WindowStartupLocation="CenterScreen"
+        Width="1366" Height="830"
+        MinWidth="950" MinHeight="620"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized" SizeChanged="OnWindowSizeChanged"
         Background="{DynamicResource AppBackgroundBrush}"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
@@ -84,7 +84,7 @@
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="286" />
+                <ColumnDefinition Width="252" />
                 <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
@@ -218,7 +218,7 @@
 
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="72" />
+                    <RowDefinition Height="76" />
                     <RowDefinition Height="0" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
@@ -228,7 +228,7 @@
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0,0,0,1"
                         CornerRadius="0"
-                        Padding="20,0">
+                        Padding="16,0">
                     <Border.Effect>
                         <DropShadowEffect BlurRadius="24"
                                           ShadowDepth="5"
@@ -236,26 +236,30 @@
                                           Color="#071827" />
                     </Border.Effect>
                     <Grid>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{Binding PageTitle}"
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Grid.Column="0">
+                            <TextBlock Text="{Binding PageTitle}" TextTrimming="CharacterEllipsis"
                                        FontSize="22"
                                        FontWeight="Bold" />
-                            <TextBlock Text="{Binding PageSubtitle}"
+                            <TextBlock x:Name="HeaderSubtitle" Text="{Binding PageSubtitle}"
                                        Foreground="{DynamicResource TextMutedBrush}"
                                        Margin="0,3,0,0" />
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal"
+                        <StackPanel Grid.Column="1" Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center">
-                            <Border Background="{DynamicResource SuccessSoftBrush}"
+                            <Border x:Name="NetworkModeBadge" Background="{DynamicResource SuccessSoftBrush}"
                                     CornerRadius="12"
                                     Padding="12,7">
                                 <TextBlock Text="{Binding NetworkMode, StringFormat=●  {0}}"
                                            Foreground="{DynamicResource SuccessBrush}"
                                            FontWeight="SemiBold" />
                             </Border>
-                            <Border Margin="12,0,0,0" Padding="10,7"
+                            <Border x:Name="OperatorBadge" Margin="12,0,0,0" Padding="10,7"
                                     Background="{DynamicResource TopBarActionBrush}"
                                     CornerRadius="10">
                                 <TextBlock Text="{Binding OperatorLabel}"
@@ -264,7 +268,7 @@
                                            TextTrimming="CharacterEllipsis"
                                            Foreground="{DynamicResource TextSecondaryBrush}" />
                             </Border>
-                            <Button Margin="8,0,0,0"
+                            <Button x:Name="SwitchOperatorButton" Margin="8,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="Switch operator"
                                     ToolTip="Sign in as a different restaurant operator"
@@ -273,7 +277,7 @@
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="{Binding ThemeButtonText}"
                                     Command="{Binding ToggleThemeCommand}" />
-                            <Button Margin="8,0,0,0"
+                            <Button x:Name="RefreshButton" Margin="8,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="↻  Refresh"
                                     Command="{Binding RefreshCommand}" />
@@ -286,7 +290,7 @@
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0"
                         CornerRadius="0"
-                        Padding="20">
+                        Padding="14">
                     <ContentControl Content="{Binding CurrentPage}" />
                 </Border>
             </Grid>
