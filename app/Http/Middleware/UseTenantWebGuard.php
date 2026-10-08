@@ -21,8 +21,10 @@ class UseTenantWebGuard
         $current = $user?->fresh();
         if ($user !== null && ($current === null || ! (bool) $current->is_active)) {
             Auth::guard('tenant')->logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
+            if ($request->hasSession()) {
+                $request->session()->invalidate();
+                $request->session()->regenerateToken();
+            }
 
             return redirect('/login');
         }
