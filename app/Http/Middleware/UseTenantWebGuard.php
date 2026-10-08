@@ -13,6 +13,17 @@ class UseTenantWebGuard
     {
         Auth::shouldUse('tenant');
 
+        // Disabling a staff member must also end an existing browser session,
+        // not merely reject their next password-based login.
+        $user = Auth::guard('tenant')->user();
+        if ($user !== null && ! (bool) $user->is_active) {
+            Auth::guard('tenant')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return redirect('/login');
+        }
+
         return $next($request);
     }
 }
