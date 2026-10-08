@@ -504,6 +504,62 @@ internal static class RestaurantOperationalPages
         supplierGrid.Columns.Add(Column("Code", nameof(SupplierRow.Code), 110)); supplierGrid.Columns.Add(Column("Supplier", nameof(SupplierRow.Name), 220));
         supplierGrid.Columns.Add(Column("Phone", nameof(SupplierRow.Phone), 150)); supplierGrid.Columns.Add(Column("Email", nameof(SupplierRow.Email), 220));
         panel.Children.Add(supplierGrid);
+        var purchaseButton = new Button { Content = "+ New Purchase & Receive", Height = 38, MinWidth = 200, Margin = new Thickness(0, 10, 0, 8) };
+        purchaseButton.Click += async (_, _) =>
+        {
+            var dialog = new Window { Title = "Purchase & Receive Ingredient", Width = 470, Height = 510, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            await using var lookupDb = factory.Create();
+            var availableSuppliers = await lookupDb.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var availableItems = await lookupDb.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var availableBranches = await lookupDb.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var supplier = new ComboBox { ItemsSource = availableSuppliers, DisplayMemberPath = "Name", Height = 34 };
+            var branch = new ComboBox { ItemsSource = availableBranches, DisplayMemberPath = "Name", Height = 34 };
+            var item = new ComboBox { ItemsSource = availableItems, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Text = "1", Height = 34 };
+            var cost = new TextBox { Text = "0", Height = 34 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branch), ("Supplier", supplier), ("Ingredient", item),
+                ("Purchase quantity", quantity), ("Unit cost AFN", cost)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(entry.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Create PO and Receive Stock", Height = 40 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        supplier.SelectedItem is not LocalSupplier selectedSupplier ||
+                        item.SelectedItem is not LocalInventoryItem selectedItem ||
+                        !decimal.TryParse(quantity.Text, out var qty) || qty <= 0 ||
+                        !decimal.TryParse(cost.Text, out var unitCost) || unitCost < 0)
+                        throw new InvalidOperationException("Choose branch, supplier, ingredient and valid quantity/cost.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    var inventoryService = new LocalInventoryService(factory);
+                    await inventoryService.CreatePurchaseOrderAsync(selectedBranch.Id, selectedSupplier.Id,
+                        new[] { new LocalPurchaseOrderLineRequest(selectedItem.Id, qty, unitCost) },
+                        "Desktop one-step purchase", actor, CancellationToken.None);
+                    feedback.Text = "Purchase order created. Open purchase order receiving to post stock.";
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info, "Purchase order created; receiving is required before stock increases.");
+        };
+        panel.Children.Add(purchaseButton);
         panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var grid = GridFor(orders); grid.MinHeight = 230;
         grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190)); grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 220));
