@@ -36,11 +36,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        await RefreshAsync();
+        // Startup loads the dashboard once; the toolbar refresh additionally reloads the active page.
+        await RefreshDiagnosticsAsync();
         await NavigateAsync("dashboard");
     }
 
     private async Task RefreshAsync()
+    {
+        await RefreshDiagnosticsAsync();
+
+        // Recreate the active operational page from the local store. Preserve the visible page
+        // if loading fails, and never overwrite a newer navigation that completed meanwhile.
+        var route = CurrentRoute;
+        var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+        if (CurrentRoute == route)
+        {
+            CurrentPage = refreshedPage;
+        }
+    }
+
+    private async Task RefreshDiagnosticsAsync()
     {
         await _diagnostics.RefreshCommand.ExecuteAsync(null);
         OnPropertyChanged(nameof(NetworkMode));
