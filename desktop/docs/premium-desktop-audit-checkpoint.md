@@ -106,3 +106,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Kept the complete original table list behind a show/hide toggle for operations/auditing; backend service operations and the immutable KOT round policy remain unchanged.
 - Added static coverage for actual row projection and reuse of transfer/merge/move/split business services.
 - A real touch-device walkthrough, card layout screenshot checks and complete waiter-to-cashier end-to-end acceptance remain outstanding.
+
+## Batch 8 — Live kitchen KDS triage indicators (final acceptance pending)
+
+- Audited the existing KDS: independent optional Queue/Preparing steps, Expo transitions, rush, refire, recall, item-level timers and two-second live refresh were already present and were not recreated.
+- Added visible live counts for selected station/state: in-production, Expo, Ready, Rush and delayed items. Counts use actual ticket-item projections, the current filter and the configured kitchen late threshold.
+- Counts refresh on data changes and each age-timer tick; no change to KOT submission, item state mutation, recipe consumption, billing, or notification rules.
+- Added the existing "expo" operator role to the constrained KDS-only workspace route policy, preserving Expo actions already implemented at service/UI level.
+- Added regression tests for state/role preservation and live-summary wiring.
+- Exact in-kitchen hardware/performance and visual screenshot acceptance remain unverified.
