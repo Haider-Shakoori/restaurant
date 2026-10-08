@@ -672,6 +672,18 @@ internal static class OperationalActionViews
         filterRow.Children.Add(statusText);
         root.Children.Add(filterRow);
 
+        // Live service counters update with the KDS refresh and aging timer.
+        // They reflect actual item status, station filter and delay thresholds.
+        var kitchenSummary = new TextBlock
+        {
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 14),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        kitchenSummary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        root.Children.Add(kitchenSummary);
+
         var board = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
@@ -993,6 +1005,30 @@ internal static class OperationalActionViews
             return card;
         }
 
+        void UpdateKitchenSummary()
+        {
+            var stationId = (stationFilter.SelectedItem as Choice)?.Id ?? "";
+            var state = statusFilter.SelectedItem?.ToString() ?? "All states";
+            var visible = rows
+                .Where(row => string.IsNullOrWhiteSpace(stationId) || row.StationId == stationId)
+                .Where(row => state == "All states" || row.Status == state)
+                .ToArray();
+
+            var active = visible.Count(row => row.Status is "queued" or "active" or "preparing");
+            var expo = visible.Count(row => row.Status == "expo");
+            var ready = visible.Count(row => row.Status == "ready");
+            var rush = visible.Count(row => row.Priority == "rush" &&
+                row.Status is not ("completed" or "ready"));
+            var overdue = visible.Count(row =>
+                row.Status is "queued" or "active" or "preparing" or "expo" &&
+                DateTimeOffset.UtcNow - row.QueuedAt >=
+                    TimeSpan.FromMinutes(settings.KitchenLateMinutes));
+
+            kitchenSummary.Text =
+                $"{visible.Length} visible · {active} in production · " +
+                $"{expo} expo · {ready} ready · {rush} rush · {overdue} delayed";
+        }
+
         void RenderBoard()
         {
             board.Children.Clear();
@@ -1011,6 +1047,8 @@ internal static class OperationalActionViews
             {
                 board.Children.Add(BuildKitchenCard(row));
             }
+
+            UpdateKitchenSummary();
 
             if (filtered.Length == 0)
             {
@@ -1039,6 +1077,7 @@ internal static class OperationalActionViews
         var ageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ageTimer.Tick += (_, _) =>
         {
+            UpdateKitchenSummary();
             foreach (var binding in timerBindings)
             {
                 UpdateAge(
