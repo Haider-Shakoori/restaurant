@@ -329,11 +329,30 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Status", nameof(PurchaseRow.Status), 120)); grid.Columns.Add(Column("Estimated AFN", nameof(PurchaseRow.Total), 140));
         grid.Columns.Add(Column("Ordered", nameof(PurchaseRow.OrderedAt), 190)); grid.Columns.Add(Column("Completed", nameof(PurchaseRow.CompletedAt), 190));
         panel.Children.Add(grid);
-        panel.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        // Receipt records remain in the database for auditing and stock
+        // reconciliation, but are not a second mandatory operator workflow.
+        var historyToggle = new Button
+        {
+            Content = "Show receipt audit history",
+            MinWidth = 220,
+            Height = 36,
+            Margin = new Thickness(0, 12, 0, 8),
+        };
+        var receiptHistory = new StackPanel { Visibility = Visibility.Collapsed };
+        receiptHistory.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var receiptGrid = GridFor(receipts); receiptGrid.MinHeight = 200;
         receiptGrid.Columns.Add(Column("GRN", nameof(ReceiptRow.Number), 210)); receiptGrid.Columns.Add(Column("Status", nameof(ReceiptRow.Status), 120));
         receiptGrid.Columns.Add(Column("Received", nameof(ReceiptRow.ReceivedAt), 200)); receiptGrid.Columns.Add(Column("Purchase order ID", nameof(ReceiptRow.PurchaseOrderId), 280));
-        panel.Children.Add(receiptGrid);
+        receiptHistory.Children.Add(receiptGrid);
+        historyToggle.Click += (_, _) =>
+        {
+            receiptHistory.Visibility = receiptHistory.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            historyToggle.Content = receiptHistory.Visibility == Visibility.Visible
+                ? "Hide receipt audit history" : "Show receipt audit history";
+        };
+        panel.Children.Add(historyToggle);
+        panel.Children.Add(receiptHistory);
         return Scroll(panel);
     }
 
