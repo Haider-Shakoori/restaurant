@@ -70,7 +70,52 @@ public partial class App : System.Windows.Application
             }
         }
 
-        var window = new MainWindow();
+        // Activation authorizes this computer; an operator still needs a tenant-bound
+        // identity. A protected prior session allows working during Internet outages.
+        var activationState = await new WindowsActivationStore().LoadAsync();
+        if (activationState is null)
+        {
+            MessageBox.Show("Restaurant activation is missing. Activate this computer before signing in.",
+                "BusinessOS Restaurant", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown();
+            return;
+        }
+
+        var sessions = new WindowsSessionStore();
+        AuthSession? session = null;
+        try
+        {
+            session = await sessions.LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "operator-session-load");
+        }
+
+        var licenseTenant = activationState.Snapshot.TenantId;
+        if (session is not null &&
+            (!string.Equals(session.TenantId, licenseTenant, StringComparison.Ordinal) ||
+             session.User is null ||
+             string.IsNullOrEmpty(RestaurantWorkspaceRoutes.DefaultRoute(session.User.Role))))
+        {
+            session = null;
+            await sessions.ClearAsync();
+        }
+
+        if (session is null)
+        {
+            var configured = await new ConnectionSettingsStore().LoadAsync();
+            var signIn = new OperatorSignInWindow(licenseTenant, configured?.TenantBaseUrl);
+            if (signIn.ShowDialog() != true || signIn.SignedInSession is null)
+            {
+                Shutdown();
+                return;
+            }
+
+            session = signIn.SignedInSession;
+        }
+
+        var window = new MainWindow(session);
         MainWindow = window;
         window.Show();
 
