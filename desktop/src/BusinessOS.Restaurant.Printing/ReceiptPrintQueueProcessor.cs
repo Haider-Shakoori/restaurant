@@ -73,7 +73,8 @@ public sealed class ReceiptPrintQueueProcessor : IAsyncDisposable
 
         var now = DateTimeOffset.UtcNow;
         var candidate = candidates
-            .Where(value => !_retryNotBefore.TryGetValue(value.Id, out var next) || next <= now)
+            .Where(value => value.Status == "pending" ||
+                !_retryNotBefore.TryGetValue(value.Id, out var next) || next <= now)
             .OrderBy(value => value.CreatedAtUtc)
             .FirstOrDefault();
 
