@@ -46,6 +46,10 @@ public sealed class PremiumNavigationTests
             "BusinessOS.Restaurant.Desktop", "MainWindowViewModel.cs"));
         Assert.Contains("[ObservableProperty] private string _currentRoute", viewModel);
         Assert.Contains("CurrentRoute = route;", viewModel);
+        // A failed navigation must not leave the previous dashboard under a
+        // new POS heading when SQLite rejects a query.
+        Assert.True(viewModel.IndexOf("var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);", StringComparison.Ordinal) <
+                    viewModel.IndexOf("PageTitle = pageTitle;", StringComparison.Ordinal));
         Assert.True(viewModel.IndexOf("CurrentPage = page;", StringComparison.Ordinal) <
                     viewModel.IndexOf("CurrentRoute = route;", StringComparison.Ordinal));
     }
