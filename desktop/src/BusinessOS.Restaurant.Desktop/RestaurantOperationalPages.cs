@@ -558,6 +558,26 @@ internal static class RestaurantOperationalPages
         staffGrid.Columns.Add(Column("Restaurant role", nameof(StaffRow.Role), 160));
         staffGrid.Columns.Add(Column("Active", nameof(StaffRow.Active), 100));
         panel.Children.Add(staffGrid);
+        // StaffUsers is a read-only synchronized identity projection. Creating
+        // records here would not provision login credentials or permissions.
+        var manageUsers = new Button
+        {
+            Content = "User & Role Management",
+            MinWidth = 190,
+            Height = 38,
+            Margin = new Thickness(0, 10, 0, 8),
+        };
+        manageUsers.Click += (_, _) =>
+        {
+            MessageBox.Show(
+                "Restaurant staff accounts must be provisioned through the authenticated identity service. " +
+                "The local staff list is synchronized and cannot safely create logins or reset passwords. " +
+                "Role assignment and account provisioning require the connected management service.",
+                "User & Role Management",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        };
+        panel.Children.Insert(1, manageUsers);
 
         panel.Children.Add(new TextBlock { Text = "Staff shifts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var shiftGrid = GridFor(shifts);
