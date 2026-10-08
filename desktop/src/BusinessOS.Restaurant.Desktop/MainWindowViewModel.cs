@@ -100,7 +100,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (!CanView(route))
             return; // Shell visibility is not authorization: reject direct route commands too.
 
-        (PageTitle, PageSubtitle) = route switch
+        var (pageTitle, pageSubtitle) = route switch
         {
             "dashboard" => ("Dashboard", "Restaurant overview and today's operations"),
             "pos" => ("POS & Orders", "Orders, menu and cashier workflow"),
@@ -117,7 +117,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _ => ("Restaurant", "Operational workspace"),
         };
 
+        // Commit the header, content and active route together only after a
+        // successful load. If SQLite or a device is unavailable, the existing
+        // page must not appear under a misleading new navigation title.
         var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+        PageTitle = pageTitle;
+        PageSubtitle = pageSubtitle;
         CurrentPage = page;
         CurrentRoute = route;
     }
