@@ -196,3 +196,13 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 
 - Windows CI caught CS0053 on the newly bound notification record type: public shell collection properties exposed an internal record. Made only the immutable notice record and severity enum public; the bounded feed and event bus remain Desktop-internal.
 - Added a subtle WPF entrance fade to notification cards and a source-level assertion. No changes to restaurant operations or backend contracts.
+
+## Batch 14 — Critical action confirmations and rapid-submit safety (CI acceptance pending)
+
+- Found a verified Desktop UI risk: `AddPaymentAsync` generates a fresh payment identifier for each invocation while the cashier's `Post payment` button previously accepted repeated clicks. Concurrent double-taps could produce more than one intent despite service-level idempotency for a single request.
+- Added a pure UI submission gate with in-flight and completed states: the cashier payment control now ignores concurrent submissions and remains disabled after a successful post until the page is refreshed. An unsuccessful attempt restores the button for operator review/retry. This does **not** promise exactly-once delivery through a crash or a previously ambiguous failure.
+- KOT submit now prevents overlapping sends but re-enables after each completed attempt so legitimate subsequent rounds still work.
+- Added explicit Yes/No warning confirmations before order-line void, order cancellation, kitchen recall/waste/re-fire and daily closing finalization. Reasons and existing role checks remain enforced by the underlying local services.
+- Fixed a notification-instrumentation regression that had accidentally inserted the event-bus call as literal text inside the `Order served` success message. The served event now publishes a separate toast correctly; successful daily closing also publishes a toast.
+- Added unit tests for gate concurrency and reentry plus static source assertions for critical confirmations, button wiring, printer review and unchanged payment identifier generation.
+- Desktop WPF interaction changes only: no SQLite schema, production quantity, KOT ID, payment service, licensing, Laravel, Flutter or external API modifications. Manual Windows/thermal printer/4K/LAN and full operator acceptance remains deferred until the end. PR #69 stays draft and unmerged.

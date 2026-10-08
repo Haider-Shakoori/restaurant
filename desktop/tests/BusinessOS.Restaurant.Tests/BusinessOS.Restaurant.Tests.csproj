@@ -17,6 +17,7 @@
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/NavigationRequestGate.cs" Link="NavigationRequestGate.cs" />
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DashboardChartLayout.cs" Link="DashboardChartLayout.cs" />
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DesktopNoticeFeed.cs" Link="DesktopNoticeFeed.cs" />
+    <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DesktopSubmissionGate.cs" Link="DesktopSubmissionGate.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
