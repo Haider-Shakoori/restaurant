@@ -112,6 +112,18 @@ internal static class RestaurantOperationalPages
         Grid.SetColumn(right, 2);
         overviewGrid.Children.Add(right);
 
+        // Keep the detail column useful even on 1024 px cashier displays.
+        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.SizeChanged += (_, _) =>
+        {
+            var narrow = root.ActualWidth < 920;
+            overviewGrid.ColumnDefinitions[0].Width = new GridLength(narrow ? 1 : 3, GridUnitType.Star);
+            overviewGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            overviewGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(right, narrow ? 0 : 2);
+            Grid.SetRow(right, narrow ? 1 : 0);
+        };
         root.Children.Add(overviewGrid);
 
         var lowerGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -142,6 +154,16 @@ internal static class RestaurantOperationalPages
         Grid.SetColumn(kitchenPanel, 2);
         lowerGrid.Children.Add(kitchenPanel);
 
+        lowerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        lowerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.SizeChanged += (_, _) =>
+        {
+            var narrow = root.ActualWidth < 770;
+            lowerGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            lowerGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(kitchenPanel, narrow ? 0 : 2);
+            Grid.SetRow(kitchenPanel, narrow ? 1 : 0);
+        };
         root.Children.Add(lowerGrid);
         root.Children.Add(DashboardPanel(
             "Stock Alerts",
@@ -1153,11 +1175,23 @@ internal static class RestaurantOperationalPages
         foreach (var value in values)
             wrap.Children.Add(DashboardCard(value.Icon, value.Label, value.Value, value.Detail, value.Accent));
 
-        return new Border
+        var container = new Border
         {
             Child = wrap,
             Margin = new Thickness(0, 0, 0, 10),
         };
+        container.SizeChanged += (_, _) =>
+        {
+            var available = container.ActualWidth;
+            if (available <= 0 || !double.IsFinite(available)) return;
+
+            // KPI cards fill each row rather than clipping at lower resolutions.
+            var columns = Math.Clamp((int)((available + 10) / 245), 1, values.Length);
+            var cardWidth = Math.Max(164, Math.Floor(available / columns) - 10);
+            foreach (var card in wrap.Children.OfType<Border>())
+                card.Width = cardWidth;
+        };
+        return container;
     }
 
     private static Border DashboardCard(string icon, string title, string value, string detail, Color accent)
