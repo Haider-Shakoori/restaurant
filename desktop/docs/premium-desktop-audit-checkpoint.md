@@ -115,3 +115,11 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added the existing "expo" operator role to the constrained KDS-only workspace route policy, preserving Expo actions already implemented at service/UI level.
 - Added regression tests for state/role preservation and live-summary wiring.
 - Exact in-kitchen hardware/performance and visual screenshot acceptance remain unverified.
+
+## Batch 9 — Interrupt-safe printer queues and audited recovery (final validation pending)
+
+- Audited KOT and receipt spool workers. A durable job left in `printing` after process crash was automatically resent on restart; its true physical paper state is unknowable, so replay could lead to duplicate production.
+- Removed automatic replay of ambiguous `printing` jobs. Failed spool submissions retain automatic retry with exponential in-process delay, rather than exhausting ten attempts in a rapid loop. Explicit manager retry resets the job to `pending` and bypasses failed-job backoff.
+- Added a real Settings printer-queue summary (pending/failed/interrupted) and a physically-confirmed Owner/Manager retry action for original KOT/receipt document IDs. The workflow records a local audit event and does not create another order, KOT round, recipe consumption or customer bill.
+- Added policy regressions for worker selectors, failure backoff, approval confirmation and audit recording.
+- These safeguards reduce but cannot eliminate printer/spooler ambiguity. Real thermal printers, driver faults, copy counts and network interruptions still need hands-on acceptance. There is no guaranteed exactly-once physical printing across power loss.
