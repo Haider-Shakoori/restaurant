@@ -191,3 +191,8 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Preserved local inline operation feedback and all explicit Yes/No dialogs for destructive actions and ambiguous physical printer retries. No KOT state, money, SQLite, licensing, Web/Flutter or network contract changes.
 - Notifications stay in memory in the active authenticated shell and are cleared when switching operators; no cross-operator history or offline persistence is introduced.
 - Added pure feed unit regressions and shell-source wiring checks. Windows CI and eventual deferred hardware/visual acceptance remain mandatory; PR #69 stays unmerged.
+
+### Notification CI compile follow-up
+
+- Windows CI caught CS0053 on the newly bound notification record type: public shell collection properties exposed an internal record. Made only the immutable notice record and severity enum public; the bounded feed and event bus remain Desktop-internal.
+- Added a subtle WPF entrance fade to notification cards and a source-level assertion. No changes to restaurant operations or backend contracts.

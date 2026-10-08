@@ -89,6 +89,17 @@
         </Style>
         <DataTemplate x:Key="NotificationItemTemplate">
             <Border Style="{StaticResource NotificationSurfaceStyle}" Margin="0,0,0,8">
+                <!-- Subtle entrance on both toasts and notification history entries. -->
+                <Border.Triggers>
+                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1" Duration="0:0:0.22" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Border.Triggers>
                 <StackPanel>
                     <DockPanel>
                         <TextBlock DockPanel.Dock="Right" Text="{Binding TimeLabel}"

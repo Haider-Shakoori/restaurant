@@ -1,8 +1,8 @@
 namespace BusinessOS.Restaurant.Desktop;
 
-internal enum DesktopNoticeLevel { Info, Success, Warning, Error }
+public enum DesktopNoticeLevel { Info, Success, Warning, Error }
 
-internal sealed record DesktopNotice(
+public sealed record DesktopNotice(
     long Id, DateTimeOffset CreatedAt, DesktopNoticeLevel Level, string Message, bool IsRead)
 {
     public string Kind => Level.ToString();

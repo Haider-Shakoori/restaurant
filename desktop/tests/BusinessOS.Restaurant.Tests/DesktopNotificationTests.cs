@@ -53,6 +53,9 @@ public sealed class DesktopNotificationTests
             ((string?)e.Attribute("IsOpen"))?.Contains("NotificationsOpen", StringComparison.Ordinal) == true);
         Assert.Contains(shell.Descendants(), e => e.Name.LocalName == "ItemsControl" &&
             (string?)e.Attribute("ItemsSource") == "{Binding ToastNotifications}");
+        Assert.Contains(shell.Descendants(), e => e.Name.LocalName == "DoubleAnimation" &&
+            (string?)e.Attribute("From") == "0" &&
+            (string?)e.Attribute("To") == "1");
         foreach (var theme in new[] { "Glass.xaml", "Classic.xaml" })
         {
             var colors = XDocument.Load(FileAt("src", "BusinessOS.Restaurant.Desktop", "Themes", theme));
