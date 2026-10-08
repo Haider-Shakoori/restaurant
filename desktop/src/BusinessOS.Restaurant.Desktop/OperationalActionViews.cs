@@ -206,8 +206,9 @@ internal static class OperationalActionViews
 
                 lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
                 status.Text = "Order opened locally. Add items now or later; each Send KOT creates only the next unsent production round.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
         menuBox.SelectionChanged += (_, _) =>
         {
@@ -262,8 +263,9 @@ internal static class OperationalActionViews
                 lineBox.SelectedItem = localLine;
 
                 status.Text = $"{qty} × {item.Name} added. Send KOT when this round is ready.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
         submit.Click += async (_, _) =>
         {
@@ -272,8 +274,9 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
                 await workflow.SendKotAsync(orderIdBox.Text);
                 status.Text = "New KOT round sent. Previously sent items were not duplicated.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         fireCourse.Click += async (_, _) =>
@@ -284,8 +287,9 @@ internal static class OperationalActionViews
                 if (!int.TryParse(fireCourseBox.Text, out var courseNumber)) throw new InvalidOperationException("Enter a course number.");
                 await workflow.FireCourseAsync(orderIdBox.Text, courseNumber);
                 status.Text = $"Course {courseNumber} fired as a new KOT round.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         voidLine.Click += async (_, _) =>
@@ -296,8 +300,9 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a void reason.");
                 await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
                 status.Text = $"{line.ItemName} voided. Reserved stock was released when production had not started.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         cancelOrder.Click += async (_, _) =>
@@ -308,8 +313,9 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a cancellation reason.");
                 await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
                 status.Text = "Order cancelled with audit history preserved.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         var grid = DataGrid(orders);
@@ -363,13 +369,13 @@ internal static class OperationalActionViews
         var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
         cashier.Children.Add(cashierStatus);
 
-        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        pay.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (sessionBox.SelectedItem is not CashierSessionChoice s) throw new InvalidOperationException("Select an open cashier session."); if (!decimal.TryParse(amountBox.Text, out var amount)) throw new InvalidOperationException("Enter payment amount."); await workflow.AddPaymentAsync(b.Id, s.Id, amount, paymentMethod.SelectedItem?.ToString() ?? "cash"); cashierStatus.Text = "Payment posted. A fully paid bill releases the table through the restaurant settlement workflow."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); recipe inventory consumption recorded."; } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        pay.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (sessionBox.SelectedItem is not CashierSessionChoice s) throw new InvalidOperationException("Select an open cashier session."); if (!decimal.TryParse(amountBox.Text, out var amount)) throw new InvalidOperationException("Enter payment amount."); await workflow.AddPaymentAsync(b.Id, s.Id, amount, paymentMethod.SelectedItem?.ToString() ?? "cash"); cashierStatus.Text = "Payment posted. A fully paid bill releases the table through the restaurant settlement workflow."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
 
         var page = new StackPanel();
         page.Children.Add(root);
@@ -584,8 +590,9 @@ internal static class OperationalActionViews
 
                 await workflow.TransferOrderAsync(order.Id, target.Id);
                 operationStatus.Text = $"{order.ClientOrderId} transferred to {target.Label}. Refresh to see the new floor state.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         merge.Click += async (_, _) =>
@@ -599,8 +606,9 @@ internal static class OperationalActionViews
 
                 await workflow.MergeDraftOrdersAsync(target.Id, source.Id);
                 operationStatus.Text = $"{source.ClientOrderId} merged into {target.ClientOrderId}.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         move.Click += async (_, _) =>
@@ -621,8 +629,9 @@ internal static class OperationalActionViews
 
                 await workflow.MoveUnsentItemsAsync(source.Id, target.Id, ids);
                 operationStatus.Text = $"{ids.Length} unsent line(s) moved from {source.ClientOrderId} to {target.ClientOrderId}. KOT history stayed on the source order.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         split.Click += async (_, _) =>
@@ -643,8 +652,9 @@ internal static class OperationalActionViews
 
                 await workflow.SplitUnsentItemsAsync(source.Id, target.Id, ids);
                 operationStatus.Text = $"{ids.Length} unsent line(s) split to {target.Label}. Existing KOT history was unchanged.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         root.Children.Add(Card(operations));
@@ -938,11 +948,13 @@ internal static class OperationalActionViews
                         primary.IsEnabled = false;
                         await primaryAction();
                         statusText.Text = success ?? "Kitchen item updated.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         primary.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -960,11 +972,13 @@ internal static class OperationalActionViews
                         recall.IsEnabled = false;
                         await workflow.RecallKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} recalled to the kitchen without reversing its prior consumption.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         recall.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -982,11 +996,13 @@ internal static class OperationalActionViews
                         waste.IsEnabled = false;
                         await workflow.RecordKitchenWasteAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} recorded as production waste; inventory was not returned.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         waste.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -1004,11 +1020,13 @@ internal static class OperationalActionViews
                         refire.IsEnabled = false;
                         await workflow.RefireKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         refire.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -1222,7 +1240,7 @@ internal static class OperationalActionViews
                 await workflow.FinalizeDailyClosingAsync(branch.Id, date);
                 status.Text = $"Business date {date:yyyy-MM-dd} finalized.";
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
         root.Children.Add(Card(controls));
 

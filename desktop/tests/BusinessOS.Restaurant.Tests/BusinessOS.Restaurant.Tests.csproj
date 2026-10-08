@@ -16,6 +16,7 @@
     <!-- Compile pure Desktop helpers without loading a WPF window in the test host. -->
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/NavigationRequestGate.cs" Link="NavigationRequestGate.cs" />
     <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DashboardChartLayout.cs" Link="DashboardChartLayout.cs" />
+    <Compile Include="../../src/BusinessOS.Restaurant.Desktop/DesktopNoticeFeed.cs" Link="DesktopNoticeFeed.cs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

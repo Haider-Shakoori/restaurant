@@ -66,6 +66,43 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="NotificationSurfaceStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="12" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="Warning">
+                    <Setter Property="Background" Value="{DynamicResource WarningSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Error">
+                    <Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource ErrorBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Success">
+                    <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <DataTemplate x:Key="NotificationItemTemplate">
+            <Border Style="{StaticResource NotificationSurfaceStyle}" Margin="0,0,0,8">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeLabel}"
+                                   FontSize="10" Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock Text="{Binding Heading}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               FontSize="12" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="TopBarGhostButton" TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource TopBarActionBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
@@ -288,6 +325,48 @@
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="↻  Refresh"
                                     Command="{Binding RefreshCommand}" />
+                            <Button x:Name="NotificationBellButton" Margin="8,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="{Binding NotificationBellLabel}"
+                                    ToolTip="Show restaurant notifications"
+                                    AutomationProperties.Name="Notifications"
+                                    Command="{Binding ToggleNotificationsCommand}" />
+                            <Popup PlacementTarget="{Binding ElementName=NotificationBellButton}"
+                                   Placement="Bottom" HorizontalOffset="-250" VerticalOffset="10"
+                                   AllowsTransparency="True" StaysOpen="False"
+                                   PopupAnimation="Fade"
+                                   IsOpen="{Binding NotificationsOpen, Mode=TwoWay}"
+                                   DataContext="{Binding DataContext, ElementName=NotificationBellButton}">
+                                <Border Width="360" MaxHeight="480" Padding="14"
+                                        Background="{DynamicResource SurfaceBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1" CornerRadius="16">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="20" ShadowDepth="5"
+                                                          Color="#0E223A" Opacity="0.25" />
+                                    </Border.Effect>
+                                    <DockPanel>
+                                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                            <Button Content="Mark read" DockPanel.Dock="Right"
+                                                    Style="{StaticResource TopBarGhostButton}"
+                                                    Command="{Binding MarkNotificationsReadCommand}" />
+                                            <TextBlock Text="Notifications" FontSize="17"
+                                                       FontWeight="Bold" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      MaxHeight="380">
+                                            <StackPanel>
+                                                <TextBlock Text="Recent alerts for this operator session"
+                                                           Margin="0,0,0,8" FontSize="11"
+                                                           Foreground="{DynamicResource TextMutedBrush}"/>
+                                                <ItemsControl ItemsSource="{Binding NotificationHistory}"
+                                                              ItemTemplate="{StaticResource NotificationItemTemplate}" />
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </DockPanel>
+                                </Border>
+                            </Popup>
                         </StackPanel>
                     </Grid>
                 </Border>
@@ -327,5 +406,12 @@
                 </Border>
             </Grid>
         </Grid>
+
+        <!-- Toast overlay belongs to the shell, not to the current page. It
+             never blocks kitchen, table or cashier actions after expiry. -->
+        <ItemsControl Grid.Row="0" Grid.Column="0" Panel.ZIndex="20"
+                      Width="355" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      Margin="12,12,18,18" ItemsSource="{Binding ToastNotifications}"
+                      ItemTemplate="{StaticResource NotificationItemTemplate}" />
     </Grid>
 </Window>

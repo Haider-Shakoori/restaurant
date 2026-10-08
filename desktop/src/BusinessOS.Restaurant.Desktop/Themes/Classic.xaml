@@ -23,6 +23,10 @@
     <SolidColorBrush x:Key="BorderStrongBrush" Color="#CBD5E1" />
     <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#0B82F6" />
     <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#E8F3FF" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
+    <SolidColorBrush x:Key="WarningSoftBrush" Color="#FFFBEB" />
+    <SolidColorBrush x:Key="ErrorBrush" Color="#B91C1C" />
+    <SolidColorBrush x:Key="ErrorSoftBrush" Color="#FEF2F2" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#169B62" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF5" />
     <SolidColorBrush x:Key="HoverBrush" Color="#F1F5F9" />

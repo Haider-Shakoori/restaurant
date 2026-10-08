@@ -182,3 +182,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Network and license diagnostic refresh exceptions now log without preventing a local SQLite page from loading while Internet/LAN are intermittent; a failing license-status read is visibly marked unavailable rather than falsely presented as valid.
 - Added static shell/recovery tests for command wiring, banner visibility, failure order, role enforcement and network diagnostics isolation.
 - No Web/Flutter, database schema, printing, KOT, inventory-consumption, payment or shared contract changes. User-deferred Windows manual acceptance and hardware testing remain required before production approval.
+
+## Batch 13 — Session-scoped Desktop notifications (new CI acceptance pending)
+
+- Created a Desktop-only bounded notification feed, capped at 100 session entries, with severity, timestamps, unread counts, mark-read and suppression of repeated identical alerts within ten seconds.
+- Added a top-bar bell with unread count and accessible popover notification history; Glass and Classic dictionaries supply theme-aware success/warning/error surfaces.
+- Added short-lived nonmodal toasts for successful POS/cashier/table/KDS actions, action failures and workspace recovery. Toasts expire automatically (errors last longer) and at most three are visible.
+- Preserved local inline operation feedback and all explicit Yes/No dialogs for destructive actions and ambiguous physical printer retries. No KOT state, money, SQLite, licensing, Web/Flutter or network contract changes.
+- Notifications stay in memory in the active authenticated shell and are cleared when switching operators; no cross-operator history or offline persistence is introduced.
+- Added pure feed unit regressions and shell-source wiring checks. Windows CI and eventual deferred hardware/visual acceptance remain mandatory; PR #69 stays unmerged.

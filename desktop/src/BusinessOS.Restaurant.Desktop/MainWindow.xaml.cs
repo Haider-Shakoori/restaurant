@@ -60,6 +60,7 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         ThemeManager.ThemeChanged -= OnThemeChanged;
+        _viewModel.ReleaseNotifications();
     }
 
     private async void OnSwitchOperatorClick(object sender, RoutedEventArgs e)

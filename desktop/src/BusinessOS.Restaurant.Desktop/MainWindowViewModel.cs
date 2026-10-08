@@ -1,3 +1,6 @@
+using System.Collections.ObjectModel;
+using System.Windows;
+using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop.Appearance;
 using BusinessOS.Restaurant.Licensing;
@@ -14,6 +17,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     // Every navigation and refresh shares one generation; stale loads cannot replace a newer workspace.
     private readonly NavigationRequestGate _pageRequests = new();
     private string? _failedWorkspaceRoute;
+    private readonly DesktopNoticeFeed _noticeFeed = new();
+    private readonly List<DispatcherTimer> _noticeTimers = new();
 
     public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
     public bool CanViewDashboard => CanView("dashboard");
@@ -39,6 +44,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _licenseText = "Checking license…";
     [ObservableProperty] private bool _hasWorkspaceError;
     [ObservableProperty] private string _workspaceErrorMessage = string.Empty;
+    [ObservableProperty] private bool _notificationsOpen;
+    [ObservableProperty] private int _unreadNotificationCount;
+
+    public ObservableCollection<DesktopNotice> NotificationHistory { get; } = new();
+    public ObservableCollection<DesktopNotice> ToastNotifications { get; } = new();
+    public string NotificationBellLabel => UnreadNotificationCount > 0
+        ? $"🔔 {UnreadNotificationCount}" : "🔔";
 
     public string NetworkMode => _diagnostics.NetworkMode;
 
@@ -52,6 +64,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public IRelayCommand ToggleThemeCommand { get; }
 
     public IAsyncRelayCommand RetryWorkspaceCommand { get; }
+    public IRelayCommand ToggleNotificationsCommand { get; }
+    public IRelayCommand MarkNotificationsReadCommand { get; }
 
     public MainWindowViewModel(AuthSession session)
     {
@@ -61,6 +75,68 @@ public sealed partial class MainWindowViewModel : ObservableObject
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
         RetryWorkspaceCommand = new AsyncRelayCommand(RetryWorkspaceAsync);
+        ToggleNotificationsCommand = new RelayCommand(() => NotificationsOpen = !NotificationsOpen);
+        MarkNotificationsReadCommand = new RelayCommand(MarkNotificationsRead);
+        DesktopNoticeEvents.Posted += OnDesktopNotice;
+    }
+
+    partial void OnNotificationsOpenChanged(bool value)
+    {
+        if (value) MarkNotificationsRead();
+    }
+
+    partial void OnUnreadNotificationCountChanged(int value) =>
+        OnPropertyChanged(nameof(NotificationBellLabel));
+
+    private void MarkNotificationsRead()
+    {
+        _noticeFeed.MarkAllRead();
+        NotificationHistory.Clear();
+        foreach (var notice in _noticeFeed.History)
+            NotificationHistory.Add(notice);
+        UnreadNotificationCount = _noticeFeed.UnreadCount;
+    }
+
+    private void OnDesktopNotice(DesktopNoticeLevel level, string message)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted)
+            return;
+        if (!dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(new Action(() => OnDesktopNotice(level, message)));
+            return;
+        }
+
+        var notice = _noticeFeed.Publish(level, message, DateTimeOffset.Now);
+        if (notice is null)
+            return;
+
+        NotificationHistory.Insert(0, notice);
+        if (NotificationHistory.Count > 100)
+            NotificationHistory.RemoveAt(NotificationHistory.Count - 1);
+        UnreadNotificationCount = _noticeFeed.UnreadCount;
+        ToastNotifications.Insert(0, notice);
+        while (ToastNotifications.Count > 3)
+            ToastNotifications.RemoveAt(ToastNotifications.Count - 1);
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(level == DesktopNoticeLevel.Error ? 9 : 5) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            _noticeTimers.Remove(timer);
+            ToastNotifications.Remove(notice);
+        };
+        _noticeTimers.Add(timer);
+        timer.Start();
+    }
+
+    public void ReleaseNotifications()
+    {
+        DesktopNoticeEvents.Posted -= OnDesktopNotice;
+        foreach (var timer in _noticeTimers)
+            timer.Stop();
+        _noticeTimers.Clear();
     }
 
     public async Task InitializeAsync()
@@ -150,6 +226,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         WorkspaceErrorMessage = $"Could not load {pageTitle}. Your current screen is unchanged. " +
             "Retry the workspace or check the local diagnostic log.";
         HasWorkspaceError = true;
+        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Warning, WorkspaceErrorMessage);
     }
 
     private void ToggleTheme()
