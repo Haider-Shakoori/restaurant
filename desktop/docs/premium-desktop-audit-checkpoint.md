@@ -61,3 +61,13 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added aggregation tests for Afghanistan's UTC+04:30 local-day boundary, differing timestamp offsets, and empty days.
 - Existing multi-KOT and other operational logic remain untouched.
 - Visual screenshot acceptance (including photographic blur and nested Glass surfaces), real printer testing, and final production golden path are still outstanding.
+
+## Batch 3 — Branch-aware stock alerts and accurate service counts (CI acceptance pending)
+
+- Confirmed that the old dashboard counted cancelled orders as open and every non-available table as occupied. Updated service KPIs to exclude cancelled orders and count only occupied active tables.
+- Added a read-only, premium-style Stock Alerts panel to the desktop dashboard using actual inventory balances and reorder levels for active branches. Zero/unconfigured thresholds do not trigger alarms.
+- Branch and ingredient names are shown for the five most urgent alerts; the summary makes additional alerts visible without fabricating stock records or multiplying shared item balances across branches.
+- When inventory has no balances or no configured thresholds, show explicit setup guidance instead of claiming that stock health is good.
+- Added pure domain regression tests for branch separation, empty inventory, out-of-stock ordering, and threshold boundary conditions.
+- No changes to Laravel, Flutter, purchasing, pricing, stock movement, KOT, or existing SQLite schema.
+- Next acceptance gate: .NET tests, Windows publish/installer smoke tests, then green GitHub Actions before starting another batch.
