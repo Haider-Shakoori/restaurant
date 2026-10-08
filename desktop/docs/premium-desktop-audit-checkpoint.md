@@ -123,3 +123,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added a real Settings printer-queue summary (pending/failed/interrupted) and a physically-confirmed Owner/Manager retry action for original KOT/receipt document IDs. The workflow records a local audit event and does not create another order, KOT round, recipe consumption or customer bill.
 - Added policy regressions for worker selectors, failure backoff, approval confirmation and audit recording.
 - These safeguards reduce but cannot eliminate printer/spooler ambiguity. Real thermal printers, driver faults, copy counts and network interruptions still need hands-on acceptance. There is no guaranteed exactly-once physical printing across power loss.
+
+## Batch 10 — Cold-start SQLite restore, verification and local recovery UI (final acceptance pending)
+
+- Found a verified recovery gap: `LocalMaintenanceService.StageRestoreAsync` and `ApplyPendingRestoreAsync` existed, but the Desktop startup path never invoked the latter. Staged restore therefore never became active.
+- Startup now applies a pending restore before creating the main WPF window, local database consumers, KOT/receipt workers, cloud reconciliation or the LAN host. A validation failure logs the issue and prevents local service startup, preserving the existing live database for investigation.
+- Restore markers are now checked against the staged file SHA-256 before replacement. The current live DB receives a WAL-consistent online safety backup when possible, with a raw forensic fallback for already-corrupted sources. Existing SQLite WAL/SHM sidecars are archived rather than reused with the restored DB.
+- Added operational Settings controls to create an online verified local backup, inspect integrity/backup state, and stage a selected backup with explicit end-of-shift warning. The restored backup is applied only after restart, not mid-service.
+- Added a tamper regression and static startup/recovery UI coverage. No schema or shared Web/Flutter API changes.
+- Production test still must cover genuine Windows power interruption, database corruption recovery, active WAL transactions, low disk, multi-terminal shutdown and a full post-restore KOT/cashier flow.
