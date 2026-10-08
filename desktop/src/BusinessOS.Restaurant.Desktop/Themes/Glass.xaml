@@ -3,7 +3,7 @@
                     xmlns:effects="clr-namespace:System.Windows.Media.Effects;assembly=PresentationCore">
     <!-- Pharma-style frosted shell: the restaurant artwork remains visible underneath. -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="#102033" />
-    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#16FFFFFF" />
+    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#46304460" />
 
     <SolidColorBrush x:Key="SurfaceBrush" Color="#C9F8FBFF" />
     <SolidColorBrush x:Key="SidebarBrush" Color="#B8F5F9FF" />
@@ -37,5 +37,5 @@
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
 
     <!-- WPF cannot do real backdrop-filter blur; blur the artwork and layer translucent surfaces over it. -->
-    <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="8" />
+    <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="24" />
 </ResourceDictionary>
