@@ -52,3 +52,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - The converter changes presentation only; it does not introduce a second navigation or authorization system.
 - Added static XAML/view-model regression tests. Windows build and GitHub CI are the acceptance gate.
 - **Deferred**: role-specific hiding/authorization until the MainWindow startup/authenticated-session boundary is audited. The existing app starts the main window after licensing without an interactive operator login; hiding menu items without an authenticated operator would be misleading and could block access. Role enforcement must be handled separately at the service boundary.
+
+## Batch 2 — Truthful business-day dashboard trend (CI pending)
+
+- Removed the hard-coded rising sales polyline. Empty days now explicitly say there are no billed sales.
+- Daily sales and hourly trend are derived from the same local SQLite bill snapshots, with receipt timestamps converted to the Windows restaurant time zone.
+- Exclude future timestamps from the as-of dashboard projection; no accounting records are mutated.
+- Added aggregation tests for Afghanistan's UTC+04:30 local-day boundary, differing timestamp offsets, and empty days.
+- Existing multi-KOT and other operational logic remain untouched.
+- Visual screenshot acceptance (including photographic blur and nested Glass surfaces), real printer testing, and final production golden path are still outstanding.
