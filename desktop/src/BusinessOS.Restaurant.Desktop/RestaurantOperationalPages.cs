@@ -462,36 +462,49 @@ internal static class RestaurantOperationalPages
             var components = await costDb.RecipeItems.AsNoTracking().ToListAsync();
             var ingredients = await costDb.InventoryItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
             var menuItems = await costDb.MenuItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var branches = await costDb.Branches.AsNoTracking().ToDictionaryAsync(x => x.Id);
             var versions = await costDb.Recipes.AsNoTracking().Where(x => x.IsActive).ToListAsync();
+            var unitCosts = valuations.ToDictionary(x => (x.BranchId, x.InventoryItemId), x => x.AverageUnitCost);
+            var componentGroups = components.ToLookup(x => x.RecipeId);
+
             var preview = versions.Select(version =>
             {
-                var recipeItems = components.Where(x => x.RecipeId == version.Id).ToList();
+                var recipeItems = componentGroups[version.Id].ToList();
                 decimal total = 0m;
-                var missing = 0;
+                var missing = recipeItems.Count == 0 ? 1 : 0;
                 foreach (var component in recipeItems)
                 {
-                    var valuation = valuations.FirstOrDefault(x =>
-                        x.BranchId == version.BranchId && x.InventoryItemId == component.InventoryItemId);
-                    if (valuation is null || !ingredients.ContainsKey(component.InventoryItemId))
+                    if (component.QuantityBase <= 0 ||
+                        !ingredients.TryGetValue(component.InventoryItemId, out var ingredient) ||
+                        !ingredient.IsActive ||
+                        !unitCosts.TryGetValue((version.BranchId, component.InventoryItemId), out var unitCost) ||
+                        unitCost <= 0)
                     {
                         missing++;
                         continue;
                     }
-                    total += component.QuantityBase * valuation.AverageUnitCost;
+                    total += component.QuantityBase * unitCost;
                 }
+
                 menuItems.TryGetValue(version.MenuItemId, out var menuItem);
+                branches.TryGetValue(version.BranchId, out var selectedBranch);
                 var salePrice = menuItem?.Price ?? 0m;
+                var reliable = missing == 0 && salePrice > 0;
                 return new
                 {
+                    Branch = selectedBranch?.Name ?? version.BranchId,
                     Menu = menuItem?.Name ?? version.MenuItemId,
                     version.Version,
-                    IngredientCostAfn = Math.Round(total, 2),
+                    IngredientCostAfn = missing == 0 ? Math.Round(total, 2).ToString("0.00") : "N/A",
                     SalePriceAfn = salePrice,
-                    GrossMarginAfn = missing == 0 ? Math.Round(salePrice - total, 2).ToString("0.00") : "N/A",
+                    FoodCostPercent = reliable ? Math.Round(total / salePrice * 100m, 2).ToString("0.00") + "%" : "N/A",
+                    GrossMarginAfn = reliable ? Math.Round(salePrice - total, 2).ToString("0.00") : "N/A",
+                    GrossMarginPercent = reliable ? Math.Round((salePrice - total) / salePrice * 100m, 2).ToString("0.00") + "%" : "N/A",
                     MissingCosts = missing,
                 };
             }).ToList();
-            var dialog = new Window { Title = "Recipe Food-Cost Preview (Estimated)", Width = 850, Height = 470, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+
+            var dialog = new Window { Title = "Estimated Recipe Food Cost (AFN)", Width = 1040, Height = 470, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var owner = System.Windows.Application.Current?.MainWindow;
             if (owner is not null) dialog.Owner = owner;
             var costGrid = GridFor(preview);
