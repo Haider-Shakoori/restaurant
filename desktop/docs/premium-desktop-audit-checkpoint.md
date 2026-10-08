@@ -97,3 +97,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added a fail-closed route visibility and navigation policy for owner, manager, cashier, waiter and kitchen; the kitchen role lands on KOT and does not see sales-dashboard workspaces. Waiters see order entry without cashier-only billing/session controls. Existing local service authorizers are still authoritative.
 - Added tests for route policy, startup ordering, login tenant check, sidebar role visibility and PasswordBox wiring.
 - Does NOT prove enterprise-grade re-authentication or offline revocation handling; shared Windows-user kiosk policy, session expiry, device tests and the full service permission audit remain for final security and manual acceptance. No new schema, Web/Flutter changes, licensing contract changes or disabled KOT flows.
+
+## Batch 7 — Visual table/floor board (final acceptance pending)
+
+- Verified the existing live floor page relied on a CRUD-like DataGrid despite working table transfer, order merge, unsent-line move and split services.
+- Added an area-grouped, touch-sized visual table board based entirely on existing local dining table and active order projections. Cards show table capacity, status, order reference and amount without synthetic/demo data.
+- Selecting an occupied card chooses its existing order for table operations; selecting an available card chooses the destination table. Unavailable cards cannot be selected as destinations.
+- Kept the complete original table list behind a show/hide toggle for operations/auditing; backend service operations and the immutable KOT round policy remain unchanged.
+- Added static coverage for actual row projection and reuse of transfer/merge/move/split business services.
+- A real touch-device walkthrough, card layout screenshot checks and complete waiter-to-cashier end-to-end acceptance remain outstanding.
