@@ -57,20 +57,23 @@ internal static class OperationalActionViews
             .OrderByDescending(x => x.IssuedAt)
             .Select(x => x.Row)
             .ToList();
-        var orderLines = await (
+        // SQLite cannot translate ORDER BY on DateTimeOffset; sort the projected rows in memory.
+        var orderLines = (await (
             from line in db.OrderItems.AsNoTracking()
             join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
             where order.Status != "closed" && order.Status != "cancelled" &&
                   line.Status != "voided" && line.Status != "cancelled"
-            orderby line.CreatedAtUtc
-            select new OrderLineChoice(
-                order.ClientOrderId,
-                line.ClientLineId,
-                line.ItemName,
-                line.Quantity,
-                line.Status,
-                line.RoundNumber))
-            .ToListAsync();
+            select new
+            {
+                Row = new OrderLineChoice(
+                    order.ClientOrderId, line.ClientLineId, line.ItemName,
+                    line.Quantity, line.Status, line.RoundNumber),
+                line.CreatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -375,37 +378,41 @@ internal static class OperationalActionViews
                           select new TableChoice(table.Id, area.Name, table.Code, table.Name, table.Capacity, table.Status))
             .ToListAsync();
 
-        var activeOrders = await (
+        var activeOrders = (await (
             from order in db.Orders.AsNoTracking()
             join table in db.DiningTables.AsNoTracking() on order.DiningTableId equals table.Id
             where order.ServiceType == "dine_in" &&
                   order.Status != "closed" &&
                   order.Status != "cancelled" &&
                   order.Status != "billed"
-            orderby order.UpdatedAtUtc descending
-            select new TableOrderChoice(
-                order.Id,
-                order.ClientOrderId,
-                table.Id,
-                table.Name,
-                order.Status,
-                order.Total))
-            .ToListAsync();
+            select new
+            {
+                Row = new TableOrderChoice(
+                    order.Id, order.ClientOrderId, table.Id, table.Name,
+                    order.Status, order.Total),
+                order.UpdatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
-        var unsentLines = await (
+        var unsentLines = (await (
             from line in db.OrderItems.AsNoTracking()
             join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
             where order.ServiceType == "dine_in" &&
                   line.KotRoundId == null &&
                   (line.Status == "pending" || line.Status == "held")
-            orderby line.CreatedAtUtc
-            select new TableSplitLineChoice(
-                order.Id,
-                line.Id,
-                line.ItemName,
-                line.Quantity,
-                line.Status))
-            .ToListAsync();
+            select new
+            {
+                Row = new TableSplitLineChoice(
+                    order.Id, line.Id, line.ItemName, line.Quantity, line.Status),
+                line.CreatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
         var availableTables = rows
             .Where(x => x.Status == "available")
