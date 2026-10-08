@@ -132,3 +132,10 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added operational Settings controls to create an online verified local backup, inspect integrity/backup state, and stage a selected backup with explicit end-of-shift warning. The restored backup is applied only after restart, not mid-service.
 - Added a tamper regression and static startup/recovery UI coverage. No schema or shared Web/Flutter API changes.
 - Production test still must cover genuine Windows power interruption, database corruption recovery, active WAL transactions, low disk, multi-terminal shutdown and a full post-restore KOT/cashier flow.
+
+## Batch 11 — Traceable Windows installer and release artifacts (final CI acceptance pending)
+
+- Verified the existing branded Inno Setup installer already contains the 7-day trial link, machine-bound activation check, preservation of restaurant data across upgrades, private/domain-only LAN firewall setup and unsigned CI build/installer smoke tests. These features were not rebuilt.
+- Added a Desktop GitHub Actions release provenance manifest containing the built source commit, explicit `unsigned_ci` label, EXE SHA-256 and installer SHA-256. CI uploads this as a separate downloadable verification artifact.
+- Added static release pipeline regression coverage for the checksum and unsigned labeling.
+- This is provenance, **not** a code signature. A production Authenticode-signed release still requires an approved signing certificate/secrets, controlled release promotion, and manual installer activation/update acceptance.
