@@ -621,10 +621,55 @@ internal static class RestaurantOperationalPages
         supplierGrid.Columns.Add(Column("Code", nameof(SupplierRow.Code), 110)); supplierGrid.Columns.Add(Column("Supplier", nameof(SupplierRow.Name), 220));
         supplierGrid.Columns.Add(Column("Phone", nameof(SupplierRow.Phone), 150)); supplierGrid.Columns.Add(Column("Email", nameof(SupplierRow.Email), 220));
         panel.Children.Add(supplierGrid);
-        var purchaseButton = new Button { Content = "+ New Purchase & Receive", Height = 38, MinWidth = 200, Margin = new Thickness(0, 10, 0, 8) };
+        var addSupplier = new Button { Content = "+ Add Supplier", Height = 38, MinWidth = 150, Margin = new Thickness(0, 10, 0, 6) };
+        addSupplier.Click += (_, _) =>
+        {
+            var dialog = new Window { Title = "Add Supplier", Width = 445, Height = 410, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var code = new TextBox { Height = 34 };
+            var name = new TextBox { Height = 34 };
+            var phone = new TextBox { Height = 34 };
+            var email = new TextBox { Height = 34 };
+            foreach (var field in new (string Label, FrameworkElement Input)[]
+            {
+                ("Supplier code", code), ("Supplier name", name), ("Phone (optional)", phone), ("Email (optional)", email)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = field.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(field.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Save Supplier", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text))
+                        throw new InvalidOperationException("Supplier code and name are required.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateSupplierAsync(
+                        code.Text.Trim(), name.Text.Trim(), phone.Text.Trim(), email.Text.Trim(),
+                        null, actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Supplier saved. Refresh Purchases to see it.");
+        };
+        panel.Children.Add(addSupplier);
+
+        var purchaseButton = new Button { Content = "+ New Purchase & Receive", Height = 38, MinWidth = 200, Margin = new Thickness(0, 6, 0, 8) };
         purchaseButton.Click += async (_, _) =>
         {
-            var dialog = new Window { Title = "Purchase & Receive Ingredient", Width = 470, Height = 510, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var dialog = new Window { Title = "Purchase & Receive Inventory", Width = 500, Height = 550, WindowStartupLocation = WindowStartupLocation.CenterOwner };
             var owner = System.Windows.Application.Current?.MainWindow;
             if (owner is not null) dialog.Owner = owner;
             await using var lookupDb = factory.Create();
@@ -647,42 +692,90 @@ internal static class RestaurantOperationalPages
                 form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
                 form.Children.Add(entry.Input);
             }
+
+            var purchaseLines = new List<(LocalInventoryItem Item, decimal Quantity, decimal UnitCost)>();
+            var linesSummary = new TextBlock { Text = "Add at least one ingredient.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            var addLine = new Button { Content = "+ Add Purchase Line", Height = 36 };
+            addLine.Click += (_, _) =>
+            {
+                if (item.SelectedItem is not LocalInventoryItem selectedItem ||
+                    !decimal.TryParse(quantity.Text, out var qty) || qty <= 0 ||
+                    !decimal.TryParse(cost.Text, out var unitCost) || unitCost < 0)
+                {
+                    linesSummary.Text = "Select an ingredient and enter a positive quantity and valid unit cost.";
+                    return;
+                }
+                if (purchaseLines.Any(x => x.Item.Id == selectedItem.Id))
+                {
+                    linesSummary.Text = "This ingredient is already in the purchase. Add each ingredient once.";
+                    return;
+                }
+                purchaseLines.Add((selectedItem, qty, unitCost));
+                var total = purchaseLines.Sum(x => x.Quantity * x.UnitCost);
+                linesSummary.Text = string.Join("\n", purchaseLines.Select(x =>
+                    x.Item.Name + ": " + x.Quantity + " " + (x.Item.PurchaseUnit ?? x.Item.BaseUnit) +
+                    " × " + x.UnitCost.ToString("0.00") + " AFN")) +
+                    "\nTotal: " + total.ToString("0.00") + " AFN";
+            };
+            form.Children.Add(addLine);
+            form.Children.Add(linesSummary);
             var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8) };
             form.Children.Add(feedback);
             var save = new Button { Content = "Create PO and Receive Stock", Height = 40 };
+            string? pendingPurchaseId = null;
+            LocalReceivePurchaseOrderLineRequest[]? pendingReceiptLines = null;
             save.Click += async (_, _) =>
             {
                 try
                 {
                     if (branch.SelectedItem is not LocalBranch selectedBranch ||
-                        supplier.SelectedItem is not LocalSupplier selectedSupplier ||
-                        item.SelectedItem is not LocalInventoryItem selectedItem ||
-                        !decimal.TryParse(quantity.Text, out var qty) || qty <= 0 ||
-                        !decimal.TryParse(cost.Text, out var unitCost) || unitCost < 0)
-                        throw new InvalidOperationException("Choose branch, supplier, ingredient and valid quantity/cost.");
+                        supplier.SelectedItem is not LocalSupplier selectedSupplier || purchaseLines.Count == 0)
+                        throw new InvalidOperationException("Select branch, supplier and at least one purchase line.");
                     save.IsEnabled = false;
                     var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
                     var inventoryService = new LocalInventoryService(factory);
-                    var created = await inventoryService.CreatePurchaseOrderAsync(selectedBranch.Id, selectedSupplier.Id,
-                        new[] { new LocalPurchaseOrderLineRequest(selectedItem.Id, qty, unitCost) },
-                        "Desktop one-step purchase", actor, CancellationToken.None);
-                    var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
-                    var poId = snapshot.GetProperty("id").GetString()
-                        ?? throw new InvalidOperationException("Purchase order ID was not returned.");
-                    var poLineId = snapshot.GetProperty("lines")[0].GetProperty("id").GetString()
-                        ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
-                    await inventoryService.ReceivePurchaseOrderAsync(poId,
-                        new[] { new LocalReceivePurchaseOrderLineRequest(poLineId, qty) },
-                        "desktop-receipt-" + poId, "Received through desktop purchase form",
-                        actor, CancellationToken.None);
+                    if (pendingPurchaseId is null)
+                    {
+                        var created = await inventoryService.CreatePurchaseOrderAsync(
+                            selectedBranch.Id, selectedSupplier.Id,
+                            purchaseLines.Select(x => new LocalPurchaseOrderLineRequest(x.Item.Id, x.Quantity, x.UnitCost)).ToArray(),
+                            "Desktop one-step purchase", actor, CancellationToken.None);
+                        var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
+                        pendingPurchaseId = snapshot.GetProperty("id").GetString()
+                            ?? throw new InvalidOperationException("Purchase order ID was not returned.");
+                        var returnedLines = snapshot.GetProperty("lines").EnumerateArray().ToArray();
+                        pendingReceiptLines = purchaseLines.Select(line =>
+                        {
+                            var savedLine = returnedLines.Single(x =>
+                                x.GetProperty("inventory_item_id").GetString() == line.Item.Id);
+                            var savedId = savedLine.GetProperty("id").GetString()
+                                ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
+                            return new LocalReceivePurchaseOrderLineRequest(savedId, line.Quantity);
+                        }).ToArray();
+                        branch.IsEnabled = false;
+                        supplier.IsEnabled = false;
+                        item.IsEnabled = false;
+                        quantity.IsEnabled = false;
+                        cost.IsEnabled = false;
+                        addLine.IsEnabled = false;
+                    }
+
+                    await inventoryService.ReceivePurchaseOrderAsync(pendingPurchaseId,
+                        pendingReceiptLines!, "desktop-receipt-" + pendingPurchaseId,
+                        "Received through desktop purchase form", actor, CancellationToken.None);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (Exception ex)
+                {
+                    feedback.Text = (pendingPurchaseId is null ? "" :
+                        "Purchase order already saved. Retry receiving; do not create a duplicate. ") + ex.Message;
+                    save.IsEnabled = true;
+                }
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
             if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated.");
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated. Refresh Purchases to see it.");
         };
         panel.Children.Add(purchaseButton);
         panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
