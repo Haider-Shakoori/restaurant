@@ -357,7 +357,31 @@ internal static class RestaurantOperationalPages
             if (dialog.ShowDialog() == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Menu item created. Refresh Menu to see it.");
         };
+        var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipes.Click += async (_, _) =>
+        {
+            await using var recipeDb = factory.Create();
+            var versions = await (from version in recipeDb.Recipes.AsNoTracking()
+                                  join menuItem in recipeDb.MenuItems.AsNoTracking()
+                                      on version.MenuItemId equals menuItem.Id
+                                  orderby menuItem.Name, version.Version descending
+                                  select new { Menu = menuItem.Name, version.Name, version.Version, version.IsActive })
+                .ToListAsync();
+            var dialog = new Window
+            {
+                Title = "Recipe Versions",
+                Width = 650, Height = 460,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var recipeGrid = GridFor(versions);
+            recipeGrid.AutoGenerateColumns = true;
+            dialog.Content = recipeGrid;
+            dialog.ShowDialog();
+        };
         panel.Children.Add(create);
+        panel.Children.Add(recipes);
         panel.Children.Add(grid);
         return Scroll(panel);
     }
