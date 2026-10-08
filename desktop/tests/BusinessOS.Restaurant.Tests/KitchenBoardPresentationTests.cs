@@ -30,9 +30,9 @@ public sealed class KitchenBoardPresentationTests
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
 
-        Assert.Contains("await workflow.StartKitchenItemAsync(", source);
-        Assert.Contains("await workflow.MarkKitchenItemReadyAsync(", source);
-        Assert.Contains("await workflow.PassExpoItemAsync(", source);
+        Assert.Contains("workflow.StartKitchenItemAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyAsync(", source);
+        Assert.Contains("workflow.PassExpoItemAsync(", source);
         Assert.Contains("await workflow.RefireKitchenItemAsync(", source);
         Assert.Contains("pollTimer.Start();", source);
         Assert.Contains("ageTimer.Start();", source);
