@@ -191,6 +191,49 @@ class TenantPortalSetupController extends Controller
         return back()->with('status', 'Supplier created.');
     }
 
+
+    public function updateUser(Request $request, TenantUser $user): RedirectResponse
+    {
+        $roles = ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'];
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'phone' => ['nullable', 'string', 'max:50'],
+            'role' => ['required', Rule::in($roles)],
+            'is_active' => ['required', 'boolean'],
+            'password' => ['nullable', 'string', 'min:8', 'max:255'],
+        ]);
+
+        $currentUser = auth('tenant')->user();
+        if ($currentUser && (int) $currentUser->id === (int) $user->id &&
+            ($data['role'] !== $user->role || ! (bool) $data['is_active'])) {
+            return back()->withErrors(['role' => 'You cannot change your own role or disable your own account.']);
+        }
+
+        if ($user->role === 'owner' && ($data['role'] !== 'owner' || ! (bool) $data['is_active']) &&
+            TenantUser::query()->where('role', 'owner')->where('is_active', true)->count() <= 1) {
+            return back()->withErrors(['role' => 'The last active restaurant owner cannot be removed.']);
+        }
+
+        $user->fill([
+            'name' => trim($data['name']),
+            'email' => Str::lower($data['email']),
+            'phone' => $data['phone'] ?? null,
+            'role' => $data['role'],
+            'is_active' => (bool) $data['is_active'],
+        ]);
+        if (! empty($data['password'])) {
+            $user->password = $data['password'];
+        }
+        $user->save();
+
+        if (! $user->is_active || ! empty($data['password']) || $user->wasChanged('role')) {
+            $user->tokens()->delete();
+        }
+
+        return back()->with('status', 'Restaurant user updated.');
+    }
+
     public function user(Request $request): RedirectResponse
     {
         $roles = ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'];
