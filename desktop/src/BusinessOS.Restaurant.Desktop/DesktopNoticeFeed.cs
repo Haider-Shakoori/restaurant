@@ -42,11 +42,14 @@ internal sealed class DesktopNoticeFeed
         if (normalized.Length > 500)
             normalized = normalized[..497] + "...";
 
-        // KDS and printer status loops may report the same fault repeatedly.
-        if (_history.Count > 0 && _history[0].Level == level &&
-            _history[0].Message == normalized &&
-            now >= _history[0].CreatedAt &&
-            now - _history[0].CreatedAt < TimeSpan.FromSeconds(10))
+        // Suppress repeat alerts even when other workspace failures interleave.
+        // Do not hide a new failure after the cooldown, and keep separate
+        // messages/levels independently visible to the operator.
+        var lastMatching = _history.FirstOrDefault(notice =>
+            notice.Level == level && notice.Message == normalized);
+        if (lastMatching is not null &&
+            now >= lastMatching.CreatedAt &&
+            now - lastMatching.CreatedAt < TimeSpan.FromMinutes(2))
             return null;
 
         var notice = new DesktopNotice(++_nextId, now, level, normalized, false);
