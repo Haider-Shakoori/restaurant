@@ -33,12 +33,31 @@ public sealed class DesktopNotificationTests
         Assert.NotNull(first);
         Assert.Null(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddSeconds(2)));
         Assert.Single(feed.History);
-        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddSeconds(11)));
+        Assert.Null(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddSeconds(11)));
+        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Error, "KDS offline", now.AddMinutes(3)));
         for (var i = 0; i < 120; i++)
             feed.Publish(DesktopNoticeLevel.Info, $"Event {i}", now.AddMinutes(i + 1));
         Assert.Equal(100, feed.History.Count);
         Assert.Equal(100, feed.UnreadCount);
         Assert.Equal("Event 119", feed.History[0].Message);
+    }
+
+    [Fact]
+    public void Feed_suppresses_interleaved_workspace_warnings_without_hiding_distinct_errors()
+    {
+        var feed = new DesktopNoticeFeed();
+        var now = new DateTimeOffset(2026, 10, 8, 1, 32, 0, TimeSpan.Zero);
+        const string kitchen = "Could not load Kitchen / KOT";
+        const string settings = "Could not load Settings";
+        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Warning, kitchen, now));
+        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Warning, settings, now.AddSeconds(10)));
+        Assert.Null(feed.Publish(DesktopNoticeLevel.Warning, kitchen, now.AddSeconds(20)));
+        Assert.Null(feed.Publish(DesktopNoticeLevel.Warning, settings, now.AddSeconds(30)));
+        Assert.Equal(2, feed.History.Count);
+        Assert.Equal(2, feed.UnreadCount);
+        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Error, kitchen, now.AddSeconds(40)));
+        Assert.NotNull(feed.Publish(DesktopNoticeLevel.Warning, kitchen, now.AddMinutes(3)));
+        Assert.Equal(4, feed.History.Count);
     }
 
     [Fact]
