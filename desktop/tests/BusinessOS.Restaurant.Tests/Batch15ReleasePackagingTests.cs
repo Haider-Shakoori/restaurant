@@ -70,6 +70,29 @@ public sealed class Batch15ReleasePackagingTests
     }
 
     [Fact]
+    public void Ci_independently_verifies_unsigned_release_manifest_and_both_hashes()
+    {
+        var root = RepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root,
+            ".github", "workflows", "restaurant-desktop-ci.yml"));
+        var releaseScript = File.ReadAllText(Path.Combine(root,
+            "desktop", "installer", "Build-Release.ps1"));
+
+        Assert.Contains("Verify release provenance against built artifacts", workflow);
+        Assert.Contains("Get-AuthenticodeSignature -FilePath $exe", workflow);
+        Assert.Contains("if ($signature.Status -ne \"NotSigned\")", workflow);
+        Assert.Contains("$fields[\"source_commit\"] -ne $env:GITHUB_SHA", workflow);
+        Assert.Contains("$fields[\"build_kind\"] -ne \"unsigned_ci\"", workflow);
+        Assert.Contains("$fields[\"desktop_exe_sha256\"]", workflow);
+        Assert.Contains("$fields[\"installer_sha256\"]", workflow);
+        Assert.Contains("Get-FileHash $setup -Algorithm SHA256", workflow);
+        Assert.Contains("Test-Path -LiteralPath $CertificatePath -PathType Leaf", releaseScript);
+        Assert.Contains("IsNullOrWhiteSpace($CertificatePassword)", releaseScript);
+        Assert.Contains("SIGNED_RELEASE=false", releaseScript);
+        Assert.Contains("signtool verify /pa", releaseScript);
+    }
+
+    [Fact]
     public void Installer_has_no_destructive_uninstall_directives()
     {
         var installer=File.ReadAllText(Path.Combine(RepositoryRoot(),"desktop","installer","BusinessOS.Restaurant.iss"));
