@@ -139,3 +139,10 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added a Desktop GitHub Actions release provenance manifest containing the built source commit, explicit `unsigned_ci` label, EXE SHA-256 and installer SHA-256. CI uploads this as a separate downloadable verification artifact.
 - Added static release pipeline regression coverage for the checksum and unsigned labeling.
 - This is provenance, **not** a code signature. A production Authenticode-signed release still requires an approved signing certificate/secrets, controlled release promotion, and manual installer activation/update acceptance.
+
+## Batch 12 — Final integrated acceptance protocol (IN PROGRESS / NOT VERIFIED)
+
+- Existing KOT Golden Path, takeaway, split-payment, inventory consumption and database upgrade tests were inspected; retained rather than duplicated.
+- Added `desktop/docs/restaurant-premium-final-acceptance.md` with a 12-batch implementation matrix, automated CI/build/provenance gate and 30-step physical restaurant acceptance script.
+- Implementation batches were deliberately not gated on intermediate CI per user authorization. The final combined test and release-acceptance phase is required now.
+- **Do not merge PR #69, distribute an unsigned CI installer as production-signed, or claim the Restaurant Desktop app production-ready until final CI is green and all critical real-hardware/visual tests pass.**
