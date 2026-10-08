@@ -562,20 +562,39 @@ internal static class RestaurantOperationalPages
         // records here would not provision login credentials or permissions.
         var manageUsers = new Button
         {
-            Content = "User & Role Management",
+            Content = "Add Users / Manage Roles",
             MinWidth = 190,
             Height = 38,
             Margin = new Thickness(0, 10, 0, 8),
         };
-        manageUsers.Click += (_, _) =>
+        manageUsers.Click += async (_, _) =>
         {
-            MessageBox.Show(
-                "Restaurant staff accounts must be provisioned through the authenticated identity service. " +
-                "The local staff list is synchronized and cannot safely create logins or reset passwords. " +
-                "Role assignment and account provisioning require the connected management service.",
-                "User & Role Management",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            try
+            {
+                // The tenant portal owns account creation and password handling.
+                // Never pass the desktop bearer token in a URL or browser query.
+                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
+                if (session is null)
+                    throw new InvalidOperationException("Sign in before managing restaurant users.");
+                var role = session.User.Role.Trim().ToLowerInvariant();
+                if (role is not ("owner" or "admin"))
+                    throw new UnauthorizedAccessException("Only the restaurant owner or administrator can manage staff accounts.");
+                if (!Uri.TryCreate(session.TenantBaseUrl, UriKind.Absolute, out var baseUri) ||
+                    baseUri.Scheme != Uri.UriSchemeHttps)
+                    throw new InvalidOperationException("A secure tenant portal URL is required.");
+                var target = new Uri(baseUri, "/users");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = target.AbsoluteUri,
+                    UseShellExecute = true,
+                });
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info,
+                    "Users & Roles opened in the secure tenant portal. Sign in there if requested.");
+            }
+            catch (Exception ex)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
         };
         panel.Children.Insert(1, manageUsers);
 
