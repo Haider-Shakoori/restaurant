@@ -16,7 +16,7 @@ public sealed class DashboardQuickActionsTests
         Assert.Contains("new Binding(nameof(MainWindowViewModel.NavigateCommand))", pages);
         Assert.Contains("CommandParameter = route", pages);
         foreach (var route in new[] { "pos", "tables", "kitchen", "inventory" })
-            Assert.Contains($"\\\"{route}\\\"", pages);
+            Assert.Contains($"\"{route}\"", pages);
     }
 
     private static string RepositoryRoot()
