@@ -118,6 +118,26 @@ public partial class App : System.Windows.Application
             session = signIn.SignedInSession;
         }
 
+        // Restore is a cold-start operation only. Run before MainWindow,
+        // print workers, cloud reconciliation or the LAN host can open SQLite.
+        try
+        {
+            await new LocalMaintenanceService(new LocalDatabaseFactory())
+                .ApplyPendingRestoreAsync();
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "pending-restore");
+            MessageBox.Show(
+                "The staged restaurant database restore could not be verified. " +
+                "The desktop has not started local service to avoid risking stored orders. " +
+                "Review the recovery files and diagnostics before retrying.\\n\\n" + exception.Message,
+                "Restaurant restore needs attention",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
+
         var window = new MainWindow(session);
         MainWindow = window;
         ShutdownMode = ShutdownMode.OnMainWindowClose;
