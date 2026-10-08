@@ -173,3 +173,12 @@ Verified gap: the existing Desktop sidebar had hover styling but no active-route
 - Added coordinate and XAML/source regression tests for 4K-width responsive behavior.
 - No changes to order entry, KOT/KDS semantics, data, database schema, licensing, backend APIs, Laravel or Flutter.
 - Hardware acceptance still required: Windows 4K at 100/150/200% DPI, maximize/restore, Glass/Classic, external monitor DPI transition, receipt/kitchen devices.
+
+## Offline-safe workspace loading and recovery banner (CI acceptance pending)
+
+- Audited a confirmed Desktop shell issue: navigation and toolbar refresh call async local-page and network-diagnostic loaders without a recovery UI; exceptions can bubble into WPF's generic dispatcher error dialogue and leave operators uncertain which page to retry.
+- Added per-workspace failure handling. A failed load retains the previous page, header, route and locally stored transaction state. A visible banner names the failed workspace and offers an explicit Retry action.
+- The retry re-enters the existing role-aware `NavigateAsync` route policy, not a bypass. The shared latest-request gate suppresses stale error notices and stale page results.
+- Network and license diagnostic refresh exceptions now log without preventing a local SQLite page from loading while Internet/LAN are intermittent; a failing license-status read is visibly marked unavailable rather than falsely presented as valid.
+- Added static shell/recovery tests for command wiring, banner visibility, failure order, role enforcement and network diagnostics isolation.
+- No Web/Flutter, database schema, printing, KOT, inventory-consumption, payment or shared contract changes. User-deferred Windows manual acceptance and hardware testing remain required before production approval.

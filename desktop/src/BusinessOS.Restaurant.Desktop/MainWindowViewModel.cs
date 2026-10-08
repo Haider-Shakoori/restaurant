@@ -13,6 +13,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly AuthSession _session;
     // Every navigation and refresh shares one generation; stale loads cannot replace a newer workspace.
     private readonly NavigationRequestGate _pageRequests = new();
+    private string? _failedWorkspaceRoute;
 
     public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
     public bool CanViewDashboard => CanView("dashboard");
@@ -36,6 +37,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private object? _currentPage;
     [ObservableProperty] private string _currentRoute = "dashboard";
     [ObservableProperty] private string _licenseText = "Checking license…";
+    [ObservableProperty] private bool _hasWorkspaceError;
+    [ObservableProperty] private string _workspaceErrorMessage = string.Empty;
 
     public string NetworkMode => _diagnostics.NetworkMode;
 
@@ -48,6 +51,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public IRelayCommand ToggleThemeCommand { get; }
 
+    public IAsyncRelayCommand RetryWorkspaceCommand { get; }
+
     public MainWindowViewModel(AuthSession session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
@@ -55,6 +60,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
+        RetryWorkspaceCommand = new AsyncRelayCommand(RetryWorkspaceAsync);
     }
 
     public async Task InitializeAsync()
@@ -66,31 +72,84 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private async Task RefreshAsync()
     {
-        // Register refresh intent before the first await, including diagnostic I/O.
+        // Capture intent before diagnostics perform any I/O, so this refresh cannot
+        // later overwrite a newer workspace navigation.
         var requestId = _pageRequests.Begin();
         await RefreshDiagnosticsAsync();
         if (!_pageRequests.IsCurrent(requestId))
             return;
 
-        // Recreate the active operational page from the local store. Preserve the visible page
-        // if loading fails, and never overwrite a newer navigation that completed meanwhile.
         var route = CurrentRoute;
-        var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
-        if (_pageRequests.IsCurrent(requestId) && CurrentRoute == route && CanView(route))
+        try
         {
-            CurrentPage = refreshedPage;
+            var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            if (_pageRequests.IsCurrent(requestId) && CurrentRoute == route && CanView(route))
+            {
+                CurrentPage = refreshedPage;
+                ClearWorkspaceError();
+            }
+        }
+        catch (Exception exception)
+        {
+            HandleWorkspaceLoadFailure(route, PageTitle, requestId, exception);
         }
     }
 
     private async Task RefreshDiagnosticsAsync()
     {
-        await _diagnostics.RefreshCommand.ExecuteAsync(null);
-        OnPropertyChanged(nameof(NetworkMode));
+        // Diagnostics are advisory. Intermittent LAN/cloud failures must not stop
+        // the local POS/KDS page from reopening when its SQLite data is available.
+        try
+        {
+            await _diagnostics.RefreshCommand.ExecuteAsync(null);
+            OnPropertyChanged(nameof(NetworkMode));
+        }
+        catch (Exception exception)
+        {
+            App.LogRecoverableException("workspace-network-diagnostics", exception);
+        }
 
-        var license = await _licenses.GetStatusAsync();
-        LicenseText = license.IsValid
-            ? $"{license.PlanName} · {license.DaysRemaining} day(s)"
-            : "License expired";
+        try
+        {
+            var license = await _licenses.GetStatusAsync();
+            LicenseText = license.IsValid
+                ? $"{license.PlanName} · {license.DaysRemaining} day(s)"
+                : "License expired";
+        }
+        catch (Exception exception)
+        {
+            // Keep the last known display label; never fabricate a fresh valid lease.
+            App.LogRecoverableException("workspace-license-diagnostics", exception);
+            LicenseText = "License status unavailable";
+        }
+    }
+
+    private Task RetryWorkspaceAsync()
+    {
+        // Retry exactly the failed workspace through the same role-aware route
+        // policy; do not accidentally refresh a different visible page instead.
+        var failedRoute = _failedWorkspaceRoute;
+        return failedRoute is null ? Task.CompletedTask : NavigateAsync(failedRoute);
+    }
+
+    private void ClearWorkspaceError()
+    {
+        _failedWorkspaceRoute = null;
+        WorkspaceErrorMessage = string.Empty;
+        HasWorkspaceError = false;
+    }
+
+    private void HandleWorkspaceLoadFailure(
+        string route, string pageTitle, long requestId, Exception exception)
+    {
+        if (!_pageRequests.IsCurrent(requestId))
+            return; // Stale errors should never hide the newer successful page.
+
+        App.LogRecoverableException("workspace-load-" + route, exception);
+        _failedWorkspaceRoute = route;
+        WorkspaceErrorMessage = $"Could not load {pageTitle}. Your current screen is unchanged. " +
+            "Retry the workspace or check the local diagnostic log.";
+        HasWorkspaceError = true;
     }
 
     private void ToggleTheme()
@@ -129,13 +188,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // Commit the header, content and active route together only after a
         // successful load. If SQLite or a device is unavailable, the existing
         // page must not appear under a misleading new navigation title.
-        var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
-        if (!_pageRequests.IsCurrent(requestId))
-            return;
+        try
+        {
+            var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            if (!_pageRequests.IsCurrent(requestId))
+                return;
 
-        PageTitle = pageTitle;
-        PageSubtitle = pageSubtitle;
-        CurrentPage = page;
-        CurrentRoute = route;
+            PageTitle = pageTitle;
+            PageSubtitle = pageSubtitle;
+            CurrentPage = page;
+            CurrentRoute = route;
+            ClearWorkspaceError();
+        }
+        catch (Exception exception)
+        {
+            HandleWorkspaceLoadFailure(route, pageTitle, requestId, exception);
+        }
     }
 }

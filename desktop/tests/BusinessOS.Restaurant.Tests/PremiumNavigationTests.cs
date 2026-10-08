@@ -116,6 +116,62 @@ public sealed class PremiumNavigationTests
                     navigate.IndexOf("PageTitle = pageTitle;", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Workspace_load_failure_has_a_non_blocking_retry_banner()
+    {
+        var root = RepositoryRoot();
+        var shell = XDocument.Load(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "MainWindow.xaml"));
+        var banner = shell.Descendants().Single(e =>
+            e.Name.LocalName == "Border" && (string?)e.Attribute("Grid.Row") == "1");
+        Assert.Contains("HasWorkspaceError", (string?)banner.Attribute("Visibility"));
+        Assert.Contains(banner.Descendants(), e => e.Name.LocalName == "TextBlock" &&
+            (string?)e.Attribute("Text") == "{Binding WorkspaceErrorMessage}");
+        Assert.Contains(banner.Descendants(), e => e.Name.LocalName == "Button" &&
+            (string?)e.Attribute("Command") == "{Binding RetryWorkspaceCommand}");
+        Assert.Equal("Auto", (string?)shell.Descendants().First(e =>
+            e.Name.LocalName == "Grid" && e.Descendants().Any(x => x == banner))
+            .Element(shell.Root!.Name.Namespace + "Grid.RowDefinitions")?
+            .Elements().ElementAt(1).Attribute("Height"));
+
+        var workspace = shell.Descendants().Single(e => e.Name.LocalName == "ContentControl" &&
+            ((string?)e.Attribute("Content"))?.Contains("CurrentPage", StringComparison.Ordinal) == true);
+        Assert.Equal("2", (string?)workspace.Parent?.Attribute("Grid.Row"));
+    }
+
+    [Fact]
+    public void Navigation_failures_keep_the_existing_page_and_reuse_role_aware_retry()
+    {
+        var root = RepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "MainWindowViewModel.cs"));
+        Assert.Contains("RetryWorkspaceCommand = new AsyncRelayCommand(RetryWorkspaceAsync)", source);
+        Assert.Contains("failedRoute is null ? Task.CompletedTask : NavigateAsync(failedRoute)", source);
+        Assert.Contains("App.LogRecoverableException(\"workspace-load-\" + route, exception)", source);
+        Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", source);
+        Assert.Contains("if (!CanView(route))", source);
+
+        var refresh = source.Split("private async Task RefreshAsync()", StringSplitOptions.None)[1]
+            .Split("private async Task RefreshDiagnosticsAsync()", StringSplitOptions.None)[0];
+        Assert.Contains("catch (Exception exception)", refresh);
+        Assert.Contains("HandleWorkspaceLoadFailure(route, PageTitle, requestId, exception)", refresh);
+        Assert.Contains("ClearWorkspaceError();", refresh);
+
+        var navigate = source.Split("private async Task NavigateAsync(string? key)", StringSplitOptions.None)[1];
+        Assert.Contains("catch (Exception exception)", navigate);
+        Assert.Contains("HandleWorkspaceLoadFailure(route, pageTitle, requestId, exception)", navigate);
+        Assert.True(navigate.IndexOf("CurrentPage = page;", StringComparison.Ordinal) <
+            navigate.IndexOf("ClearWorkspaceError();", StringComparison.Ordinal));
+        Assert.True(navigate.IndexOf("CurrentRoute = route;", StringComparison.Ordinal) <
+            navigate.IndexOf("ClearWorkspaceError();", StringComparison.Ordinal));
+
+        var diagnostics = source.Split("private async Task RefreshDiagnosticsAsync()", StringSplitOptions.None)[1]
+            .Split("private Task RetryWorkspaceAsync()", StringSplitOptions.None)[0];
+        Assert.Contains("workspace-network-diagnostics", diagnostics);
+        Assert.Contains("workspace-license-diagnostics", diagnostics);
+        Assert.Contains("License status unavailable", diagnostics);
+    }
+
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
