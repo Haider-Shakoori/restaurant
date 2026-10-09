@@ -33,6 +33,24 @@ internal static class RestaurantOperationalPages
         };
     }
 
+    internal static async Task OpenCloudManagementAsync(string section)
+    {
+        try
+        {
+            var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                ?? throw new InvalidOperationException("Sign in before editing the restaurant catalog.");
+            var dialog = new DesktopCloudManagementWindow(session, section)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+            dialog.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+        }
+    }
+
     private static async Task<FrameworkElement> DashboardAsync(LanDiagnosticsViewModel diagnostics)
     {
         var factory = new LocalDatabaseFactory();
@@ -381,6 +399,10 @@ internal static class RestaurantOperationalPages
             dialog.Content = recipeGrid;
             dialog.ShowDialog();
         };
+        // Cloud-owned catalog edits never disappear on the next snapshot refresh.
+        var editCatalog = new Button { Content = "+ Create / Edit Menu, Categories & Images", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editCatalog.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        panel.Children.Add(editCatalog);
         panel.Children.Add(create);
         panel.Children.Add(recipes);
         var recipeCreate = new Button { Content = "+ Create Recipe Version", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
@@ -614,6 +636,9 @@ internal static class RestaurantOperationalPages
             if (dialog.ShowDialog() == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created. Refresh Inventory to see it.");
         };
+        var editInventory = new Button { Content = "Edit Ingredients & Units (Online)", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
+        panel.Children.Add(editInventory);
         panel.Children.Add(create);
         panel.Children.Add(grid);
         return Scroll(panel);
