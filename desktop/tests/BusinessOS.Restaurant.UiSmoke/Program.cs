@@ -60,6 +60,12 @@ internal static class Program
         {
             Source = new Uri("pack://application:,,,/BusinessOS.Restaurant.Desktop;component/Themes/Classic.xaml"),
         });
+        // Load the exact same controls and implicit text styling as App.xaml:
+        // screenshots must exercise production button contrast, not WPF defaults.
+        application.Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("pack://application:,,,/BusinessOS.Restaurant.Desktop;component/Styles/Buttons.xaml"),
+        });
         ThemeManager.Apply(AppearanceTheme.Classic);
 
         var owner = OpenWindow("owner");
@@ -136,6 +142,7 @@ internal static class Program
 
         Assert(!vm.HasWorkspaceError, "Dashboard opens without an error");
         await CaptureGalleryAsync(owner);
+        await CheckButtonTextInheritanceAsync(owner);
         await CaptureAuthWindowsAsync(owner);
         CheckNavigation(owner, "menu");
         CheckNavigation(owner, "inventory");
@@ -143,6 +150,15 @@ internal static class Program
         CheckNavigation(owner, "expenses");
         CheckNavigation(owner, "pos");
         CheckNavigation(owner, "kitchen");
+
+        // The reported issue was inside the Glass-mode cloud-management dialog.
+        // Open the real Dining Floors tab under Glass, check contrast, capture
+        // it, and confirm a theme switch never leaves dark text on dark buttons.
+        ThemeManager.Apply(AppearanceTheme.Glass);
+        await NavigateAsync(owner, "tables");
+        await CheckFormAsync(app, owner, "+ Add / Edit Floors & Tables",
+            "Restaurant · Catalog, Floors & Inventory", "Create", null);
+        ThemeManager.Apply(AppearanceTheme.Classic);
 
         await NavigateAsync(owner, "menu");
         await CheckFormAsync(app, owner, "+ Add Menu Item (Tenant)",
@@ -224,6 +240,7 @@ internal static class Program
                 await NavigateAsync(window, route);
                 if (route is "settings" or "kitchen")
                     AssertWorkspaceGlassSurface(window, theme, route);
+                AssertReadableActionButtons(window, label + "/" + route);
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
             }
@@ -234,6 +251,83 @@ internal static class Program
         window.Height = 800;
         await NavigateAsync(window, "dashboard");
         Console.WriteLine("Gallery captured: 24 operational pages across Classic and Glass themes.");
+    }
+
+    private static double ContrastRatio(Color a, Color b)
+    {
+        static double Channel(byte value)
+        {
+            var linear = value / 255d;
+            return linear <= 0.04045 ? linear / 12.92 : Math.Pow((linear + 0.055) / 1.055, 2.4);
+        }
+        static double Luminance(Color c) =>
+            0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        var light = Math.Max(Luminance(a), Luminance(b));
+        var dark = Math.Min(Luminance(a), Luminance(b));
+        return (light + 0.05) / (dark + 0.05);
+    }
+
+    private static void AssertReadableActionButtons(DependencyObject root, string location)
+    {
+        var template = System.Windows.Application.Current.FindResource("PremiumActionTemplate") as ControlTemplate;
+        Assert(template is not null, "real WPF action template is loaded");
+        var buttons = Descendants<Button>(root)
+            .Where(button => button.IsVisible && button.IsEnabled &&
+                ReferenceEquals(button.Template, template))
+            .ToArray();
+        Assert(buttons.Length > 0, location + " has themed action buttons");
+
+        foreach (var button in buttons)
+        {
+            if (button.Background is not SolidColorBrush background ||
+                button.Foreground is not SolidColorBrush foreground)
+                throw new InvalidOperationException("Expected solid themed button brushes for " + button.Content);
+            var ratio = ContrastRatio(foreground.Color, background.Color);
+            Assert(ratio >= 4.5,
+                $"{location}: '{button.Content}' text/background contrast {ratio:0.00}:1 passes AA");
+        }
+    }
+
+    private static async Task CheckButtonTextInheritanceAsync(MainWindow owner)
+    {
+        var label = new TextBlock { Text = "Readable label" };
+        var primary = new Button { Content = label };
+        var secondaryLabel = new TextBlock { Text = "Neutral action" };
+        var secondary = new Button { Content = secondaryLabel };
+        secondary.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var panel = new StackPanel { Margin = new Thickness(15) };
+        panel.Children.Add(primary);
+        panel.Children.Add(secondary);
+        var probe = new Window
+        {
+            Title = "Button theme regression",
+            Owner = owner,
+            Width = 430,
+            Height = 200,
+            Content = panel,
+        };
+        try
+        {
+            probe.Show();
+            foreach (var theme in new[] { AppearanceTheme.Classic, AppearanceTheme.Glass })
+            {
+                ThemeManager.Apply(theme);
+                await probe.Dispatcher.InvokeAsync(probe.UpdateLayout, DispatcherPriority.Render);
+                AssertReadableActionButtons(probe, "probe/" + theme);
+                foreach (var button in new[] { primary, secondary })
+                {
+                    var text = (TextBlock)button.Content;
+                    Assert(text.Foreground is SolidColorBrush && button.Foreground is SolidColorBrush &&
+                           ((SolidColorBrush)text.Foreground).Color == ((SolidColorBrush)button.Foreground).Color,
+                        theme + " nested TextBlock uses Button.Foreground instead of global TextPrimaryBrush");
+                }
+            }
+        }
+        finally
+        {
+            probe.Close();
+            ThemeManager.Apply(AppearanceTheme.Classic);
+        }
     }
 
     private static void AssertWorkspaceGlassSurface(MainWindow window, AppearanceTheme theme, string route)
@@ -377,8 +471,10 @@ internal static class Program
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
             var opened = modal!;
+            AssertReadableActionButtons(opened, "dialog/" + ThemeManager.Current);
             await CaptureWindowAsync(opened, Path.Combine(
                 GalleryDirectory, "dialogs",
+                ThemeManager.Current.ToString().ToLowerInvariant() + "-" +
                 new string(dialogTitle.ToLowerInvariant().Select(c =>
                     char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()) + ".png"));
             Assert(FindButton(opened, saveLabel) is { IsEnabled: true },
