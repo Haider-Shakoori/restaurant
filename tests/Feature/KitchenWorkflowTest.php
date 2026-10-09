@@ -16,6 +16,8 @@ use App\Models\Order;
 use App\Models\RestaurantBranch;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\WaiterPushDevice;
+use Illuminate\Support\Facades\DB;
 use App\Services\Tenant\KitchenService;
 use App\Services\Tenant\OrderService;
 use App\Services\Tenant\RestaurantSettingsService;
@@ -351,6 +353,59 @@ class KitchenWorkflowTest extends TestCase
         $this->assertSame(Order::STATUS_READY, $order->fresh()->status);
         $this->assertNotNull($items[0]->fresh()->ready_at);
         $this->assertNotNull($items[1]->fresh()->ready_at);
+    }
+
+    public function test_ready_item_queues_one_push_only_for_assigned_waiter_and_retries_do_not_duplicate(): void
+    {
+        $tenant = $this->createTenant('restaurant-push-ready', 'push-ready.test');
+        tenancy()->initialize($tenant);
+
+        [$waiter, $table, $branch, $food] = $this->seedRestaurant();
+        $station = KitchenStation::query()->create([
+            'branch_id' => $branch->id,
+            'code' => 'HOT',
+            'name' => 'Hot Kitchen',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+        MenuItemKitchenRoute::query()->create([
+            'menu_item_id' => $food->id,
+            'branch_id' => $branch->id,
+            'kitchen_station_id' => $station->id,
+        ]);
+        WaiterPushDevice::query()->create([
+            'central_device_id' => 'push-test-01',
+            'tenant_user_id' => $waiter->id,
+            'fcm_token' => str_repeat('a', 75),
+            'platform' => 'android',
+            'enabled' => true,
+        ]);
+
+        $orders = app(OrderService::class);
+        $kitchen = app(KitchenService::class);
+        $order = $orders->open($waiter, [
+            'client_order_id' => '01PUSHREADYORDER0000000000001',
+            'dining_table_id' => $table->id,
+            'guest_count' => 2,
+        ]);
+        $orders->addItem($order, $waiter, [
+            'client_line_id' => '01PUSHREADYLINE00000000000001',
+            'menu_item_id' => $food->id,
+            'quantity' => 1,
+        ]);
+        $orders->submit($order, $waiter, 'push-ready-round');
+        $item = KitchenTicket::query()->firstOrFail()->items()->firstOrFail();
+        $kitchen->startItem($item, $waiter);
+        $kitchen->readyItem($item, $waiter);
+        $kitchen->readyItem($item->fresh(), $waiter);
+
+        $pending = DB::connection('tenant')
+            ->table('waiter_push_deliveries')->get();
+        $this->assertCount(1, $pending);
+        $this->assertSame($item->id, $pending[0]->ready_item_id);
+        $this->assertSame($order->id, $pending[0]->order_id);
+        $this->assertSame('push-test-01', $pending[0]->central_device_id);
+        $this->assertNull($pending[0]->sent_at);
     }
 
     public function test_expo_endpoint_is_derived_from_ready_production_items(): void
