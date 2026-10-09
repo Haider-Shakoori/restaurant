@@ -738,6 +738,7 @@ class TenantWebPortalTest extends TestCase
             'role' => 'owner', 'password' => 'TestPassword123',
         ])->assertForbidden();
 
+        $this->app['auth']->forgetGuards();
         $this->withToken($ownerToken)->postJson($url, [
             'name' => 'Kitchen Operator',
             'email' => 'kitchen@example.test',
@@ -761,9 +762,11 @@ class TenantWebPortalTest extends TestCase
             'password' => 'NewPassword123',
         ])->assertOk()->assertJsonPath('data.role', 'manager');
 
+        $this->app['auth']->forgetGuards();
         $this->withToken($createdToken)->getJson("http://{$domain}/api/v1/bootstrap")
             ->assertUnauthorized();
 
+        $this->app['auth']->forgetGuards();
         $this->withToken($ownerToken)->patchJson("{$url}/{$owner->id}", [
             'name' => 'Owner', 'email' => 'desktop-owner@example.test',
             'role' => 'waiter', 'is_active' => false,
@@ -809,6 +812,7 @@ class TenantWebPortalTest extends TestCase
 
         $base = "http://{$domain}/api/v1/desktop/management";
         $this->withToken($waiterToken)->getJson($base)->assertForbidden();
+        $this->app['auth']->forgetGuards();
         $this->withToken($ownerToken)->getJson($base)->assertOk()
             ->assertJsonStructure(['data' => ['branches', 'areas', 'tables', 'categories', 'menu_items', 'inventory_items']]);
 
