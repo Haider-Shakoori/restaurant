@@ -92,7 +92,9 @@ class RestaurantPushNotifications {
         (token) => unawaited(_reportToken(token)),
       );
       final initial = await FirebaseMessaging.instance.getInitialMessage();
-      if (initial != null) _onMessageOpened(initial);
+      if (initial != null) {
+        _onMessageOpened(initial);
+      }
     } on Object {
       // Missing Firebase/APNs configuration cannot block waiter POS login.
       _initialized = false;
@@ -100,8 +102,10 @@ class RestaurantPushNotifications {
   }
 
   void _onMessageOpened(RemoteMessage message) {
-    if (message.data['type'] != 'restaurant.kot.ready') return;
-    final orderId = message.data['order_id'];
+    if (message.data['type'] != 'restaurant.kot.ready') {
+      return;
+    }
+    final orderId = message.data['order_id']?.toString();
     if (orderId != null && orderId.isNotEmpty) {
       tappedOrderId.value = orderId;
     }
@@ -110,23 +114,33 @@ class RestaurantPushNotifications {
   void clearTappedOrder() => tappedOrderId.value = null;
 
   Future<void> registerAfterLogin() async {
-    if (!_initialized) return;
+    if (!_initialized) {
+      return;
+    }
     final session = await _currentSession();
-    if (session == null) return;
+    if (session == null) {
+      return;
+    }
     try {
       final permission = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
-      if (permission.authorizationStatus == AuthorizationStatus.denied) return;
+      if (permission.authorizationStatus == AuthorizationStatus.denied) {
+        return;
+      }
 
       // Apple requires APNs registration before getToken; it can take time
       // after a fresh install, so retry after the next app resume/login.
       if (Platform.isIOS &&
-          await FirebaseMessaging.instance.getAPNSToken() == null) return;
+          (await FirebaseMessaging.instance.getAPNSToken()) == null) {
+        return;
+      }
       final token = await FirebaseMessaging.instance.getToken();
-      if (token != null && token.isNotEmpty) await _reportToken(token);
+      if (token != null && token.isNotEmpty) {
+        await _reportToken(token);
+      }
     } on Object {
       // Foreground LAN ordering stays available when Google services are
       // blocked, mobile data is off or the app is unsigned.
