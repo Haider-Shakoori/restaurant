@@ -21,6 +21,7 @@ use App\Models\RestaurantBranch;
 use App\Models\SyncMutation;
 use App\Models\Tenant;
 use App\Models\TenantUser;
+use App\Models\WaiterPushDevice;
 use App\Services\Platform\LicenseService;
 use App\Services\Platform\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -91,7 +92,7 @@ class MobileOfflineSyncTest extends TestCase
         ])->assertOk()->assertJsonPath('status', 'registered');
 
         tenancy()->initialize($tenant);
-        $registered = \App\Models\WaiterPushDevice::query()->firstOrFail();
+        $registered = WaiterPushDevice::query()->firstOrFail();
         $this->assertSame((string) $waiter->id, (string) $registered->tenant_user_id);
         $this->assertSame($pushToken, $registered->fcm_token);
         $this->assertTrue($registered->enabled);
@@ -107,7 +108,7 @@ class MobileOfflineSyncTest extends TestCase
             ->assertOk()->assertJsonPath('status', 'unregistered');
 
         tenancy()->initialize($tenant);
-        $this->assertFalse(\App\Models\WaiterPushDevice::query()->firstOrFail()->enabled);
+        $this->assertFalse(WaiterPushDevice::query()->firstOrFail()->enabled);
     }
 
     public function test_device_bound_bootstrap_push_retry_and_incremental_pull_are_resumable(): void
