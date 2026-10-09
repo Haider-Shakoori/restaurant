@@ -34,12 +34,20 @@
     <SolidColorBrush x:Key="SuccessBrush" Color="#169B62" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF5" />
     <SolidColorBrush x:Key="HoverBrush" Color="#F1F5F9" />
-    <!-- Premium charcoal actions with warm-gold interaction affordances. -->
-    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#19212D" />
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#313E50" />
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#101722" />
-    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#45505D" />
-    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#E9BC58" />
+    <!-- Solid accessible actions. Both themes provide the exact same brush keys. -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#1D4ED8" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#1E40AF" />
+    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#1D4ED8" />
+    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#60A5FA" />
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ButtonSecondaryBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#EFF6FF" />
+    <SolidColorBrush x:Key="ButtonSecondaryPressedBrush" Color="#DBEAFE" />
+    <SolidColorBrush x:Key="ButtonSecondaryOutlineBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="ButtonSecondaryForegroundBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#475569" />
+    <SolidColorBrush x:Key="ButtonDisabledOutlineBrush" Color="#CBD5E1" />
     <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="0" />
 </ResourceDictionary>
