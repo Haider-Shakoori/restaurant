@@ -5,7 +5,12 @@
 @section('subheading', 'Categories, pricing and item availability.')
 
 @section('content')
-    <div class="grid gap-6 lg:grid-cols-[1fr_22rem]">
+    <div x-data="{ term: '' }" class="space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div><h2 class="text-lg font-black">Menu catalogue</h2><p class="text-xs text-slate-500">Browse categories, photos, availability and AFN prices.</p></div>
+            <input x-model="term" type="search" placeholder="Search menu items" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm sm:w-80">
+        </div>
+        <div class="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div class="space-y-5">
             @forelse ($categories as $category)
                 <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -17,7 +22,7 @@
                     </div>
                     <div class="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
                         @forelse ($category->items as $item)
-                            <article class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                            <article x-show="@js(strtolower($item->name.' '.$item->sku)).includes(term.toLowerCase())" class="overflow-hidden rounded-xl border border-slate-200 bg-white">
                                 <div class="aspect-[4/3] bg-slate-100">
                                     @if ($item->image_url)
                                         <img src="{{ $item->image_url }}" alt="{{ $item->name }}" loading="lazy" class="h-full w-full object-cover">
@@ -90,5 +95,6 @@
                 </section>
             </aside>
         @endif
+        </div>
     </div>
 @endsection
