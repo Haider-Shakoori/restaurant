@@ -707,6 +707,76 @@ class TenantWebPortalTest extends TestCase
     /**
      * @return array{Tenant, string}
      */
+    public function test_desktop_staff_api_requires_owner_and_provisions_real_logins(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+        tenancy()->initialize($tenant);
+        $owner = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Owner',
+            'email' => 'desktop-owner@example.test',
+            'password' => 'OwnerPassword123',
+            'role' => 'owner',
+            'is_active' => true,
+        ]);
+        $waiter = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Waiter',
+            'email' => 'desktop-waiter@example.test',
+            'password' => 'WaiterPassword123',
+            'role' => 'waiter',
+            'is_active' => true,
+        ]);
+        $ownerToken = $owner->createToken('desktop-test')->plainTextToken;
+        $waiterToken = $waiter->createToken('desktop-test')->plainTextToken;
+        tenancy()->end();
+
+        $url = "http://{$domain}/api/v1/desktop/users";
+        $this->withToken($waiterToken)->getJson($url)->assertForbidden();
+        $this->withToken($waiterToken)->postJson($url, [
+            'name' => 'Unauthorized', 'email' => 'no@example.test',
+            'role' => 'owner', 'password' => 'TestPassword123',
+        ])->assertForbidden();
+
+        $this->withToken($ownerToken)->postJson($url, [
+            'name' => 'Kitchen Operator',
+            'email' => 'kitchen@example.test',
+            'role' => 'kitchen',
+            'password' => 'KitchenPassword123',
+        ])->assertCreated()->assertJsonPath('data.role', 'kitchen');
+
+        tenancy()->initialize($tenant);
+        $created = TenantUser::query()->where('email', 'kitchen@example.test')->sole();
+        $this->assertTrue(Hash::check('KitchenPassword123', $created->password));
+        $createdToken = $created->createToken('previous-session')->plainTextToken;
+        $createdId = $created->id;
+        tenancy()->end();
+
+        $this->withToken($ownerToken)->patchJson("{$url}/{$createdId}", [
+            'name' => 'Kitchen Manager',
+            'email' => 'kitchen@example.test',
+            'phone' => null,
+            'role' => 'manager',
+            'is_active' => true,
+            'password' => 'NewPassword123',
+        ])->assertOk()->assertJsonPath('data.role', 'manager');
+
+        $this->withToken($createdToken)->getJson("http://{$domain}/api/v1/bootstrap")
+            ->assertUnauthorized();
+
+        $this->withToken($ownerToken)->patchJson("{$url}/{$owner->id}", [
+            'name' => 'Owner', 'email' => 'desktop-owner@example.test',
+            'role' => 'waiter', 'is_active' => false,
+        ])->assertUnprocessable();
+
+        tenancy()->initialize($tenant);
+        $this->assertSame('owner', $owner->fresh()->role);
+        $this->assertTrue((bool) $owner->fresh()->is_active);
+        $this->assertTrue(Hash::check('NewPassword123',
+            TenantUser::query()->findOrFail($createdId)->password));
+        tenancy()->end();
+    }
+
     private function createActiveTenant(): array
     {
         $plan = Plan::create([
