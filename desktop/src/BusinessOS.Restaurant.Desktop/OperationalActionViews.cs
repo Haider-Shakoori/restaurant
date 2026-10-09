@@ -836,13 +836,32 @@ internal static class OperationalActionViews
             TextWrapping = TextWrapping.Wrap,
         };
         handoffText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        var handoffContents = new StackPanel();
+        handoffContents.Children.Add(handoffText);
+        if (principal.UserRole is "owner" or "manager" or "cashier")
+        {
+            var openService = Button("OPEN POS & ORDERS · MARK SERVED");
+            openService.MinWidth = 0;
+            openService.Margin = new Thickness(0, 10, 0, 0);
+            openService.ToolTip =
+                "After the waiter delivers every ready item, select the complete order in POS and mark it Served. Then bill and receive payment.";
+            openService.Click += (_, _) =>
+            {
+                var vm = System.Windows.Application.Current?.MainWindow?.DataContext
+                    as MainWindowViewModel;
+                var navigate = vm?.NavigateCommand;
+                if (navigate?.CanExecute("pos") == true)
+                    navigate.Execute("pos");
+            };
+            handoffContents.Children.Add(openService);
+        }
         var handoffPanel = new Border
         {
             CornerRadius = new CornerRadius(12),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(14, 11, 14, 11),
             Margin = new Thickness(0, 0, 0, 14),
-            Child = handoffText,
+            Child = handoffContents,
         };
         handoffPanel.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
         handoffPanel.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
