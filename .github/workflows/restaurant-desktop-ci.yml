@@ -62,6 +62,18 @@ jobs:
       - name: Test
         run: dotnet test BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build
 
+      - name: Restore WPF interaction harness
+        run: dotnet restore tests/BusinessOS.Restaurant.UiSmoke/BusinessOS.Restaurant.UiSmoke.csproj
+
+      - name: Smoke-test WPF navigation and dialogs
+        shell: pwsh
+        timeout-minutes: 6
+        run: |
+          # Separate CI-only harness: never activate production licensing or
+          # persist a real staff identity. Hosted runner is disposable.
+          dotnet run --project tests/BusinessOS.Restaurant.UiSmoke/BusinessOS.Restaurant.UiSmoke.csproj --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "WPF control interaction smoke test failed." }
+
       - name: Publish Windows x64 single EXE
         shell: pwsh
         run: ./installer/Build-Release.ps1
