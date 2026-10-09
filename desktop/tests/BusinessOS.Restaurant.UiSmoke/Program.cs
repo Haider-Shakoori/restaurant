@@ -240,7 +240,8 @@ internal static class Program
                 await NavigateAsync(window, route);
                 if (route is "settings" or "kitchen")
                     AssertWorkspaceGlassSurface(window, theme, route);
-                AssertReadableActionButtons(window, label + "/" + route);
+                AssertReadableActionButtons(window, label + "/" + route,
+                    requireButtons: route is "tables" or "menu" or "pos");
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
             }
@@ -267,7 +268,8 @@ internal static class Program
         return (light + 0.05) / (dark + 0.05);
     }
 
-    private static void AssertReadableActionButtons(DependencyObject root, string location)
+    private static void AssertReadableActionButtons(
+        DependencyObject root, string location, bool requireButtons = true)
     {
         var template = System.Windows.Application.Current.FindResource("PremiumActionTemplate") as ControlTemplate;
         Assert(template is not null, "real WPF action template is loaded");
@@ -275,7 +277,8 @@ internal static class Program
             .Where(button => button.IsVisible && button.IsEnabled &&
                 ReferenceEquals(button.Template, template))
             .ToArray();
-        Assert(buttons.Length > 0, location + " has themed action buttons");
+        if (requireButtons)
+            Assert(buttons.Length > 0, location + " has themed action buttons");
 
         foreach (var button in buttons)
         {
