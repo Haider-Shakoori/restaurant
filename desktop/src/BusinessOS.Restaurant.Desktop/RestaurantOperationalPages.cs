@@ -1311,8 +1311,13 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> SettingsAsync(LanDiagnosticsViewModel diagnostics)
     {
-        var panel = Stack();
-        panel.DataContext = diagnostics;
+        // Build each group exactly once so the original action handlers and
+        // device bindings stay intact as operators move between settings tabs.
+        var workflowPage = Stack();
+        var backupPage = Stack();
+        var printingPage = Stack();
+        var networkPage = Stack();
+        var devicesPage = Stack();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var workflowSettings = await workflow.RestaurantSettingsAsync();
@@ -1478,29 +1483,29 @@ internal static class RestaurantOperationalPages
             }
         };
 
-        panel.Children.Add(Section(
+        workflowPage.Children.Add(SettingsSection(
             "Restaurant workflow settings",
             "These settings drive the Desktop KOT/KDS state machine and are included in LAN bootstrap/settings APIs for cross-client alignment.",
             workflowPanel));
 
-        panel.Children.Add(Section(
+        backupPage.Children.Add(SettingsSection(
             "Backup, restore & local database health",
             "Back up a consistent SQLite snapshot; staged restores apply only on the next cold launch before local services start.",
             await BackupRestorePanelAsync()));
 
-        panel.Children.Add(Section(
+        printingPage.Children.Add(SettingsSection(
             "Printing & Recovery",
             "KOT and receipt queues are independent. Interrupted spool submissions are not replayed automatically because an unconfirmed replay can cause duplicate food production.",
             await PrinterQueueRecoveryPanelAsync(workflow)));
 
-        panel.Children.Add(Cards(
+        networkPage.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
             ("WAITER DEVICES", diagnostics.TerminalSummary),
             ("MOBILE ALLOWANCE", diagnostics.MobileAllowance),
             ("OFFLINE LEASE", diagnostics.LeaseStatus),
             ("CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts")));
 
-        panel.Children.Add(Card(
+        networkPage.Children.Add(Card(
             "Local restaurant network",
             $"{diagnostics.StatusMessage}\n\nCloud: {diagnostics.CloudStatus}\n\nWaiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid."));
 
@@ -1529,28 +1534,27 @@ internal static class RestaurantOperationalPages
         pairingPanel.Children.Add(qr);
         pairingPanel.Children.Add(pairing);
 
-        panel.Children.Add(Section(
+        devicesPage.Children.Add(SettingsSection(
             "Waiter app connection",
             "Scan this QR from the waiter app to configure both LAN and cloud routes. Automatic mode prefers LAN, falls back to cloud when LAN is unavailable, queues offline changes when neither route is reachable, and returns to LAN automatically.",
             pairingPanel));
 
-        var actions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
-
-        var refresh = new Button { Content = "Refresh status", MinWidth = 130, Height = 38, Margin = new Thickness(0, 0, 10, 0) };
+        var refresh = new Button { Content = "Refresh status", MinWidth = 130, Height = 38, Margin = new Thickness(0, 0, 10, 10) };
         refresh.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.RefreshCommand)));
-        actions.Children.Add(refresh);
+        networkPage.Children.Add(refresh);
 
+        var deviceActions = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
         var toggle = new Button { MinWidth = 140, Height = 38, Margin = new Thickness(0, 0, 10, 0) };
         toggle.SetBinding(Button.ContentProperty, new Binding(nameof(LanDiagnosticsViewModel.ToggleTerminalLabel)));
         toggle.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.ToggleSelectedTerminalCommand)));
-        actions.Children.Add(toggle);
+        deviceActions.Children.Add(toggle);
 
         var unpair = new Button { Content = "Unpair device", MinWidth = 130, Height = 38 };
         unpair.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.UnpairSelectedTerminalCommand)));
-        actions.Children.Add(unpair);
-        panel.Children.Add(actions);
+        deviceActions.Children.Add(unpair);
+        devicesPage.Children.Add(deviceActions);
 
-        panel.Children.Add(new TextBlock
+        devicesPage.Children.Add(new TextBlock
         {
             Text = "Paired waiter devices",
             FontSize = 18,
@@ -1572,13 +1576,31 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Enabled", "IsEnabled", 90));
         grid.Columns.Add(Column("IP address", "LastIpAddress", 160));
         grid.Columns.Add(Column("Last seen", "LastSeenAtUtc", 210));
-        panel.Children.Add(grid);
+        devicesPage.Children.Add(grid);
 
-        panel.Children.Add(Card(
+        devicesPage.Children.Add(Card(
             "Device control",
             "Select a waiter device above to enable/disable or unpair it. Device-management actions require an Owner or Manager session. Disabling or unpairing a terminal does not disable the restaurant desktop or other LAN terminals."));
 
-        return Scroll(WorkspaceFrostedSurface.Wrap(panel));
+        var tabs = new TabControl
+        {
+            Name = "RestaurantSettingsTabs",
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            DataContext = diagnostics,
+        };
+        tabs.Items.Add(SettingsTab("kitchen", "Kitchen & KOT", workflowPage));
+        tabs.Items.Add(SettingsTab("backup", "Backup & Restore", backupPage));
+        tabs.Items.Add(SettingsTab("printing", "Printing", printingPage));
+        tabs.Items.Add(SettingsTab("network", "Network & Sync", networkPage));
+        tabs.Items.Add(SettingsTab("devices", "Waiter Devices", devicesPage, horizontalScroll: true));
+        tabs.SelectedIndex = 0;
+
+        // Keep tab headers in view while the selected tab's contents scroll.
+        // The translucent white surface is shared across the entire tab strip.
+        return WorkspaceFrostedSurface.Wrap(tabs);
     }
 
     private static async Task<FrameworkElement> BackupRestorePanelAsync()
@@ -1840,6 +1862,46 @@ internal static class RestaurantOperationalPages
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
     };
+
+    private static FrameworkElement SettingsSection(string title, string subtitle, UIElement content)
+    {
+        // Tab pages have one outer ScrollViewer. Do not embed the older
+        // Section() ScrollViewer: it traps the mouse wheel and hides controls.
+        var panel = Stack();
+        panel.Margin = new Thickness(0, 0, 0, 24);
+        var heading = new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold };
+        heading.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        var hint = new TextBlock
+        {
+            Text = subtitle,
+            Margin = new Thickness(0, 6, 0, 16),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        hint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(heading);
+        panel.Children.Add(hint);
+        panel.Children.Add(content);
+        return panel;
+    }
+
+    private static TabItem SettingsTab(string id, string label, UIElement content, bool horizontalScroll = false)
+    {
+        var tab = new TabItem
+        {
+            Header = label,
+            Tag = id,
+            Content = new ScrollViewer
+            {
+                Content = content,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = horizontalScroll
+                    ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled,
+                Padding = new Thickness(0, 18, 0, 0),
+            },
+        };
+        tab.SetResourceReference(FrameworkElement.StyleProperty, "RestaurantSettingsTabItemStyle");
+        return tab;
+    }
 
     private static Border Hero(string title, string subtitle, string network, string license)
     {

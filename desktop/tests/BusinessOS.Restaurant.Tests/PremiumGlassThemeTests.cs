@@ -97,7 +97,7 @@ public sealed class PremiumGlassThemeTests
         var settings = File.ReadAllText(Path.Combine(desktopRoot, "RestaurantOperationalPages.cs"));
         var wrapper = File.ReadAllText(Path.Combine(desktopRoot, "WorkspaceFrostedSurface.cs"));
         Assert.Contains("Content = WorkspaceFrostedSurface.Wrap(root)", kitchen, StringComparison.Ordinal);
-        Assert.Contains("return Scroll(WorkspaceFrostedSurface.Wrap(panel))", settings, StringComparison.Ordinal);
+        Assert.Contains("return WorkspaceFrostedSurface.Wrap(tabs)", settings, StringComparison.Ordinal);
         Assert.Contains("WorkspaceFrostedBackgroundBrush", wrapper, StringComparison.Ordinal);
         Assert.Contains("SetResourceReference(Border.PaddingProperty", wrapper, StringComparison.Ordinal);
     }
@@ -145,6 +145,28 @@ public sealed class PremiumGlassThemeTests
         Assert.Contains("PrimaryActionButton", markup);
         Assert.Contains("SecondaryActionButton", markup);
         Assert.Contains("ButtonSecondaryHoverBrush", markup);
+    }
+
+    [Fact]
+    public void Settings_tabs_preserve_all_operational_sections_and_theme_aware_headers()
+    {
+        var directory = Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop");
+        var settings = File.ReadAllText(Path.Combine(directory, "RestaurantOperationalPages.cs"));
+        var app = Load("App.xaml").ToString();
+        foreach (var (id, title) in new[]
+        {
+            ("kitchen", "Kitchen & KOT"), ("backup", "Backup & Restore"),
+            ("printing", "Printing"), ("network", "Network & Sync"),
+            ("devices", "Waiter Devices"),
+        })
+            Assert.Contains($"SettingsTab(\"{id}\", \"{title}\"", settings, StringComparison.Ordinal);
+
+        Assert.Contains("Name = \"RestaurantSettingsTabs\"", settings, StringComparison.Ordinal);
+        Assert.Contains("SettingsSection(", settings, StringComparison.Ordinal);
+        Assert.Contains("Content = new ScrollViewer", settings, StringComparison.Ordinal);
+        Assert.Contains("RestaurantSettingsTabItemStyle", app);
+        Assert.Contains("BrandPrimarySoftBrush", app);
     }
 
     private static double ColorContrast(string background, string foreground)
