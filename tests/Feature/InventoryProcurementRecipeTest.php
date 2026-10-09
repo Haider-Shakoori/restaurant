@@ -216,7 +216,7 @@ class InventoryProcurementRecipeTest extends TestCase
                 ]],
             ]);
             $this->fail('Incompatible recipe unit was accepted.');
-        } catch (\\Illuminate\\Validation\\ValidationException $ex) {
+        } catch (\Illuminate\Validation\ValidationException $ex) {
             $this->assertArrayHasKey('items', $ex->errors());
         }
 
@@ -230,7 +230,7 @@ class InventoryProcurementRecipeTest extends TestCase
                 ]],
             ]);
             $this->fail('Fractional pieces were accepted.');
-        } catch (\\Illuminate\\Validation\\ValidationException $ex) {
+        } catch (\Illuminate\Validation\ValidationException $ex) {
             $this->assertArrayHasKey('items', $ex->errors());
         }
     }
