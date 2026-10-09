@@ -60,6 +60,7 @@ internal static class Program
             catch (Exception exception)
             {
                 Console.Error.WriteLine("WPF UI INTERACTION SMOKE FAILED: " + exception);
+                PrintDiagnostics();
                 application.Shutdown(1);
             }
         };
@@ -74,6 +75,28 @@ internal static class Program
             new AuthUser(901, "ci-test-operator", "CI " + role, "ci@example.test", role),
             "isolated-test-tenant",
             DateTimeOffset.UtcNow);
+
+    private static void PrintDiagnostics()
+    {
+        try
+        {
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "BusinessOS", "Restaurant", "logs");
+            if (!Directory.Exists(directory)) return;
+            foreach (var log in Directory.GetFiles(directory, "desktop-*.log")
+                         .OrderByDescending(File.GetLastWriteTimeUtc).Take(2))
+            {
+                Console.Error.WriteLine("Recent desktop diagnostic: " + Path.GetFileName(log));
+                foreach (var line in File.ReadLines(log).TakeLast(75))
+                    Console.Error.WriteLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine("Could not read CI diagnostic log: " + ex.Message);
+        }
+    }
 
     private static MainWindow OpenWindow(string role) =>
         new(TestSession(role))
