@@ -240,10 +240,10 @@ internal static class Program
                 await NavigateAsync(window, route);
                 if (route is "settings" or "kitchen")
                     AssertWorkspaceGlassSurface(window, theme, route);
-                AssertReadableActionButtons(window, label + "/" + route,
-                    requireButtons: route is "tables" or "menu" or "pos");
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
+                AssertReadableActionButtons(window, label + "/" + route,
+                    requireButtons: route is "tables" or "menu" or "pos");
             }
         }
 
@@ -273,9 +273,12 @@ internal static class Program
     {
         var template = System.Windows.Application.Current.FindResource("PremiumActionTemplate") as ControlTemplate;
         Assert(template is not null, "real WPF action template is loaded");
-        var buttons = Descendants<Button>(root)
-            .Where(button => button.IsVisible && button.IsEnabled &&
-                ReferenceEquals(button.Template, template))
+        // A navigation page can be updated in the VM before WPF measures it.
+        // Force the real template into place before inspecting themed brushes.
+        var candidates = Descendants<Button>(root).Where(button => button.IsEnabled).ToArray();
+        foreach (var button in candidates) button.ApplyTemplate();
+        var buttons = candidates
+            .Where(button => ReferenceEquals(button.Template, template))
             .ToArray();
         if (requireButtons)
             Assert(buttons.Length > 0, location + " has themed action buttons");
