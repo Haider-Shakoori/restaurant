@@ -51,6 +51,7 @@ use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
 use App\Http\Controllers\Tenant\TenantDeviceController;
+use App\Http\Controllers\Tenant\TenantDesktopUsersController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
 use App\Http\Controllers\Tenant\TenantWebAuthController;
@@ -204,6 +205,14 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            // Staff identity is cloud-owned: Windows Desktop uses authenticated API calls,
+            // never writes passwords or roles to its local SQLite projection.
+            Route::middleware('tenant.role:owner,admin')->group(function (): void {
+                Route::get('/desktop/users', [TenantDesktopUsersController::class, 'index']);
+                Route::post('/desktop/users', [TenantDesktopUsersController::class, 'store']);
+                Route::patch('/desktop/users/{user}', [TenantDesktopUsersController::class, 'update']);
+            });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
                 Route::post('/pairing-tokens', [WaiterPairingController::class, 'store'])
