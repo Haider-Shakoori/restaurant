@@ -44,11 +44,29 @@ internal static class RestaurantOperationalPages
                 Owner = System.Windows.Application.Current?.MainWindow,
             };
             dialog.ShowDialog();
+            if (dialog.SavedChanges)
+            {
+                var refreshed = await RefreshOperationalSnapshotAsync();
+                DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
+                    refreshed ? "Tenant changes synchronized to Desktop SQLite. Refresh this workspace."
+                        : "Changes saved online. Local catalog refresh is unavailable; reconnect and refresh before using edited items.");
+            }
         }
         catch (Exception ex)
         {
             DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
         }
+    }
+
+    private static async Task<bool> RefreshOperationalSnapshotAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        return await new BusinessOS.Restaurant.Sync.OperationalDataRefreshService(
+            new BusinessOS.Restaurant.Licensing.WindowsActivationStore(),
+            new BusinessOS.Restaurant.Authentication.WindowsSessionStore(),
+            new BusinessOS.Restaurant.Licensing.ConnectionSettingsStore(),
+            new BusinessOS.Restaurant.Sync.CloudOperationalDataClient(http),
+            new OperationalSnapshotStore(new LocalDatabaseFactory())).RefreshIfPossibleAsync();
     }
 
     private static async Task<FrameworkElement> DashboardAsync(LanDiagnosticsViewModel diagnostics)
@@ -956,8 +974,13 @@ internal static class RestaurantOperationalPages
                     Owner = System.Windows.Application.Current?.MainWindow,
                 };
                 dialog.ShowDialog();
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info,
-                    "Changes to cloud staff are reflected locally after the next operational data refresh.");
+                if (dialog.SavedChanges)
+                {
+                    var refreshed = await RefreshOperationalSnapshotAsync();
+                    DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
+                        refreshed ? "Tenant staff synchronized. Refresh Users to see the updated roster."
+                            : "Accounts saved online; local staff refresh will occur when cloud sync is available.");
+                }
             }
             catch (Exception ex)
             {
