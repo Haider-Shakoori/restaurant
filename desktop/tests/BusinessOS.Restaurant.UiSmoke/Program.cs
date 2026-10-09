@@ -39,7 +39,7 @@ internal static class Program
             return 2;
         }
 
-        var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        var application = new System.Windows.Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         application.Resources.MergedDictionaries.Add(new ResourceDictionary
         {
             Source = new Uri("pack://application:,,,/BusinessOS.Restaurant.Desktop;component/Themes/Classic.xaml"),
@@ -81,7 +81,7 @@ internal static class Program
             Top = 50,
         };
 
-    private static async Task RunAsync(Application app, MainWindow owner)
+    private static async Task RunAsync(System.Windows.Application app, MainWindow owner)
     {
         var vm = (MainWindowViewModel)owner.DataContext;
         await WaitUntilAsync(() => vm.CurrentPage is not null || vm.HasWorkspaceError,
@@ -163,7 +163,7 @@ internal static class Program
     }
 
     private static async Task CheckFormAsync(
-        Application app, MainWindow main, string createLabel, string dialogTitle,
+        System.Windows.Application app, MainWindow main, string createLabel, string dialogTitle,
         string saveLabel, string? expectedError)
     {
         var create = FindButton(main, createLabel)
