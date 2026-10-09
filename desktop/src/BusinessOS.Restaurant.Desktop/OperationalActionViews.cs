@@ -268,6 +268,149 @@ internal static class OperationalActionViews
                 menuBox.SelectedIndex = 0;
         };
 
+        var grid = DataGrid(orders);
+        grid.Name = "PosActiveOrdersGrid";
+        grid.MinHeight = 340;
+        grid.MaxHeight = 570;
+        grid.SelectionMode = DataGridSelectionMode.Single;
+        grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
+        grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
+        grid.Columns.Add(Column("Waiter", nameof(OrderChoice.Waiter), 150));
+        grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
+        grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
+        grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
+        var formCard = Card(form);
+        var orderListPanel = new StackPanel();
+        orderListPanel.Children.Add(Header("ACTIVE ORDERS",
+            "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
+        var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
+        orderOverview.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        orderListPanel.Children.Add(orderOverview);
+        var orderSearchBox = new TextBox
+        {
+            Name = "PosOrderSearchBox",
+            Height = 38,
+            Margin = new Thickness(0, 4, 8, 6),
+            ToolTip = "Find an order by number, waiter or service type",
+        };
+        System.Windows.Automation.AutomationProperties.SetName(orderSearchBox, "Search active orders");
+        var orderStatusFilter = new ComboBox
+        {
+            Name = "PosOrderStatusFilter",
+            ItemsSource = new[] { "All statuses" }.Concat(
+                orders.Select(x => x.Status).Distinct(StringComparer.OrdinalIgnoreCase)).ToArray(),
+            SelectedIndex = 0, Width = 160, Height = 38,
+            Margin = new Thickness(0, 4, 0, 6),
+        };
+        var listTools = new WrapPanel();
+        var searchGroup = new StackPanel { Width = 250 };
+        searchGroup.Children.Add(Label("Search orders"));
+        searchGroup.Children.Add(orderSearchBox);
+        listTools.Children.Add(searchGroup);
+        var filterGroup = new StackPanel();
+        filterGroup.Children.Add(Label("Status"));
+        filterGroup.Children.Add(orderStatusFilter);
+        listTools.Children.Add(filterGroup);
+        orderListPanel.Children.Add(listTools);
+        var selectHint = new TextBlock
+        {
+            Text = "Select a row to continue. Billed or cancelled orders are not editable.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 10),
+        };
+        selectHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        orderListPanel.Children.Add(selectHint);
+        orderListPanel.Children.Add(grid);
+        var useSelected = Button("Continue selected order");
+        useSelected.MinHeight = 42;
+        useSelected.Margin = new Thickness(0, 12, 0, 0);
+        orderListPanel.Children.Add(useSelected);
+        var ordersCard = Card(orderListPanel);
+        Grid.SetColumn(formCard, 0);
+        Grid.SetColumn(ordersCard, 2);
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(formCard);
+        root.Children.Add(ordersCard);
+        root.SizeChanged += (_, _) =>
+        {
+            // On smaller Windows displays place the POS form above the orders
+            // list. The grid retains horizontal scrolling for detailed columns.
+            var compact = root.ActualWidth < 960;
+            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(470);
+            root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
+            root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(ordersCard, compact ? 0 : 2);
+            Grid.SetRow(ordersCard, compact ? 1 : 0);
+            ordersCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
+        };
+
+        var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
+        cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
+        var cashierStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
+        cashierStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        var branchBox = Combo(branches, "Label");
+        var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
+        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260;
+        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 260;
+        var billBox = Combo(bills, "Display"); billBox.Width = 360;
+        var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
+        var amountBox = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
+        var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
+        var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
+
+        cashier.Children.Add(Label("Branch / opening cash"));
+        var sessionOpenRow = new WrapPanel(); sessionOpenRow.Children.Add(branchBox); sessionOpenRow.Children.Add(openingCash);
+        var openSession = Button("Open cashier session"); sessionOpenRow.Children.Add(openSession); cashier.Children.Add(sessionOpenRow);
+        cashier.Children.Add(Label("Open cashier session")); cashier.Children.Add(sessionBox);
+        cashier.Children.Add(Label("Order")); cashier.Children.Add(orderBox);
+        var orderActions = new WrapPanel(); var serve = Button("Mark served"); var issue = Button("Issue bill"); orderActions.Children.Add(serve); orderActions.Children.Add(issue); cashier.Children.Add(orderActions);
+        cashier.Children.Add(Label("Open bill")); cashier.Children.Add(billBox);
+        var discountRow = new WrapPanel(); discountRow.Children.Add(discountBox); var discount = Button("Apply % discount"); discountRow.Children.Add(discount); discountRow.Children.Add(splitCountBox); var split = Button("Split equally"); discountRow.Children.Add(split); cashier.Children.Add(discountRow);
+        var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
+        cashier.Children.Add(cashierStatus);
+
+        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        // AddPaymentAsync creates a fresh client payment ID per invocation.
+        // Lock the button on successful posting until this cashier page is refreshed;
+        // repeated clicks must never create a second payment intent.
+        var paymentSubmission = new DesktopSubmissionGate();
+        pay.Click += async (_, _) =>
+        {
+            if (!paymentSubmission.TryBegin()) return;
+            pay.IsEnabled = false;
+            var posted = false;
+            try
+            {
+                if (billBox.SelectedItem is not BillChoice bill)
+                    throw new InvalidOperationException("Select a bill.");
+                if (sessionBox.SelectedItem is not CashierSessionChoice session)
+                    throw new InvalidOperationException("Select an open cashier session.");
+                if (!decimal.TryParse(amountBox.Text, out var amount) || amount <= 0)
+                    throw new InvalidOperationException("Enter a positive payment amount.");
+                await workflow.AddPaymentAsync(bill.Id, session.Id, amount,
+                    paymentMethod.SelectedItem?.ToString() ?? "cash");
+                posted = true;
+                cashierStatus.Text = "Payment posted. Refresh the cashier workspace before entering another payment.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
+            }
+            catch (Exception ex)
+            {
+                cashierStatus.Text = ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text);
+            }
+            finally
+            {
+                paymentSubmission.Finish(lockOnSuccess: posted);
+                if (!posted) pay.IsEnabled = true;
+            }
+        };
+        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+
+        // Register mutation handlers after all POS search/list/cashier controls exist.
         open.Click += async (_, _) =>
         {
             open.IsEnabled = false; // prevent duplicate orders on rapid clicks
@@ -459,148 +602,6 @@ internal static class OperationalActionViews
             catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
-        var grid = DataGrid(orders);
-        grid.Name = "PosActiveOrdersGrid";
-        grid.MinHeight = 340;
-        grid.MaxHeight = 570;
-        grid.SelectionMode = DataGridSelectionMode.Single;
-        grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
-        grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
-        grid.Columns.Add(Column("Waiter", nameof(OrderChoice.Waiter), 150));
-        grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
-        grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
-        grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
-        var formCard = Card(form);
-        var orderListPanel = new StackPanel();
-        orderListPanel.Children.Add(Header("ACTIVE ORDERS",
-            "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
-        var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
-        orderOverview.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-        orderListPanel.Children.Add(orderOverview);
-        var orderSearchBox = new TextBox
-        {
-            Name = "PosOrderSearchBox",
-            Height = 38,
-            Margin = new Thickness(0, 4, 8, 6),
-            ToolTip = "Find an order by number, waiter or service type",
-        };
-        System.Windows.Automation.AutomationProperties.SetName(orderSearchBox, "Search active orders");
-        var orderStatusFilter = new ComboBox
-        {
-            Name = "PosOrderStatusFilter",
-            ItemsSource = new[] { "All statuses" }.Concat(
-                orders.Select(x => x.Status).Distinct(StringComparer.OrdinalIgnoreCase)).ToArray(),
-            SelectedIndex = 0, Width = 160, Height = 38,
-            Margin = new Thickness(0, 4, 0, 6),
-        };
-        var listTools = new WrapPanel();
-        var searchGroup = new StackPanel { Width = 250 };
-        searchGroup.Children.Add(Label("Search orders"));
-        searchGroup.Children.Add(orderSearchBox);
-        listTools.Children.Add(searchGroup);
-        var filterGroup = new StackPanel();
-        filterGroup.Children.Add(Label("Status"));
-        filterGroup.Children.Add(orderStatusFilter);
-        listTools.Children.Add(filterGroup);
-        orderListPanel.Children.Add(listTools);
-        var selectHint = new TextBlock
-        {
-            Text = "Select a row to continue. Billed or cancelled orders are not editable.",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 10),
-        };
-        selectHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-        orderListPanel.Children.Add(selectHint);
-        orderListPanel.Children.Add(grid);
-        var useSelected = Button("Continue selected order");
-        useSelected.MinHeight = 42;
-        useSelected.Margin = new Thickness(0, 12, 0, 0);
-        orderListPanel.Children.Add(useSelected);
-        var ordersCard = Card(orderListPanel);
-        Grid.SetColumn(formCard, 0);
-        Grid.SetColumn(ordersCard, 2);
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        root.Children.Add(formCard);
-        root.Children.Add(ordersCard);
-        root.SizeChanged += (_, _) =>
-        {
-            // On smaller Windows displays place the POS form above the orders
-            // list. The grid retains horizontal scrolling for detailed columns.
-            var compact = root.ActualWidth < 960;
-            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(470);
-            root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
-            root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(ordersCard, compact ? 0 : 2);
-            Grid.SetRow(ordersCard, compact ? 1 : 0);
-            ordersCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
-        };
-
-        var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
-        cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
-        var cashierStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
-        cashierStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-        var branchBox = Combo(branches, "Label");
-        var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
-        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260;
-        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 260;
-        var billBox = Combo(bills, "Display"); billBox.Width = 360;
-        var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
-        var amountBox = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
-        var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
-        var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
-
-        cashier.Children.Add(Label("Branch / opening cash"));
-        var sessionOpenRow = new WrapPanel(); sessionOpenRow.Children.Add(branchBox); sessionOpenRow.Children.Add(openingCash);
-        var openSession = Button("Open cashier session"); sessionOpenRow.Children.Add(openSession); cashier.Children.Add(sessionOpenRow);
-        cashier.Children.Add(Label("Open cashier session")); cashier.Children.Add(sessionBox);
-        cashier.Children.Add(Label("Order")); cashier.Children.Add(orderBox);
-        var orderActions = new WrapPanel(); var serve = Button("Mark served"); var issue = Button("Issue bill"); orderActions.Children.Add(serve); orderActions.Children.Add(issue); cashier.Children.Add(orderActions);
-        cashier.Children.Add(Label("Open bill")); cashier.Children.Add(billBox);
-        var discountRow = new WrapPanel(); discountRow.Children.Add(discountBox); var discount = Button("Apply % discount"); discountRow.Children.Add(discount); discountRow.Children.Add(splitCountBox); var split = Button("Split equally"); discountRow.Children.Add(split); cashier.Children.Add(discountRow);
-        var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
-        cashier.Children.Add(cashierStatus);
-
-        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        // AddPaymentAsync creates a fresh client payment ID per invocation.
-        // Lock the button on successful posting until this cashier page is refreshed;
-        // repeated clicks must never create a second payment intent.
-        var paymentSubmission = new DesktopSubmissionGate();
-        pay.Click += async (_, _) =>
-        {
-            if (!paymentSubmission.TryBegin()) return;
-            pay.IsEnabled = false;
-            var posted = false;
-            try
-            {
-                if (billBox.SelectedItem is not BillChoice bill)
-                    throw new InvalidOperationException("Select a bill.");
-                if (sessionBox.SelectedItem is not CashierSessionChoice session)
-                    throw new InvalidOperationException("Select an open cashier session.");
-                if (!decimal.TryParse(amountBox.Text, out var amount) || amount <= 0)
-                    throw new InvalidOperationException("Enter a positive payment amount.");
-                await workflow.AddPaymentAsync(bill.Id, session.Id, amount,
-                    paymentMethod.SelectedItem?.ToString() ?? "cash");
-                posted = true;
-                cashierStatus.Text = "Payment posted. Refresh the cashier workspace before entering another payment.";
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
-            }
-            catch (Exception ex)
-            {
-                cashierStatus.Text = ex.Message;
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text);
-            }
-            finally
-            {
-                paymentSubmission.Finish(lockOnSuccess: posted);
-                if (!posted) pay.IsEnabled = true;
-            }
-        };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-
         void UpdateOrderSummary()
         {
             if (string.IsNullOrWhiteSpace(orderIdBox.Text))
@@ -749,7 +750,7 @@ internal static class OperationalActionViews
         }
         return new ScrollViewer
         {
-            Content = page,
+            Content = WorkspaceFrostedSurface.Wrap(page),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
