@@ -483,8 +483,32 @@ internal static class Program
                 new string(dialogTitle.ToLowerInvariant().Select(c =>
                     char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()) + ".png"));
             AssertReadableActionButtons(opened, "dialog/" + ThemeManager.Current);
-            Assert(FindButton(opened, saveLabel) is { IsEnabled: true },
-                $"'{dialogTitle}' contains enabled '{saveLabel}'");
+            if (dialogTitle == "Restaurant · Catalog, Floors & Inventory")
+            {
+                await WaitUntilAsync(
+                    () => Descendants<TextBlock>(opened).Any(
+                        text => text.Text.Contains("Online editing unavailable:", StringComparison.Ordinal)),
+                    "management online-offline status");
+                Assert(FindButton(opened, saveLabel) is { IsEnabled: false },
+                    "Tenant management cannot save while the cloud API is unavailable");
+
+                var floorTab = Descendants<TabItem>(opened)
+                    .FirstOrDefault(tab => string.Equals(tab.Header?.ToString(), "Dining Floors", StringComparison.Ordinal));
+                Assert(floorTab is not null, "Management includes Dining Floors");
+                var floorControls = Descendants<ComboBox>((DependencyObject)floorTab!.Content);
+                var branchCombo = floorControls.LastOrDefault();
+                Assert(branchCombo?.ItemsSource is not null &&
+                    branchCombo.ItemsSource.Cast<object>().Any(),
+                    "Dining Floors displays locally synchronized branches despite the tenant 404");
+                Assert(Descendants<TextBlock>(opened).Any(text =>
+                    text.Text.Contains("cached", StringComparison.OrdinalIgnoreCase)),
+                    "Management explicitly labels cached branches read-only");
+            }
+            else
+            {
+                Assert(FindButton(opened, saveLabel) is { IsEnabled: true },
+                    $"'{dialogTitle}' contains enabled '{saveLabel}'");
+            }
             Assert(Descendants<TextBox>(opened).Any(),
                 $"'{dialogTitle}' contains editable input fields");
             if (expectedError is not null)
