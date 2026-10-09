@@ -33,8 +33,9 @@ class TenantDesktopManagementController extends Controller
         ]]);
     }
 
-    public function category(Request $request, ?MenuCategory $menuCategory = null): JsonResponse
+    public function category(Request $request, ?string $menuCategory = null): JsonResponse
     {
+        $menuCategory = $menuCategory === null ? null : MenuCategory::query()->findOrFail($menuCategory);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
@@ -55,8 +56,9 @@ class TenantDesktopManagementController extends Controller
         return response()->json(['data' => $entity], $menuCategory ? 200 : 201);
     }
 
-    public function menuItem(Request $request, ?MenuItem $menuItem = null): JsonResponse
+    public function menuItem(Request $request, ?string $menuItem = null): JsonResponse
     {
+        $menuItem = $menuItem === null ? null : MenuItem::query()->findOrFail($menuItem);
         $data = $request->validate([
             'menu_category_id' => ['nullable', Rule::exists('menu_categories', 'id')],
             'sku' => ['nullable', 'string', 'max:80', Rule::unique('menu_items', 'sku')->ignore($menuItem?->id)],
@@ -83,8 +85,9 @@ class TenantDesktopManagementController extends Controller
         return response()->json(['data' => $entity], $menuItem ? 200 : 201);
     }
 
-    public function image(Request $request, MenuItem $menuItem): JsonResponse
+    public function image(Request $request, string $menuItem): JsonResponse
     {
+        $menuItem = MenuItem::query()->findOrFail($menuItem);
         $request->validate(['image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120']]);
         $old = $menuItem->image_path;
         $new = $request->file('image')->store('menu-items', 'public');
@@ -96,8 +99,9 @@ class TenantDesktopManagementController extends Controller
         return response()->json(['data' => ['id' => $menuItem->id, 'image_path' => $new]]);
     }
 
-    public function area(Request $request, ?DiningArea $diningArea = null): JsonResponse
+    public function area(Request $request, ?string $diningArea = null): JsonResponse
     {
+        $diningArea = $diningArea === null ? null : DiningArea::query()->findOrFail($diningArea);
         $data = $request->validate([
             'branch_id' => ['required', Rule::exists('branches', 'id')],
             'name' => ['required', 'string', 'max:255'],
@@ -122,8 +126,9 @@ class TenantDesktopManagementController extends Controller
         return response()->json(['data' => $entity], $diningArea ? 200 : 201);
     }
 
-    public function table(Request $request, ?DiningTable $diningTable = null): JsonResponse
+    public function table(Request $request, ?string $diningTable = null): JsonResponse
     {
+        $diningTable = $diningTable === null ? null : DiningTable::query()->findOrFail($diningTable);
         $data = $request->validate([
             'dining_area_id' => ['required', Rule::exists('dining_areas', 'id')],
             'code' => ['required', 'string', 'max:50', Rule::unique('dining_tables', 'code')->ignore($diningTable?->id)],
@@ -154,8 +159,9 @@ class TenantDesktopManagementController extends Controller
         return response()->json(['data' => $entity], $diningTable ? 200 : 201);
     }
 
-    public function inventory(Request $request, ?InventoryItem $inventoryItem = null): JsonResponse
+    public function inventory(Request $request, ?string $inventoryItem = null): JsonResponse
     {
+        $inventoryItem = $inventoryItem === null ? null : InventoryItem::query()->findOrFail($inventoryItem);
         $data = $request->validate([
             'sku' => ['required', 'string', 'max:80', Rule::unique('inventory_items', 'sku')->ignore($inventoryItem?->id)],
             'name' => ['required', 'string', 'max:255'],
