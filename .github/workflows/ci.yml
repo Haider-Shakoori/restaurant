@@ -29,7 +29,11 @@ jobs:
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server
             sudo systemctl start mariadb
           fi
-          sudo mysql -e "CREATE DATABASE IF NOT EXISTS restaurant_ci; CREATE USER IF NOT EXISTS 'ci_restaurant'@'%' IDENTIFIED BY 'ci_password'; GRANT ALL PRIVILEGES ON *.* TO 'ci_restaurant'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+          if sudo mysql -e "SELECT 1" >/dev/null 2>&1; then
+            sudo mysql -e "CREATE DATABASE IF NOT EXISTS restaurant_ci; CREATE USER IF NOT EXISTS 'ci_restaurant'@'%' IDENTIFIED BY 'ci_password'; GRANT ALL PRIVILEGES ON *.* TO 'ci_restaurant'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+          else
+            mysql --user=root --password=root -e "CREATE DATABASE IF NOT EXISTS restaurant_ci; CREATE USER IF NOT EXISTS 'ci_restaurant'@'%' IDENTIFIED BY 'ci_password'; GRANT ALL PRIVILEGES ON *.* TO 'ci_restaurant'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+          fi
       - name: Install PHP packages
         run: composer install --no-interaction --prefer-dist --no-progress
       - name: Prepare application
