@@ -270,10 +270,12 @@ internal static class OperationalActionViews
 
         open.Click += async (_, _) =>
         {
+            open.IsEnabled = false; // prevent duplicate orders on rapid clicks
             try
             {
                 var serviceType = serviceTypeBox.SelectedItem?.ToString() ?? "dine_in";
-                if (!int.TryParse(guestBox.Text, out var guests)) guests = 1;
+                if (!int.TryParse(guestBox.Text, out var guests) || guests < 1)
+                    throw new InvalidOperationException("Enter a positive number of guests.");
 
                 string? tableId = null;
                 var branchId = string.Empty;
@@ -297,11 +299,12 @@ internal static class OperationalActionViews
                     string.IsNullOrWhiteSpace(serviceReferenceBox.Text) ? null : serviceReferenceBox.Text.Trim(),
                     guests);
 
-                lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
-                status.Text = "Order opened locally. Add items now or later; each Send KOT creates only the next unsent production round.";
+                await RefreshPosStateAsync();
+                status.Text = "Order opened locally. Add items, or resume it later from the active orders list.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
             catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
+            finally { open.IsEnabled = true; }
         };
         menuBox.SelectionChanged += (_, _) =>
         {
@@ -319,11 +322,13 @@ internal static class OperationalActionViews
 
         add.Click += async (_, _) =>
         {
+            add.IsEnabled = false; // prevent accidental duplicate lines
             try
             {
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
                 if (menuBox.SelectedItem is not MenuChoice item) throw new InvalidOperationException("Select a menu item.");
-                if (!int.TryParse(qtyBox.Text, out var qty)) qty = 1;
+                if (!int.TryParse(qtyBox.Text, out var qty) || qty < 1)
+                    throw new InvalidOperationException("Enter a positive item quantity.");
 
                 int? seat = int.TryParse(seatBox.Text, out var parsedSeat) ? parsedSeat : null;
                 int? course = int.TryParse(courseBox.Text, out var parsedCourse) ? parsedCourse : null;
@@ -346,21 +351,18 @@ internal static class OperationalActionViews
                     string.IsNullOrWhiteSpace(kitchenInstructionsBox.Text) ? null : kitchenInstructionsBox.Text.Trim(),
                     selectedModifiers);
 
-                var localLine = new OrderLineChoice(
-                    orderIdBox.Text,
-                    clientLineId,
-                    item.Name,
-                    qty,
-                    heldBox.IsChecked == true ? "held" : "pending",
-                    null);
-                orderLines.Add(localLine);
-                lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
-                lineBox.SelectedItem = localLine;
-
+                await RefreshPosStateAsync();
+                lineBox.SelectedItem = orderLines.FirstOrDefault(x => x.ClientLineId == clientLineId);
+                qtyBox.Text = "1";
+                itemNotesBox.Clear();
+                kitchenInstructionsBox.Clear();
+                allergyBox.Clear();
+                modifiersBox.UnselectAll();
                 status.Text = $"{qty} × {item.Name} added. Send KOT when this round is ready.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
             catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
+            finally { add.IsEnabled = true; }
         };
         // Prevent overlapping KOT submissions without blocking legitimate
         // later KOT rounds after the first send completes.
@@ -374,6 +376,7 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text))
                     throw new InvalidOperationException("Open an order first.");
                 await workflow.SendKotAsync(orderIdBox.Text);
+                await RefreshPosStateAsync();
                 status.Text = "New KOT round sent. Previously sent items were not duplicated.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
@@ -396,6 +399,7 @@ internal static class OperationalActionViews
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open/select an order first.");
                 if (!int.TryParse(fireCourseBox.Text, out var courseNumber)) throw new InvalidOperationException("Enter a course number.");
                 await workflow.FireCourseAsync(orderIdBox.Text, courseNumber);
+                await RefreshPosStateAsync();
                 status.Text = $"Course {courseNumber} fired as a new KOT round.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
@@ -416,6 +420,7 @@ internal static class OperationalActionViews
                 try
                 {
                     await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
+                    await RefreshPosStateAsync();
                 }
                 finally
                 {
@@ -441,6 +446,8 @@ internal static class OperationalActionViews
                 try
                 {
                     await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
+                    orderIdBox.Clear();
+                    await RefreshPosStateAsync();
                 }
                 finally
                 {
@@ -593,6 +600,129 @@ internal static class OperationalActionViews
             }
         };
         receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+
+        void UpdateOrderSummary()
+        {
+            if (string.IsNullOrWhiteSpace(orderIdBox.Text))
+            {
+                selectionSummary.Text = "No order selected · Open an order or choose one from Active orders.";
+                lineBox.ItemsSource = Array.Empty<OrderLineChoice>();
+                return;
+            }
+
+            var order = orders.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text);
+            var lines = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToArray();
+            var awaiting = lines.Count(x => x.Status is "pending" or "held");
+            selectionSummary.Text = order is null
+                ? $"Order {orderIdBox.Text} · {lines.Length} line(s) · {awaiting} awaiting KOT"
+                : $"{order.ServiceType.Replace('_', ' ')} · {order.Status} · AFN {order.Total:N2} · " +
+                  $"{lines.Length} line(s), {awaiting} awaiting KOT";
+            lineBox.ItemsSource = lines;
+        }
+
+        void UpdateOrderList()
+        {
+            var term = orderSearchBox.Text.Trim();
+            var statusValue = orderStatusFilter.SelectedItem?.ToString() ?? "All statuses";
+            var shown = orders.Where(x =>
+                (statusValue == "All statuses" || x.Status == statusValue) &&
+                (x.ClientOrderId.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                 (x.Waiter?.Contains(term, StringComparison.OrdinalIgnoreCase) == true) ||
+                 x.ServiceType.Contains(term, StringComparison.OrdinalIgnoreCase))).ToArray();
+            grid.ItemsSource = shown;
+            orderOverview.Text = $"{orders.Count(x => x.Status is not ("closed" or "cancelled"))} open orders  ·  " +
+                $"{bills.Count} open bills  ·  {sessions.Count} cashier sessions  ·  {shown.Length} shown";
+            grid.SelectedItem = shown.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text);
+        }
+
+        void FocusOrder(OrderChoice order)
+        {
+            if (order.Status is "closed" or "cancelled" or "billed" or "paid")
+            {
+                status.Text = $"{order.ClientOrderId} is {order.Status} and cannot be edited from this order-entry form.";
+                return;
+            }
+            orderIdBox.Text = order.ClientOrderId;
+            orderBox.SelectedItem = orders.FirstOrDefault(x => x.Id == order.Id);
+            UpdateOrderSummary();
+            status.Text = $"Now editing {order.ClientOrderId}. Add items or send an unsent KOT round.";
+        }
+
+        grid.SelectionChanged += (_, _) =>
+        {
+            if (grid.SelectedItem is OrderChoice selected)
+                FocusOrder(selected);
+        };
+        useSelected.Click += (_, _) =>
+        {
+            if (grid.SelectedItem is OrderChoice selected)
+                FocusOrder(selected);
+            else
+                status.Text = "Select an active order row first.";
+        };
+        clearSelection.Click += (_, _) =>
+        {
+            orderIdBox.Clear();
+            grid.SelectedItem = null;
+            lineBox.ItemsSource = Array.Empty<OrderLineChoice>();
+            UpdateOrderSummary();
+            status.Text = "Ready for a new order. This does not cancel the previous one.";
+        };
+        orderSearchBox.TextChanged += (_, _) => UpdateOrderList();
+        orderStatusFilter.SelectionChanged += (_, _) => UpdateOrderList();
+        UpdateOrderList();
+
+        async Task RefreshPosStateAsync()
+        {
+            // Data changes are already committed by the local workflow service.
+            // A display refresh must not misreport a successful operation as failed.
+            try
+            {
+                var focused = orderIdBox.Text;
+                await using var freshDb = factory.Create();
+                var latestOrders = (await freshDb.Orders.AsNoTracking()
+                        .Where(x => x.Status != "closed")
+                        .Select(x => new
+                        {
+                            Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName,
+                                x.Status, x.GuestCount, x.Total),
+                            x.UpdatedAtUtc,
+                        }).ToListAsync())
+                    .OrderByDescending(x => x.UpdatedAtUtc).Take(100).Select(x => x.Row).ToArray();
+                var latestLines = (await (
+                        from line in freshDb.OrderItems.AsNoTracking()
+                        join order in freshDb.Orders.AsNoTracking() on line.OrderId equals order.Id
+                        where order.Status != "closed" && order.Status != "cancelled" &&
+                              line.Status != "voided" && line.Status != "cancelled"
+                        select new
+                        {
+                            Row = new OrderLineChoice(order.ClientOrderId, line.ClientLineId,
+                                line.ItemName, line.Quantity, line.Status, line.RoundNumber),
+                            line.CreatedAtUtc,
+                        }).ToListAsync())
+                    .OrderBy(x => x.CreatedAtUtc).Select(x => x.Row).ToArray();
+                orders.Clear();
+                orders.AddRange(latestOrders);
+                orderLines.Clear();
+                orderLines.AddRange(latestLines);
+                var selectedStatus = orderStatusFilter.SelectedItem?.ToString() ?? "All statuses";
+                var availableStatuses = new[] { "All statuses" }.Concat(
+                    orders.Select(x => x.Status).Distinct(StringComparer.OrdinalIgnoreCase)).ToArray();
+                orderStatusFilter.ItemsSource = availableStatuses;
+                orderStatusFilter.SelectedItem = availableStatuses.Contains(selectedStatus)
+                    ? selectedStatus : "All statuses";
+                orderBox.ItemsSource = orders;
+                UpdateOrderSummary();
+                UpdateOrderList();
+                if (!string.IsNullOrWhiteSpace(focused))
+                    orderBox.SelectedItem = orders.FirstOrDefault(x => x.ClientOrderId == focused);
+            }
+            catch (Exception ex)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Warning,
+                    "The action succeeded, but the order list could not refresh: " + ex.Message);
+            }
+        }
 
         var page = new StackPanel();
         page.Children.Add(root);
