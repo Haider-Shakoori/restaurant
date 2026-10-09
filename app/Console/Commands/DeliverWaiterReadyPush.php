@@ -9,6 +9,7 @@ use App\Models\WaiterPushDevice;
 use App\Services\Tenant\FirebaseCloudMessaging;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Throwable;
 
 class DeliverWaiterReadyPush extends Command
@@ -21,6 +22,7 @@ class DeliverWaiterReadyPush extends Command
     {
         if (! $fcm->configured()) {
             $this->components->warn('FCM service account not configured; queued alerts preserved.');
+
             return self::SUCCESS;
         }
 
@@ -73,6 +75,7 @@ class DeliverWaiterReadyPush extends Command
                     Order::STATUS_CLOSED, Order::STATUS_CANCELLED,
                 ], true)) {
                 $this->finish($row->id, 'stale');
+
                 continue;
             }
 
@@ -83,6 +86,7 @@ class DeliverWaiterReadyPush extends Command
                 if ($status === 'invalid') {
                     $device->update(['enabled' => false]);
                 }
+
                 $this->finish($row->id, $status);
             } catch (Throwable $e) {
                 $attempts = $row->attempts + 1;
@@ -90,7 +94,7 @@ class DeliverWaiterReadyPush extends Command
                     ->where('id', $row->id)
                     ->update([
                         'attempts' => $attempts,
-                        'last_error' => substr($e instanceof \RuntimeException ?
+                        'last_error' => substr($e instanceof RuntimeException ?
                             $e->getMessage() : 'push_temporarily_unavailable', 0, 80),
                         'next_attempt_at' => now()->addSeconds(min(900, 30 * (2 ** min(5, $attempts)))),
                         'updated_at' => now(),
