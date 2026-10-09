@@ -552,6 +552,7 @@ internal static class OperationalActionViews
         // remains available without duplicating the underlying table records.
         grid.Visibility = Visibility.Collapsed;
         var showTableList = Button("Show table list");
+        showTableList.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         showTableList.Click += (_, _) =>
         {
             grid.Visibility = grid.Visibility == Visibility.Visible
@@ -750,6 +751,7 @@ internal static class OperationalActionViews
         var advancedOperations = Card(operations);
         advancedOperations.Visibility = Visibility.Collapsed;
         var toggleAdvanced = Button("Show transfer / merge / split");
+        toggleAdvanced.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         toggleAdvanced.Margin = new Thickness(0, 10, 0, 6);
         toggleAdvanced.Click += (_, _) =>
         {
