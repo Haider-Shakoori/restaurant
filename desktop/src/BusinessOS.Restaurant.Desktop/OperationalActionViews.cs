@@ -1705,17 +1705,24 @@ internal static class OperationalActionViews
         await using var db = factory.Create();
 
         var recentCompletedCutoff = DateTimeOffset.UtcNow.AddHours(-2);
-        var tickets = await db.KitchenTickets
+        // SQLite cannot translate relational comparisons or ordering for
+        // DateTimeOffset. Keep the status predicate server-side, then evaluate
+        // the completed-ticket age and stable KDS ordering in managed code.
+        // The previous LINQ query prevented Kitchen from opening at all.
+        var ticketCandidates = await db.KitchenTickets
             .AsNoTracking()
             .Where(x => x.Status == "queued" ||
                         x.Status == "active" ||
                         x.Status == "preparing" ||
                         x.Status == "expo" ||
                         x.Status == "ready" ||
-                        (x.Status == "completed" && x.CompletedAt >= recentCompletedCutoff))
+                        x.Status == "completed")
+            .ToArrayAsync();
+        var tickets = ticketCandidates
+            .Where(x => x.Status != "completed" || x.CompletedAt >= recentCompletedCutoff)
             .OrderByDescending(x => x.Priority == "rush")
             .ThenBy(x => x.QueuedAt)
-            .ToArrayAsync();
+            .ToArray();
 
         var ticketIds = tickets.Select(x => x.Id).ToArray();
         var ticketItems = ticketIds.Length == 0
