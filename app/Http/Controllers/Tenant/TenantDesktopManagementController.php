@@ -89,7 +89,9 @@ class TenantDesktopManagementController extends Controller
         $old = $menuItem->image_path;
         $new = $request->file('image')->store('menu-items', 'public');
         $menuItem->update(['image_path' => $new]);
-        if (filled($old) && $old !== $new) Storage::disk('public')->delete($old);
+        if (filled($old) && $old !== $new) {
+            Storage::disk('public')->delete($old);
+        }
 
         return response()->json(['data' => ['id' => $menuItem->id, 'image_path' => $new]]);
     }
