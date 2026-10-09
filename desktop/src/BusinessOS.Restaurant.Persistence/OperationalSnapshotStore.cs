@@ -328,6 +328,32 @@ public sealed class OperationalSnapshotStore
         state.ServerTime = snapshot.ServerTime;
         state.RefreshedAtUtc = DateTimeOffset.UtcNow;
 
+        // The tenant is the authority for optional module switches. Cache the last
+        // successful snapshot so the Windows host keeps an offline module view.
+        if (snapshot.RestaurantSettings is { } moduleSettings)
+        {
+            foreach (var key in new[]
+            {
+                "recipes_enabled", "inventory_enabled", "purchasing_enabled",
+                "automatic_recipe_consumption_enabled",
+            })
+            {
+                if (!moduleSettings.TryGetValue(key, out var flag) ||
+                    flag.ValueKind is not (System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False))
+                    continue;
+
+                var stored = await db.RestaurantSettings.FindAsync([key], cancellationToken);
+                if (stored is null)
+                {
+                    stored = new LocalRestaurantSetting { Key = key, Value = flag.GetBoolean() ? "true" : "false" };
+                    db.RestaurantSettings.Add(stored);
+                }
+                stored.Value = flag.GetBoolean() ? "true" : "false";
+                stored.Source = "cloud";
+                stored.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }

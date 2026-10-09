@@ -16,6 +16,17 @@ internal static class RestaurantOperationalPages
 {
     public static async Task<FrameworkElement> CreateAsync(string route, LanDiagnosticsViewModel diagnostics)
     {
+        if (route is "inventory" or "purchases")
+        {
+            var modules = await new LocalRestaurantSettingsService(new LocalDatabaseFactory()).GetModulesAsync();
+            if (route == "inventory" && !modules.InventoryEnabled ||
+                route == "purchases" && (!modules.InventoryEnabled || !modules.PurchasingEnabled))
+            {
+                return Card("Module disabled",
+                    "This module is turned off for the restaurant. An Owner can re-enable it in Settings → Modules. Historical data is preserved.");
+            }
+        }
+
         return route switch
         {
             "dashboard" => await DashboardAsync(diagnostics),
@@ -314,7 +325,9 @@ internal static class RestaurantOperationalPages
         // snapshot would silently disappear after the next cloud refresh.
         var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
         create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var moduleFlags = await new LocalRestaurantSettingsService(factory).GetModulesAsync();
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipes.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
         recipes.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         recipes.Click += async (_, _) =>
         {
@@ -1314,6 +1327,7 @@ internal static class RestaurantOperationalPages
         // Build each group exactly once so the original action handlers and
         // device bindings stay intact as operators move between settings tabs.
         var workflowPage = Stack();
+        var modulesPage = await RestaurantModulesPanel.CreateAsync();
         var backupPage = Stack();
         var printingPage = Stack();
         var networkPage = Stack();
@@ -1592,6 +1606,7 @@ internal static class RestaurantOperationalPages
             DataContext = diagnostics,
         };
         tabs.Items.Add(SettingsTab("kitchen", "Kitchen & KOT", workflowPage));
+        tabs.Items.Add(SettingsTab("modules", "Modules", modulesPage));
         tabs.Items.Add(SettingsTab("backup", "Backup & Restore", backupPage));
         tabs.Items.Add(SettingsTab("printing", "Printing", printingPage));
         tabs.Items.Add(SettingsTab("network", "Network & Sync", networkPage));

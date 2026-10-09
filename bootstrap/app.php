@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureActivePlatformAdmin;
+use App\Http\Middleware\EnsureRestaurantModuleEnabled;
 use App\Http\Middleware\EnsureTenantRole;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\RequirePlanFeature;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'platform.active' => EnsureActivePlatformAdmin::class,
+            'restaurant.module' => EnsureRestaurantModuleEnabled::class,
             'subscription.active' => EnsureTenantSubscriptionActive::class,
             'plan.feature' => RequirePlanFeature::class,
             'tenant.role' => EnsureTenantRole::class,

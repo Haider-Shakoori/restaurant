@@ -16,6 +16,10 @@ class RestaurantSettingsService
         'kitchen_late_minutes' => 20,
         'require_manager_approval_post_kot_void' => false,
         'negative_stock_policy' => 'block',
+        'recipes_enabled' => true,
+        'inventory_enabled' => true,
+        'purchasing_enabled' => true,
+        'automatic_recipe_consumption_enabled' => true,
     ];
 
     public function all(?string $branchId = null): array
