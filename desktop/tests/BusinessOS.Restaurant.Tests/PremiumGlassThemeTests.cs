@@ -83,6 +83,25 @@ public sealed class PremiumGlassThemeTests
         Assert.Contains("PerMonitorV2", manifest, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Kitchen_and_settings_use_theme_aware_white_glass_workspace()
+    {
+        var classic = Load("Themes", "Classic.xaml");
+        var glass = Load("Themes", "Glass.xaml");
+        Assert.Equal("#00FFFFFF", BrushColor(classic, "WorkspaceFrostedBackgroundBrush"));
+        Assert.Equal("#D9F8FBFF", BrushColor(glass, "WorkspaceFrostedBackgroundBrush"));
+
+        var desktopRoot = Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop");
+        var kitchen = File.ReadAllText(Path.Combine(desktopRoot, "OperationalActionViews.cs"));
+        var settings = File.ReadAllText(Path.Combine(desktopRoot, "RestaurantOperationalPages.cs"));
+        var wrapper = File.ReadAllText(Path.Combine(desktopRoot, "WorkspaceFrostedSurface.cs"));
+        Assert.Contains("Content = WorkspaceFrostedSurface.Wrap(root)", kitchen, StringComparison.Ordinal);
+        Assert.Contains("return Scroll(WorkspaceFrostedSurface.Wrap(panel))", settings, StringComparison.Ordinal);
+        Assert.Contains("WorkspaceFrostedBackgroundBrush", wrapper, StringComparison.Ordinal);
+        Assert.Contains("SetResourceReference(Border.PaddingProperty", wrapper, StringComparison.Ordinal);
+    }
+
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

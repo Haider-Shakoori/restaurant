@@ -222,6 +222,8 @@ internal static class Program
             {
                 var route = GalleryRoutes[index];
                 await NavigateAsync(window, route);
+                if (route is "settings" or "kitchen")
+                    AssertWorkspaceGlassSurface(window, theme, route);
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
             }
@@ -232,6 +234,32 @@ internal static class Program
         window.Height = 800;
         await NavigateAsync(window, "dashboard");
         Console.WriteLine("Gallery captured: 24 operational pages across Classic and Glass themes.");
+    }
+
+    private static void AssertWorkspaceGlassSurface(MainWindow window, AppearanceTheme theme, string route)
+    {
+        var surfaces = Descendants<Border>(window)
+            .Where(x => x.Name == "WorkspaceFrostedContent").ToArray();
+        Assert(surfaces.Length == 1, $"{route} owns exactly one frosted workspace surface");
+
+        var surface = surfaces[0];
+        Assert(surface.Background is SolidColorBrush,
+            $"{route} background follows a live theme resource");
+        var brush = (SolidColorBrush)surface.Background;
+        if (theme == AppearanceTheme.Glass)
+        {
+            Assert(brush.Color.A >= 180 && brush.Color.A < 255,
+                $"{route} has translucent white glass in Glass mode");
+            Assert(surface.Padding.Left >= 18,
+                $"{route} glass content is padded");
+        }
+        else
+        {
+            Assert(brush.Color.A == 0,
+                $"{route} is transparent in Classic mode");
+            Assert(surface.Padding.Left == 0,
+                $"{route} retains Classic content spacing");
+        }
     }
 
     private static async Task CaptureAuthWindowsAsync(MainWindow owner)

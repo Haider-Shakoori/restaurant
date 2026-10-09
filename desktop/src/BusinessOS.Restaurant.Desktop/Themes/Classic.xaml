@@ -7,6 +7,10 @@
     <SolidColorBrush x:Key="SidebarBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="TopBarBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F4F7FB" />
+    <!-- Theme-aware white-glass workspace shared by Settings and Kitchen/KOT. -->
+    <SolidColorBrush x:Key="WorkspaceFrostedBackgroundBrush" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="WorkspaceFrostedBorderBrush" Color="#00FFFFFF" />
+    <Thickness x:Key="WorkspaceFrostedPadding">0</Thickness>
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#E2E8F0" />
     <!-- Opaque nested data surfaces in Classic mode. -->
