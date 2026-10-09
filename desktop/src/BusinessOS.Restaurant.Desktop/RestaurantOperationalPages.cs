@@ -82,8 +82,11 @@ internal static class RestaurantOperationalPages
         // Cancelled orders and unavailable/reserved tables are not active service.
         var openOrders = await db.Orders.CountAsync(x =>
             x.Status != "closed" && x.Status != "cancelled");
-        var activeTables = await db.DiningTables.CountAsync(x =>
-            x.IsActive && x.Status == "occupied");
+        var activeTables = await (from table in db.DiningTables.AsNoTracking()
+            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+            where table.IsActive && area.IsActive && branch.IsActive && table.Status == "occupied"
+            select table.Id).CountAsync();
         var activeKot = await db.KitchenTickets.CountAsync(x =>
             x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
         // Read only bill timestamps and totals; interpret the business day in local time.

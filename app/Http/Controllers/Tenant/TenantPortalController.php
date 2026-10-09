@@ -101,6 +101,8 @@ class TenantPortalController extends Controller
                 ->with('diningArea.branch')
                 ->where('is_active', true)
                 ->where('status', DiningTable::STATUS_AVAILABLE)
+                ->whereHas('diningArea', fn ($query) => $query->where('is_active', true)
+                    ->whereHas('branch', fn ($branches) => $branches->where('is_active', true)))
                 ->orderBy('name')
                 ->get(),
             'menuCategories' => MenuCategory::query()
