@@ -5,6 +5,21 @@
     <Style TargetType="{x:Type TextBlock}">
         <Setter Property="FontFamily" Value="Segoe UI" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Style.Triggers>
+            <!-- WPF implicit TextBlock styling otherwise overrides the Button's
+                 foreground when an action contains a nested text label.
+                 Both enabled and disabled buttons must follow their own brush. -->
+            <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                         Value="True">
+                <Setter Property="Foreground"
+                        Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                         Value="False">
+                <Setter Property="Foreground"
+                        Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+            </DataTrigger>
+        </Style.Triggers>
     </Style>
 
     <!-- Shared template: colors come from the themed Button.Foreground and
