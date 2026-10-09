@@ -17,6 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class TenantPortalSetupController extends Controller
 {
@@ -45,7 +46,7 @@ class TenantPortalSetupController extends Controller
 
         $branch = RestaurantBranch::query()->findOrFail($data['branch_id']);
         if (! $branch->is_active) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'branch_id' => 'Choose an active branch.',
             ]);
         }
@@ -70,7 +71,7 @@ class TenantPortalSetupController extends Controller
 
         $area = DiningArea::query()->with('branch')->findOrFail($data['dining_area_id']);
         if (! $area->is_active || ! $area->branch->is_active) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'dining_area_id' => 'Choose an active dining area and branch.',
             ]);
         }
