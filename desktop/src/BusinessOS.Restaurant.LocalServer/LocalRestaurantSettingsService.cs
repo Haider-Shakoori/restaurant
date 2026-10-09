@@ -39,6 +39,12 @@ public sealed record RestaurantWorkflowSettingsUpdate(
     bool RequireManagerApprovalForPostKotVoid,
     string NegativeStockPolicy = "block");
 
+public sealed record RestaurantModuleFlags(
+    bool RecipesEnabled = true,
+    bool InventoryEnabled = true,
+    bool PurchasingEnabled = true,
+    bool AutomaticRecipeConsumptionEnabled = true);
+
 public sealed class LocalRestaurantSettingsService
 {
     public const string KitchenQueueEnabledKey = "kitchen_queue_enabled";
@@ -58,6 +64,50 @@ public sealed class LocalRestaurantSettingsService
     public LocalRestaurantSettingsService(LocalDatabaseFactory databaseFactory)
     {
         _databaseFactory = databaseFactory;
+    }
+
+    public async Task<RestaurantModuleFlags> GetModulesAsync(CancellationToken cancellationToken = default)
+    {
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        var values = await db.RestaurantSettings.AsNoTracking()
+            .Where(x => x.Key == "recipes_enabled" || x.Key == "inventory_enabled" ||
+                        x.Key == "purchasing_enabled" || x.Key == "automatic_recipe_consumption_enabled")
+            .ToDictionaryAsync(x => x.Key, x => x.Value, cancellationToken);
+
+        return new RestaurantModuleFlags(
+            Bool(values, "recipes_enabled", true),
+            Bool(values, "inventory_enabled", true),
+            Bool(values, "purchasing_enabled", true),
+            Bool(values, "automatic_recipe_consumption_enabled", true));
+    }
+
+    public async Task ApplyCloudModulesAsync(RestaurantModuleFlags modules, CancellationToken token = default)
+    {
+        await _databaseFactory.EnsureCreatedAsync(token);
+        await using var db = _databaseFactory.Create();
+        await using var transaction = await db.Database.BeginTransactionAsync(token);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var entry in new Dictionary<string, bool>
+        {
+            ["recipes_enabled"] = modules.RecipesEnabled,
+            ["inventory_enabled"] = modules.InventoryEnabled,
+            ["purchasing_enabled"] = modules.PurchasingEnabled,
+            ["automatic_recipe_consumption_enabled"] = modules.AutomaticRecipeConsumptionEnabled,
+        })
+        {
+            var row = await db.RestaurantSettings.FindAsync([entry.Key], token);
+            if (row is null)
+            {
+                row = new LocalRestaurantSetting { Key = entry.Key, Value = entry.Value ? "true" : "false" };
+                db.RestaurantSettings.Add(row);
+            }
+            row.Value = entry.Value ? "true" : "false";
+            row.Source = "cloud";
+            row.UpdatedAtUtc = now;
+        }
+        await db.SaveChangesAsync(token);
+        await transaction.CommitAsync(token);
     }
 
     public async Task<RestaurantWorkflowSettings> GetAsync(CancellationToken cancellationToken = default)
