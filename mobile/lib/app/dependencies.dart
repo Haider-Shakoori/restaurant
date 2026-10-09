@@ -1,5 +1,6 @@
 import '../core/api/mobile_api_client.dart';
 import '../core/connection/connection_resolver.dart';
+import '../core/notifications/restaurant_push_notifications.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
 import '../core/session/session_service.dart';
@@ -19,6 +20,7 @@ class AppDependencies {
     required this.syncEngine,
     required this.syncCoordinator,
     required this.orders,
+    required this.pushNotifications,
   });
 
   final LocalDatabase database;
@@ -30,6 +32,7 @@ class AppDependencies {
   final SyncEngine syncEngine;
   final SyncCoordinator syncCoordinator;
   final OfflineOrderRepository orders;
+  final RestaurantPushNotifications pushNotifications;
 
   static Future<AppDependencies> create() async {
     final database = await LocalDatabase.open();
@@ -52,6 +55,10 @@ class AppDependencies {
       connectionResolver: connectionResolver,
     );
     final syncCoordinator = SyncCoordinator(engine: syncEngine);
+    final pushNotifications = RestaurantPushNotifications(
+      api: api,
+      currentSession: credentials.readSession,
+    );
     final orders = OfflineOrderRepository(
       database: database,
       credentials: credentials,
@@ -68,6 +75,7 @@ class AppDependencies {
       syncEngine: syncEngine,
       syncCoordinator: syncCoordinator,
       orders: orders,
+      pushNotifications: pushNotifications,
     );
   }
 }
