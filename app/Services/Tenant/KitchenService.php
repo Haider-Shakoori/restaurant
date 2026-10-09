@@ -438,9 +438,6 @@ class KitchenService
 
             $this->synchronizeTicketFromItems($item->ticket, $actor);
             $this->synchronizeOrderStatus($item->ticket->order, $actor);
-            if ($to === KitchenTicketItem::STATUS_READY) {
-                app(WaiterPickupPushOutbox::class)->recordReady($item);
-            }
 
             return $item->fresh(['ticket.station', 'ticket.round']);
         });
@@ -741,6 +738,9 @@ class KitchenService
 
             $this->synchronizeTicketFromItems($item->ticket, $actor);
             $this->synchronizeOrderStatus($item->ticket->order, $actor);
+            if ($to === KitchenTicketItem::STATUS_READY) {
+                app(WaiterPickupPushOutbox::class)->recordReady($item);
+            }
 
             return $item->fresh(['ticket.station', 'ticket.round']);
         });
