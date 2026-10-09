@@ -65,13 +65,14 @@ use App\Http\Controllers\Tenant\WaiterPushDeviceController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Route;
 
 $tenantMiddleware = [
     InitializeRestaurantTenancy::class,
 ];
 
-Route::middleware($tenantMiddleware)
+Route::middleware([...$tenantMiddleware, SubstituteBindings::class])
     ->get('/media/menu-items/{menuItem}', MenuItemImageController::class)
     ->name('tenant.media.menu-item');
 
