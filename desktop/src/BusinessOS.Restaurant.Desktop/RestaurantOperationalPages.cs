@@ -1517,7 +1517,7 @@ internal static class RestaurantOperationalPages
             "Device control",
             "Select a waiter device above to enable/disable or unpair it. Device-management actions require an Owner or Manager session. Disabling or unpairing a terminal does not disable the restaurant desktop or other LAN terminals."));
 
-        return Scroll(panel);
+        return Scroll(WorkspaceFrostedSurface.Wrap(panel));
     }
 
     private static async Task<FrameworkElement> BackupRestorePanelAsync()

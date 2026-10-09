@@ -803,10 +803,10 @@ internal static class OperationalActionViews
 
         var statusText = new TextBlock
         {
-            Foreground = Brushes.SlateGray,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(12, 10, 0, 0),
         };
+        statusText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
         filterRow.Children.Add(stationFilter);
         filterRow.Children.Add(statusFilter);
@@ -1312,7 +1312,7 @@ internal static class OperationalActionViews
 
         return new ScrollViewer
         {
-            Content = root,
+            Content = WorkspaceFrostedSurface.Wrap(root),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };

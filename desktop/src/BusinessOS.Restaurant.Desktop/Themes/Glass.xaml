@@ -9,6 +9,10 @@
     <SolidColorBrush x:Key="SidebarBrush" Color="#B8F5F9FF" />
     <SolidColorBrush x:Key="TopBarBrush" Color="#C7F8FBFF" />
     <SolidColorBrush x:Key="PageBackgroundBrush" Color="#1EFFFFFF" />
+    <!-- Theme-aware white-glass workspace shared by Settings and Kitchen/KOT. -->
+    <SolidColorBrush x:Key="WorkspaceFrostedBackgroundBrush" Color="#D9F8FBFF" />
+    <SolidColorBrush x:Key="WorkspaceFrostedBorderBrush" Color="#EEFFFFFF" />
+    <Thickness x:Key="WorkspaceFrostedPadding">22</Thickness>
 
     <LinearGradientBrush x:Key="CardBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Color="#D8FFFFFF" Offset="0" />
