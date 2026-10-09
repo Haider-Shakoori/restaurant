@@ -67,13 +67,16 @@ internal static class Program
         return application.Run(owner);
     }
 
-    private static MainWindow OpenWindow(string role) =>
-        new(new AuthSession(
+    private static AuthSession TestSession(string role) =>
+        new(
             "https://restaurant-ci.example.test",
             "not-a-real-access-token",
             new AuthUser(901, "ci-test-operator", "CI " + role, "ci@example.test", role),
             "isolated-test-tenant",
-            DateTimeOffset.UtcNow))
+            DateTimeOffset.UtcNow);
+
+    private static MainWindow OpenWindow(string role) =>
+        new(TestSession(role))
         {
             WindowState = WindowState.Normal,
             Width = 1280,
@@ -84,6 +87,11 @@ internal static class Program
 
     private static async Task RunAsync(System.Windows.Application app, MainWindow owner)
     {
+        // Operational workspaces read the protected Windows operator session,
+        // not just the window DataContext. Create only synthetic CI credentials
+        // on this disposable runner; production startup remains unchanged.
+        var sessions = new WindowsSessionStore();
+        await sessions.SaveAsync(TestSession("owner"));
         var vm = (MainWindowViewModel)owner.DataContext;
         await WaitUntilAsync(() => vm.CurrentPage is not null || vm.HasWorkspaceError,
             "initial Dashboard render");
@@ -118,6 +126,7 @@ internal static class Program
             await NavigateAsync(owner, route);
 
         // A second real shell tests role visibility and command-level denial.
+        await sessions.SaveAsync(TestSession("waiter"));
         var waiter = OpenWindow("waiter");
         waiter.Show();
         var waiterVm = (MainWindowViewModel)waiter.DataContext;
@@ -138,6 +147,7 @@ internal static class Program
 
         waiter.Close();
         owner.Close();
+        await sessions.ClearAsync();
     }
 
     private static void CheckNavigation(MainWindow window, string route)
