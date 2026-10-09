@@ -1343,7 +1343,8 @@ internal static class OperationalActionViews
         var branchBox = Combo(branches, "Label"); branchBox.Width = 220;
         var dateBox = new TextBox { Text = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd"), Width = 130, Height = 34, Margin = new Thickness(8,4,8,6) };
         var finalize = Button("Finalize day");
-        var status = new TextBlock { Margin = new Thickness(12,10,0,0), Foreground = System.Windows.Media.Brushes.SlateGray, TextWrapping = TextWrapping.Wrap };
+        var status = new TextBlock { Margin = new Thickness(12,10,0,0), TextWrapping = TextWrapping.Wrap };
+        status.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
         controls.Children.Add(branchBox); controls.Children.Add(dateBox); controls.Children.Add(finalize); controls.Children.Add(status);
         finalize.Click += async (_, _) =>
         {
