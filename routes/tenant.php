@@ -81,7 +81,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
         ->name('tenant.web.login.store');
 
     Route::get('/', function (Request $request, EnsureTenantSubscriptionActive $subscription) {
-        if (! $request->expectsJson()) {
+        if ($request->expectsJson() === false) {
             return auth('tenant')->check() ? redirect('/dashboard') : redirect('/login');
         }
 
