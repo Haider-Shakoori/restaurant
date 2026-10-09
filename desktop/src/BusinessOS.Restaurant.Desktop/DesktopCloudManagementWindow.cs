@@ -8,6 +8,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using BusinessOS.Restaurant.Authentication;
+using BusinessOS.Restaurant.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Win32;
 
 namespace BusinessOS.Restaurant.Desktop;
@@ -27,6 +29,7 @@ internal sealed class DesktopCloudManagementWindow : Window
     private readonly Uri _root;
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
     private readonly List<CatalogEditor> _editors = [];
+    private bool _cloudAvailable;
     public bool SavedChanges { get; private set; }
 
     public DesktopCloudManagementWindow(AuthSession session, string initialTab)
@@ -96,7 +99,14 @@ internal sealed class DesktopCloudManagementWindow : Window
         tabs.SelectedIndex = tabIndex < 0 ? 0 : tabIndex;
         root.Children.Add(tabs);
         Content = root;
-        Loaded += async (_, _) => await RefreshAsync();
+        Loaded += async (_, _) =>
+        {
+            // Show only branches actually synchronized to this desktop while
+            // the online tenant management endpoint is unavailable. They are
+            // read-only until the server authoritatively confirms them.
+            await LoadCachedBranchesAsync();
+            await RefreshAsync();
+        };
         Closed += (_, _) => _http.Dispose();
     }
 
@@ -107,6 +117,34 @@ internal sealed class DesktopCloudManagementWindow : Window
         tabs.Items.Add(new TabItem { Header = editor.Title, Content = editor.Content });
     }
 
+    private async Task LoadCachedBranchesAsync()
+    {
+        try
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var branches = await db.Branches.AsNoTracking()
+                .Where(branch => branch.IsActive)
+                .OrderBy(branch => branch.Name)
+                .Select(branch => new Choice(branch.Id, branch.Name))
+                .ToArrayAsync();
+
+            foreach (var editor in _editors)
+                editor.SetCachedBranchChoices(branches);
+
+            _status.Text = branches.Length > 0
+                ? $"{branches.Length} locally synchronized branch(es) available for reference. " +
+                  "Connect to the tenant management API to save changes."
+                : "No branches are available in this desktop's local cache. " +
+                  "Sync the restaurant's branches from the tenant before creating dining floors.";
+        }
+        catch (Exception ex)
+        {
+            _status.Text = "Could not read locally synchronized branches: " + ex.Message;
+        }
+    }
+
     private async Task RefreshAsync()
     {
         try
@@ -114,16 +152,28 @@ internal sealed class DesktopCloudManagementWindow : Window
             using var response = await _http.SendAsync(Request(HttpMethod.Get, _root));
             var data = await ReadAsync(response);
             foreach (var editor in _editors) editor.Reload(data);
+            _cloudAvailable = true;
+            foreach (var editor in _editors) editor.SetCloudAvailability(true);
             _status.Text = "Management data refreshed from the restaurant tenant.";
         }
         catch (Exception ex)
         {
-            _status.Text = "Cloud management unavailable: " + ex.Message;
+            _cloudAvailable = false;
+            foreach (var editor in _editors) editor.SetCloudAvailability(false);
+            _status.Text = "Online editing unavailable: " + ex.Message +
+                " Cached branch names (if available) are view-only. " +
+                "Create/Save remains disabled until the tenant API is reachable.";
         }
     }
 
     private async Task SaveAsync(CatalogEditor editor)
     {
+        if (!_cloudAvailable)
+        {
+            _status.Text = "Cannot save: connect to the authorized tenant management API first.";
+            return;
+        }
+
         editor.SetSaving(true);
         try
         {
@@ -239,7 +289,14 @@ internal sealed class DesktopCloudManagementWindow : Window
         private readonly ComboBox _rows = new() { Height = 35 };
         private readonly Dictionary<string, FrameworkElement> _inputs = [];
         private readonly Field[] _fields;
-        private readonly Button _save = new() { Height = 38, Content = "Create", MinWidth = 145 };
+        private readonly Button _save = new() { Height = 38, Content = "Create", MinWidth = 145, IsEnabled = false };
+        private readonly TextBlock _branchHelp = new()
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 8),
+        };
+        private bool _cloudOnline;
+        private bool _hasValidBranch = true;
         private readonly TextBlock _hint = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 9) };
 
         public CatalogEditor(string title, string key, Field[] fields, bool allowImage = false)
@@ -279,6 +336,13 @@ internal sealed class DesktopCloudManagementWindow : Window
                 };
                 _inputs[field.Key] = input;
                 form.Children.Add(input);
+                if (field.Type == Kind.Branch)
+                {
+                    _branchHelp.Text =
+                        "Branch list is loading. Local cache is view-only until tenant connection succeeds.";
+                    _branchHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                    form.Children.Add(_branchHelp);
+                }
             }
 
             if (AllowImage)
@@ -305,6 +369,35 @@ internal sealed class DesktopCloudManagementWindow : Window
             Content = layout;
         }
 
+        public void SetCachedBranchChoices(IReadOnlyList<Choice> branches)
+        {
+            if (!_inputs.TryGetValue("branch_id", out var input) || input is not ComboBox box)
+                return;
+            // Never invent a default business branch; use only actual local
+            // branches synchronized earlier from the restaurant tenant.
+            var selectedId = (box.SelectedItem as Choice)?.Id;
+            box.ItemsSource = branches;
+            box.SelectedItem = branches.FirstOrDefault(x => x.Id == selectedId)
+                ?? branches.FirstOrDefault();
+            _hasValidBranch = branches.Count > 0;
+            _branchHelp.Text = branches.Count == 0
+                ? "No branch in the local cache. Connect/sync a branch from the tenant."
+                : $"Showing {branches.Count} cached branch(es). Saving requires online verification.";
+            _save.IsEnabled = false;
+        }
+
+        public void SetCloudAvailability(bool available)
+        {
+            _cloudOnline = available;
+            _save.IsEnabled = available && _hasValidBranch;
+            if (_inputs.ContainsKey("branch_id"))
+                _branchHelp.Text = !available
+                    ? "Cached branches are read-only. Reconnect to the tenant API to create or edit floors."
+                    : !_hasValidBranch
+                        ? "No active branch on the tenant. Add/activate a branch in the tenant admin first."
+                        : "Only tenant-authorized active branches can be selected.";
+        }
+
         public void Reload(JsonElement root)
         {
             var data = root.GetProperty("data");
@@ -322,12 +415,16 @@ internal sealed class DesktopCloudManagementWindow : Window
         private void FillChoices(JsonElement data, string collection, string field, bool allowBlank = false)
         {
             if (!_inputs.TryGetValue(field, out var input) || input is not ComboBox box) return;
+            var selectedId = (box.SelectedItem as Choice)?.Id;
             var choices = data.GetProperty(collection).EnumerateArray()
                 .Where(x => !x.TryGetProperty("is_active", out var active) || active.ValueKind != JsonValueKind.False)
                 .Select(x => new Choice(x.GetProperty("id").ToString(), x.GetProperty("name").ToString())).ToList();
             if (allowBlank) choices.Insert(0, new Choice("", "Uncategorized"));
             box.ItemsSource = choices;
-            box.SelectedIndex = choices.Count > 0 ? 0 : -1;
+            box.SelectedItem = choices.FirstOrDefault(x => x.Id == selectedId)
+                ?? choices.FirstOrDefault();
+            if (field == "branch_id")
+                _hasValidBranch = choices.Count > 0;
         }
 
         private void Select(ManagementRow row)
@@ -386,6 +483,7 @@ internal sealed class DesktopCloudManagementWindow : Window
             return payload;
         }
 
-        public void SetSaving(bool state) => _save.IsEnabled = !state;
+        public void SetSaving(bool state) =>
+            _save.IsEnabled = !state && _cloudOnline && _hasValidBranch;
     }
 }

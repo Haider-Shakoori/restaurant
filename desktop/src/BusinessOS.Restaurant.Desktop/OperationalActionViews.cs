@@ -827,6 +827,46 @@ internal static class OperationalActionViews
         kitchenSummary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         root.Children.Add(kitchenSummary);
 
+        // READY is a pickup queue, not a second production step or an
+        // automatic service/payment event. The waiter must deliver the order
+        // and mark the complete ready order SERVED from POS & Orders.
+        var handoffText = new TextBlock
+        {
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        handoffText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        var handoffContents = new StackPanel();
+        handoffContents.Children.Add(handoffText);
+        if (principal.UserRole is "owner" or "manager" or "cashier")
+        {
+            var openService = Button("OPEN POS & ORDERS · MARK SERVED");
+            openService.MinWidth = 0;
+            openService.Margin = new Thickness(0, 10, 0, 0);
+            openService.ToolTip =
+                "After the waiter delivers every ready item, select the complete order in POS and mark it Served. Then bill and receive payment.";
+            openService.Click += (_, _) =>
+            {
+                var vm = System.Windows.Application.Current?.MainWindow?.DataContext
+                    as MainWindowViewModel;
+                var navigate = vm?.NavigateCommand;
+                if (navigate?.CanExecute("pos") == true)
+                    navigate.Execute("pos");
+            };
+            handoffContents.Children.Add(openService);
+        }
+        var handoffPanel = new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(14, 11, 14, 11),
+            Margin = new Thickness(0, 0, 0, 14),
+            Child = handoffContents,
+        };
+        handoffPanel.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        handoffPanel.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        root.Children.Add(handoffPanel);
+
         var board = new WrapPanel
         {
             Orientation = Orientation.Horizontal,
@@ -858,9 +898,25 @@ internal static class OperationalActionViews
             string priority,
             string currentStatus)
         {
-            var age = DateTimeOffset.UtcNow - queuedAt;
-            var minutes = Math.Max(0, (int)Math.Floor(age.TotalMinutes));
-            label.Text = $"{minutes:00}:{Math.Max(0, age.Seconds):00}";
+            // Running age only makes sense while food is being prepared.
+            // READY must never display days of elapsed time as if a chef were
+            // still preparing it; the card remains in pickup until served.
+            if (currentStatus is "ready" or "completed")
+            {
+                label.Text = currentStatus == "ready" ? "PICKUP" : "SERVED";
+            }
+            else
+            {
+                var age = DateTimeOffset.UtcNow - queuedAt;
+                var totalSeconds = Math.Max(0, (long)age.TotalSeconds);
+                var hours = totalSeconds / 3600;
+                var minutesPart = (totalSeconds / 60) % 60;
+                var secondsPart = totalSeconds % 60;
+                label.Text = hours > 0
+                    ? $"{hours:00}:{minutesPart:00}:{secondsPart:00}"
+                    : $"{minutesPart:00}:{secondsPart:00}";
+            }
+            var minutes = Math.Max(0, (int)Math.Floor((DateTimeOffset.UtcNow - queuedAt).TotalMinutes));
 
             var delayed = (currentStatus is "queued" or "active" or "preparing" or "expo") &&
                           minutes >= settings.KitchenLateMinutes;
@@ -966,6 +1022,22 @@ internal static class OperationalActionViews
             }
             panel.Children.Add(chips);
 
+            if (row.Status == "ready")
+            {
+                var pickup = KitchenDetail(
+                    "NEXT STEP",
+                    "Ready for pickup. The waiter delivers the food, then marks the complete order SERVED in POS & Orders. Billing follows service.");
+                pickup.FontWeight = FontWeights.SemiBold;
+                pickup.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                panel.Children.Add(pickup);
+            }
+            else if (row.Status == "completed")
+            {
+                panel.Children.Add(KitchenDetail(
+                    "SERVED",
+                    "The order was marked served in POS. Keep this ticket for its audit history."));
+            }
+
             if (!string.IsNullOrWhiteSpace(row.Modifiers))
                 panel.Children.Add(KitchenDetail("Modifiers", row.Modifiers));
             if (!string.IsNullOrWhiteSpace(row.KitchenInstructions))
@@ -1066,6 +1138,7 @@ internal static class OperationalActionViews
             if (canRecallWaste && (row.Status is "ready" or "completed"))
             {
                 var recall = Button("RECALL");
+                recall.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
                 actions.Children.Add(recall);
                 recall.Click += async (_, _) =>
                 {
@@ -1094,6 +1167,7 @@ internal static class OperationalActionViews
             if (canRecallWaste && (row.Status is "preparing" or "expo" or "ready" or "completed"))
             {
                 var waste = Button("MARK WASTE");
+                waste.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
                 actions.Children.Add(waste);
                 waste.Click += async (_, _) =>
                 {
@@ -1190,6 +1264,11 @@ internal static class OperationalActionViews
             kitchenSummary.Text =
                 $"{visible.Length} visible · {active} in production · " +
                 $"{expo} expo · {ready} ready · {rush} rush · {overdue} delayed";
+            handoffText.Text = ready > 0
+                ? $"{ready} item(s) READY FOR PICKUP • Waiter delivers food → POS & Orders → Mark served (when every item is ready) → Issue bill → Payment. " +
+                  "RECALL, WASTE and RE-FIRE are exception actions requiring a reason."
+                : "Kitchen flow: Prepare → READY FOR PICKUP → Waiter serves → POS marks served → Billing. " +
+                  "Expo approval is required when enabled.";
         }
 
         void RenderBoard()
