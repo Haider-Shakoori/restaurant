@@ -668,6 +668,104 @@ class MobileOfflineSyncTest extends TestCase
     /**
      * @return array{Business, string, Tenant}
      */
+    public function test_desktop_management_can_create_read_and_update_floor_table_category_menu_and_inventory(): void
+    {
+        [, $domain, $tenant] = $this->createActiveBusiness();
+
+        tenancy()->initialize($tenant);
+        [$owner, $table] = $this->seedRestaurant('management-owner@restaurant.test');
+        $owner->update(['role' => 'owner']);
+        $branchId = $table->diningArea->branch_id;
+        tenancy()->end();
+
+        $token = $this->login($domain, 'management-owner@restaurant.test');
+        $this->withToken($token);
+
+        $root = "http://{$domain}/api/v1/desktop/management";
+        $this->getJson($root)->assertOk()
+            ->assertJsonPath('data.branches.0.name', 'Main Branch');
+
+        $areaId = $this->postJson($root.'/areas', [
+            'branch_id' => $branchId,
+            'name' => 'Upper Floor',
+            'is_active' => true,
+        ])->assertCreated()->json('data.id');
+
+        $this->patchJson($root.'/areas/'.$areaId, [
+            'branch_id' => $branchId,
+            'name' => 'First Floor',
+            'is_active' => true,
+        ])->assertOk()->assertJsonPath('data.name', 'First Floor');
+
+        $newTableId = $this->postJson($root.'/tables', [
+            'dining_area_id' => $areaId,
+            'code' => 'T-02',
+            'name' => 'Table 2',
+            'capacity' => 4,
+            'is_active' => true,
+        ])->assertCreated()->json('data.id');
+
+        $this->patchJson($root.'/tables/'.$newTableId, [
+            'dining_area_id' => $areaId,
+            'code' => 'T-02',
+            'name' => 'Window Table',
+            'capacity' => 6,
+            'is_active' => true,
+        ])->assertOk()->assertJsonPath('data.name', 'Window Table');
+
+        $categoryId = $this->postJson($root.'/categories', [
+            'name' => 'Desserts',
+            'is_active' => true,
+        ])->assertCreated()->json('data.id');
+        $this->patchJson($root.'/categories/'.$categoryId, [
+            'name' => 'Desserts & Drinks',
+            'is_active' => true,
+        ])->assertOk()->assertJsonPath('data.name', 'Desserts & Drinks');
+
+        $itemId = $this->postJson($root.'/menu-items', [
+            'menu_category_id' => $categoryId,
+            'sku' => 'DES-001',
+            'name' => 'Ice Cream',
+            'price' => 120,
+            'is_available' => true,
+        ])->assertCreated()->json('data.id');
+        $this->patchJson($root.'/menu-items/'.$itemId, [
+            'menu_category_id' => $categoryId,
+            'sku' => 'DES-001',
+            'name' => 'Vanilla Ice Cream',
+            'price' => 130,
+            'is_available' => true,
+        ])->assertOk()->assertJsonPath('data.name', 'Vanilla Ice Cream');
+
+        $stockId = $this->postJson($root.'/inventory', [
+            'sku' => 'CREAM-001',
+            'name' => 'Cream',
+            'base_unit' => 'g',
+            'purchase_unit' => 'kg',
+            'purchase_to_base_factor' => 1000,
+            'reorder_level' => 200,
+            'is_active' => true,
+        ])->assertCreated()->json('data.id');
+        $this->patchJson($root.'/inventory/'.$stockId, [
+            'sku' => 'CREAM-001',
+            'name' => 'Fresh Cream',
+            'base_unit' => 'g',
+            'purchase_unit' => 'kg',
+            'purchase_to_base_factor' => 1000,
+            'reorder_level' => 250,
+            'is_active' => true,
+        ])->assertOk()->assertJsonPath('data.name', 'Fresh Cream');
+
+        $this->getJson($root)->assertOk()
+            ->assertJsonCount(2, 'data.areas')
+            ->assertJsonCount(2, 'data.tables')
+            ->assertJsonCount(2, 'data.categories')
+            ->assertJsonCount(2, 'data.menu_items')
+            ->assertJsonCount(1, 'data.inventory_items');
+
+        $this->withToken('')->getJson($root)->assertUnauthorized();
+    }
+
     private function createActiveBusiness(): array
     {
         Carbon::setTestNow(Carbon::parse('2026-10-01 09:00:00', 'Asia/Kabul'));
