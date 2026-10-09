@@ -5,6 +5,45 @@
 @section('subheading', 'Configure restaurant operations, mobile connectivity and kitchen structure.')
 
 @section('content')
+
+    <section id="modules" class="mb-6 overflow-hidden rounded-2xl border border-violet-200 bg-white shadow-sm">
+        <div class="border-b border-slate-100 bg-slate-950 px-5 py-5 text-white sm:px-6">
+            <p class="text-xs font-bold uppercase tracking-widest text-violet-300">Settings / Modules</p>
+            <h2 class="mt-1 text-xl font-black">Restaurant capability controls</h2>
+            <p class="mt-2 text-sm text-slate-300">Switch operational modules on or off for the whole restaurant, including connected Windows terminals after sync. Existing recipes, purchases and stock history are retained.</p>
+        </div>
+        <form method="POST" action="/settings/modules" class="p-5 sm:p-6" x-data="{
+            recipes: @js((bool) old('recipes_enabled', $restaurantSettings['recipes_enabled'])),
+            inventory: @js((bool) old('inventory_enabled', $restaurantSettings['inventory_enabled'])),
+            purchasing: @js((bool) old('purchasing_enabled', $restaurantSettings['purchasing_enabled'])),
+            automatic: @js((bool) old('automatic_recipe_consumption_enabled', $restaurantSettings['automatic_recipe_consumption_enabled']))
+        }">
+            @csrf
+            <div class="grid gap-3 md:grid-cols-2">
+                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
+                    <span><span class="block font-black">Recipe management</span><span class="mt-1 block text-xs leading-5 text-slate-500">Ingredient recipes, portion quantities, and cost tracking.</span></span>
+                    <input type="hidden" name="recipes_enabled" value="0"><input type="checkbox" name="recipes_enabled" value="1" x-model="recipes" @change="if (!recipes) automatic = false" class="mt-1 h-5 w-5 accent-violet-600">
+                </label>
+                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
+                    <span><span class="block font-black">Inventory management</span><span class="mt-1 block text-xs leading-5 text-slate-500">Stock levels, valuation, adjustments, and alerts.</span></span>
+                    <input type="hidden" name="inventory_enabled" value="0"><input type="checkbox" name="inventory_enabled" value="1" x-model="inventory" @change="if (!inventory) { purchasing = false; automatic = false }" class="mt-1 h-5 w-5 accent-violet-600">
+                </label>
+                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
+                    <span><span class="block font-black">Purchasing management</span><span class="mt-1 block text-xs leading-5 text-slate-500">Suppliers, purchase orders, and received stock. Requires Inventory.</span></span>
+                    <input type="hidden" name="purchasing_enabled" value="0"><input type="checkbox" name="purchasing_enabled" value="1" x-model="purchasing" :disabled="!inventory" class="mt-1 h-5 w-5 accent-violet-600">
+                </label>
+                <label class="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
+                    <span><span class="block font-black">Automatic recipe consumption</span><span class="mt-1 block text-xs leading-5 text-slate-500">Reserve and deduct recipe ingredients as orders are prepared. Requires Recipes and Inventory.</span></span>
+                    <input type="hidden" name="automatic_recipe_consumption_enabled" value="0"><input type="checkbox" name="automatic_recipe_consumption_enabled" value="1" x-model="automatic" :disabled="!recipes || !inventory" class="mt-1 h-5 w-5 accent-violet-600">
+                </label>
+            </div>
+            <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+                <p class="max-w-xl text-xs text-slate-500">POS, KOT, orders, payments, and table closing always remain active. Turning off a module never deletes financial or inventory records.</p>
+                <button type="submit" class="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white hover:bg-violet-700">Save modules</button>
+            </div>
+        </form>
+    </section>
+
     <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
