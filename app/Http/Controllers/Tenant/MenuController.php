@@ -22,10 +22,15 @@ class MenuController extends Controller
             ->map(fn (MenuCategory $category) => [
                 'id' => $category->id,
                 'name' => $category->name,
+                'name_dari' => $category->name_dari,
+                'name_pashto' => $category->name_pashto,
                 'items' => $category->items->map(fn ($item) => [
                     'id' => $item->id,
                     'sku' => $item->sku,
                     'name' => $item->name,
+                    'name_dari' => $item->name_dari,
+                    'name_pashto' => $item->name_pashto,
+                    'preparation_time_minutes' => $item->preparation_time_minutes,
                     'description' => $item->description,
                     'image_url' => $item->image_url,
                     'price' => $item->price,
