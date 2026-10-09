@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace BusinessOS.Restaurant.Application.OperationalData;
@@ -16,7 +17,8 @@ public sealed record OperationalSnapshot(
     [property: JsonPropertyName("tables")] IReadOnlyList<DiningTableSnapshot> Tables,
     [property: JsonPropertyName("kitchen")] KitchenSnapshot? Kitchen = null,
     // Backward-compatible: empty floors are included even before a table is added.
-    [property: JsonPropertyName("areas")] IReadOnlyList<DiningAreaReferenceSnapshot>? Areas = null);
+    [property: JsonPropertyName("areas")] IReadOnlyList<DiningAreaReferenceSnapshot>? Areas = null,
+    [property: JsonPropertyName("restaurant_settings")] Dictionary<string, JsonElement>? RestaurantSettings = null);
 
 public sealed record BranchSnapshot(
     [property: JsonPropertyName("id")] string Id,
