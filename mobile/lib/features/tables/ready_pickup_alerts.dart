@@ -81,7 +81,7 @@ List<ReadyPickupAlert> readyPickupAlerts(
     final ref = order['service_reference']?.toString();
     final label = service == 'dine_in'
         ? tableNames[tableId] ?? 'Dine-in order $id'
-        : '${service.replaceAll('_', ' ').toUpperCase()}' +
+        : service.replaceAll('_', ' ').toUpperCase() +
             (ref == null || ref.isEmpty ? ' · $id' : ' · $ref');
 
     ready.add(ReadyPickupAlert(
