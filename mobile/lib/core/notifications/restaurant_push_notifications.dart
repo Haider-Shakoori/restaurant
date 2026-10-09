@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import '../api/mobile_api_client.dart';
+import '../connection/connection_mode.dart';
 import '../models/session_credentials.dart';
 
 /// Firebase application identifiers are public client config, not service
@@ -134,7 +135,9 @@ class RestaurantPushNotifications {
 
   Future<void> _reportToken(String token) async {
     final session = await _currentSession();
-    final cloud = session?.cloudBaseUrl;
+    final cloud = session?.cloudBaseUrl ??
+        (session?.activeChannel == ConnectionChannel.cloud
+            ? session?.baseUrl : null);
     if (session == null || cloud == null || cloud.isEmpty) return;
     if (_boundDeviceId == session.deviceId && _lastReportedToken == token) {
       return;
@@ -154,7 +157,9 @@ class RestaurantPushNotifications {
 
   Future<void> signOut() async {
     final session = await _currentSession();
-    final cloud = session?.cloudBaseUrl;
+    final cloud = session?.cloudBaseUrl ??
+        (session?.activeChannel == ConnectionChannel.cloud
+            ? session?.baseUrl : null);
     if (session != null && cloud != null && cloud.isNotEmpty) {
       try {
         await _api.unregisterPushDevice(session.copyWith(baseUrl: cloud));
