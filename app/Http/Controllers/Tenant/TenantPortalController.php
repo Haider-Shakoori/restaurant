@@ -70,7 +70,8 @@ class TenantPortalController extends Controller
                 ->where('is_active', true)
                 ->with([
                     'diningAreas' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order')->orderBy('name'),
-                    'diningAreas.tables' => fn ($query) => $query->where('is_active', true)->orderBy('code'),
+                    'diningAreas.tables' => fn ($query) => $query->where('is_active', true)->orderBy('code')
+                        ->with(['orders' => fn ($orders) => $orders->whereIn('status', Order::ACTIVE_STATUSES)->latest('opened_at')]),
                 ])
                 ->orderBy('name')
                 ->get(),
