@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -31,6 +32,42 @@ internal static class RestaurantOperationalPages
             "settings" => await SettingsAsync(diagnostics),
             _ => Placeholder(route),
         };
+    }
+
+    internal static async Task OpenCloudManagementAsync(string section)
+    {
+        try
+        {
+            var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                ?? throw new InvalidOperationException("Sign in before editing the restaurant catalog.");
+            var dialog = new DesktopCloudManagementWindow(session, section)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+            dialog.ShowDialog();
+            if (dialog.SavedChanges)
+            {
+                var refreshed = await RefreshOperationalSnapshotAsync();
+                DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
+                    refreshed ? "Tenant changes synchronized to Desktop SQLite. Refresh this workspace."
+                        : "Changes saved online. Local catalog refresh is unavailable; reconnect and refresh before using edited items.");
+            }
+        }
+        catch (Exception ex)
+        {
+            DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+        }
+    }
+
+    private static async Task<bool> RefreshOperationalSnapshotAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        return await new BusinessOS.Restaurant.Sync.OperationalDataRefreshService(
+            new BusinessOS.Restaurant.Licensing.WindowsActivationStore(),
+            new BusinessOS.Restaurant.Authentication.WindowsSessionStore(),
+            new BusinessOS.Restaurant.Licensing.ConnectionSettingsStore(),
+            new BusinessOS.Restaurant.Sync.CloudOperationalDataClient(http),
+            new OperationalSnapshotStore(new LocalDatabaseFactory())).RefreshIfPossibleAsync();
     }
 
     private static async Task<FrameworkElement> DashboardAsync(LanDiagnosticsViewModel diagnostics)
@@ -268,96 +305,10 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Available", nameof(MenuRow.Available), 100));
         var panel = Stack();
         panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
-        var create = new Button { Content = "+ Add Menu Item", MinWidth = 165, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
-        create.Click += (_, _) =>
-        {
-            var dialog = new Window
-            {
-                Title = "New Menu Item",
-                Width = 500,
-                Height = 480,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ResizeMode = ResizeMode.NoResize,
-            };
-            var owner = System.Windows.Application.Current?.MainWindow;
-            if (owner is not null) dialog.Owner = owner;
-            var content = Stack();
-            content.Margin = new Thickness(20);
-            using var categoryDb = factory.Create();
-            var categories = categoryDb.MenuCategories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToList();
-            var category = new ComboBox { ItemsSource = categories, DisplayMemberPath = "Name", SelectedIndex = categories.Count > 0 ? 0 : -1, Height = 36 };
-            var name = new TextBox { Height = 36 };
-            var sku = new TextBox { Height = 36 };
-            var price = new TextBox { Height = 36 };
-            var image = new TextBox { Height = 36, IsReadOnly = true };
-            var browse = new Button { Content = "Choose image", Height = 36 };
-            browse.Click += (_, _) =>
-            {
-                var picker = new Microsoft.Win32.OpenFileDialog
-                {
-                    Filter = "Images|*.png;*.jpg;*.jpeg;*.webp",
-                    Title = "Select menu image",
-                };
-                if (picker.ShowDialog(dialog) == true) image.Text = picker.FileName;
-            };
-            foreach (var entry in new (string Label, FrameworkElement Input)[]
-            {
-                ("Name", name), ("SKU", sku), ("Category", category),
-                ("Price AFN", price), ("Image", image),
-            })
-            {
-                content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 7, 0, 3) });
-                content.Children.Add(entry.Input);
-            }
-            content.Children.Add(browse);
-            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
-            content.Children.Add(feedback);
-            var save = new Button { Content = "Save Menu Item", Height = 38 };
-            save.Click += async (_, _) =>
-            {
-                try
-                {
-                    if (string.IsNullOrWhiteSpace(name.Text))
-                        throw new InvalidOperationException("Enter a menu item name.");
-                    if (!decimal.TryParse(price.Text, out var amount) || amount < 0)
-                        throw new InvalidOperationException("Enter a valid price.");
-                    save.IsEnabled = false;
-                    string? imageUrl = null;
-                    if (!string.IsNullOrWhiteSpace(image.Text))
-                    {
-                        var extension = System.IO.Path.GetExtension(image.Text).ToLowerInvariant();
-                        if (extension is not (".png" or ".jpg" or ".jpeg" or ".webp"))
-                            throw new InvalidOperationException("Unsupported image format.");
-                        var folder = System.IO.Path.Combine(
-                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                            "BusinessOS", "Restaurant", "menu-images");
-                        System.IO.Directory.CreateDirectory(folder);
-                        var fileName = Guid.NewGuid().ToString("N") + extension;
-                        System.IO.File.Copy(image.Text, System.IO.Path.Combine(folder, fileName));
-                        imageUrl = "/menu-images/" + fileName;
-                    }
-                    await using var writeDb = factory.Create();
-                    writeDb.MenuItems.Add(new LocalMenuItem
-                    {
-                        Id = Guid.NewGuid().ToString("N"),
-                        Name = name.Text.Trim(),
-                        Sku = string.IsNullOrWhiteSpace(sku.Text) ? null : sku.Text.Trim(),
-                        MenuCategoryId = (category.SelectedItem as LocalMenuCategory)?.Id,
-                        Price = amount,
-                        Currency = "AFN",
-                        ImageUrl = imageUrl,
-                        IsAvailable = true,
-                    });
-                    await writeDb.SaveChangesAsync();
-                    dialog.DialogResult = true;
-                }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
-            };
-            content.Children.Add(save);
-            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Menu item created. Refresh Menu to see it.");
-        };
+        // Menus are cloud-owned reference records. Editing only the SQLite
+        // snapshot would silently disappear after the next cloud refresh.
+        var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         recipes.Click += async (_, _) =>
         {
@@ -381,6 +332,10 @@ internal static class RestaurantOperationalPages
             dialog.Content = recipeGrid;
             dialog.ShowDialog();
         };
+        // Cloud-owned catalog edits never disappear on the next snapshot refresh.
+        var editCatalog = new Button { Content = "+ Create / Edit Menu, Categories & Images", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editCatalog.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        panel.Children.Add(editCatalog);
         panel.Children.Add(create);
         panel.Children.Add(recipes);
         var recipeCreate = new Button { Content = "+ Create Recipe Version", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
@@ -614,7 +569,79 @@ internal static class RestaurantOperationalPages
             if (dialog.ShowDialog() == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created. Refresh Inventory to see it.");
         };
+        var editInventory = new Button { Content = "Edit Ingredients & Units (Online)", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
+        panel.Children.Add(editInventory);
         panel.Children.Add(create);
+
+        var adjustStock = new Button { Content = "+ Adjust Stock Quantity", Height = 38, MinWidth = 190, Margin = new Thickness(0, 6, 0, 12) };
+        adjustStock.Click += async (_, _) =>
+        {
+            try
+            {
+                await using var lookup = factory.Create();
+                var branchRows = await lookup.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+                var ingredientRows = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+                var dialog = new Window { Title = "Audited stock adjustment", Width = 480, Height = 400,
+                    MinHeight = 355, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = System.Windows.Application.Current?.MainWindow };
+                var form = Stack();
+                form.Margin = new Thickness(18);
+                var branch = new ComboBox { ItemsSource = branchRows, DisplayMemberPath = "Name", SelectedIndex = branchRows.Count > 0 ? 0 : -1, Height = 34 };
+                var item = new ComboBox { ItemsSource = ingredientRows, DisplayMemberPath = "Name", SelectedIndex = ingredientRows.Count > 0 ? 0 : -1, Height = 34 };
+                var delta = new TextBox { Text = "0", Height = 34 };
+                var reason = new TextBox { Height = 34 };
+                foreach (var field in new (string Label, FrameworkElement Input)[]
+                {
+                    ("Branch", branch), ("Ingredient", item),
+                    ("Quantity difference in stock units (+ received / - lost)", delta),
+                    ("Reason (required for audit)", reason),
+                })
+                {
+                    form.Children.Add(new TextBlock { Text = field.Label, Margin = new Thickness(0, 8, 0, 4), TextWrapping = TextWrapping.Wrap });
+                    form.Children.Add(field.Input);
+                }
+                form.Children.Add(new TextBlock
+                {
+                    Text = "Quantity corrections retain existing average valuation. Use Purchase & Receive to establish the original unit cost.",
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 10),
+                });
+                var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                var save = new Button { Content = "Post audited adjustment", Height = 38 };
+                var adjustmentId = "DESKTOP-STOCK-" + Guid.CreateVersion7().ToString("N");
+                save.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                            item.SelectedItem is not LocalInventoryItem selectedItem)
+                            throw new InvalidOperationException("Select a branch and ingredient.");
+                        if (!decimal.TryParse(delta.Text, out var amount) || amount == 0)
+                            throw new InvalidOperationException("Enter a nonzero stock change.");
+                        if (string.IsNullOrWhiteSpace(reason.Text))
+                            throw new InvalidOperationException("Enter the reason for this correction.");
+                        if (amount < 0 && MessageBox.Show(dialog,
+                            $"Remove {Math.Abs(amount)} {selectedItem.BaseUnit} of {selectedItem.Name} from stock?",
+                            "Confirm negative stock adjustment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                            return;
+                        save.IsEnabled = false;
+                        var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                        await new LocalInventoryService(factory).AdjustAsync(
+                            selectedBranch.Id, selectedItem.Id, amount, adjustmentId,
+                            reason.Text.Trim(), actor, CancellationToken.None);
+                        dialog.DialogResult = true;
+                    }
+                    catch (Exception ex) { error.Text = ex.Message; save.IsEnabled = true; }
+                };
+                form.Children.Add(save);
+                form.Children.Add(error);
+                dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+                if (dialog.ShowDialog() == true)
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Audited stock adjustment posted. Refresh Inventory.");
+            }
+            catch (Exception ex) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
+        };
+        panel.Children.Add(adjustStock);
         panel.Children.Add(grid);
         return Scroll(panel);
     }
@@ -928,8 +955,8 @@ internal static class RestaurantOperationalPages
         staffGrid.Columns.Add(Column("Restaurant role", nameof(StaffRow.Role), 160));
         staffGrid.Columns.Add(Column("Active", nameof(StaffRow.Active), 100));
         panel.Children.Add(staffGrid);
-        // StaffUsers is a read-only synchronized identity projection. Creating
-        // records here would not provision login credentials or permissions.
+        // The local staff grid is a read-only projection; edits go through cloud
+        // owner/admin authorization and immediately create genuine login identities.
         var manageUsers = new Button
         {
             Content = "Add Users / Manage Roles",
@@ -941,25 +968,20 @@ internal static class RestaurantOperationalPages
         {
             try
             {
-                // The tenant portal owns account creation and password handling.
-                // Never pass the desktop bearer token in a URL or browser query.
-                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
-                if (session is null)
-                    throw new InvalidOperationException("Sign in before managing restaurant users.");
-                var role = session.User.Role.Trim().ToLowerInvariant();
-                if (role is not ("owner" or "admin"))
-                    throw new UnauthorizedAccessException("Only the restaurant owner or administrator can manage staff accounts.");
-                if (!Uri.TryCreate(session.TenantBaseUrl, UriKind.Absolute, out var baseUri) ||
-                    baseUri.Scheme != Uri.UriSchemeHttps)
-                    throw new InvalidOperationException("A secure tenant portal URL is required.");
-                var target = new Uri(baseUri, "/users");
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                    ?? throw new InvalidOperationException("Sign in before managing restaurant users.");
+                var dialog = new DesktopUserManagementWindow(session)
                 {
-                    FileName = target.AbsoluteUri,
-                    UseShellExecute = true,
-                });
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info,
-                    "Users & Roles opened in the secure tenant portal. Sign in there if requested.");
+                    Owner = System.Windows.Application.Current?.MainWindow,
+                };
+                dialog.ShowDialog();
+                if (dialog.SavedChanges)
+                {
+                    var refreshed = await RefreshOperationalSnapshotAsync();
+                    DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
+                        refreshed ? "Tenant staff synchronized. Refresh Users to see the updated roster."
+                            : "Accounts saved online; local staff refresh will occur when cloud sync is available.");
+                }
             }
             catch (Exception ex)
             {

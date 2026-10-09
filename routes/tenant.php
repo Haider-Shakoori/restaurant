@@ -50,6 +50,8 @@ use App\Http\Controllers\Tenant\SyncBootstrapController;
 use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
+use App\Http\Controllers\Tenant\TenantDesktopManagementController;
+use App\Http\Controllers\Tenant\TenantDesktopUsersController;
 use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
 use App\Http\Controllers\Tenant\TenantPortalSetupController;
@@ -79,7 +81,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
         ->name('tenant.web.login.store');
 
     Route::get('/', function (Request $request, EnsureTenantSubscriptionActive $subscription) {
-        if (! $request->expectsJson()) {
+        if ($request->expectsJson() === false) {
             return auth('tenant')->check() ? redirect('/dashboard') : redirect('/login');
         }
 
@@ -204,6 +206,29 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
+                Route::get('/desktop/management', [TenantDesktopManagementController::class, 'index']);
+                Route::post('/desktop/management/categories', [TenantDesktopManagementController::class, 'category']);
+                Route::patch('/desktop/management/categories/{menuCategory}', [TenantDesktopManagementController::class, 'category']);
+                Route::post('/desktop/management/menu-items', [TenantDesktopManagementController::class, 'menuItem']);
+                Route::patch('/desktop/management/menu-items/{menuItem}', [TenantDesktopManagementController::class, 'menuItem']);
+                Route::post('/desktop/management/menu-items/{menuItem}/image', [TenantDesktopManagementController::class, 'image']);
+                Route::post('/desktop/management/areas', [TenantDesktopManagementController::class, 'area']);
+                Route::patch('/desktop/management/areas/{diningArea}', [TenantDesktopManagementController::class, 'area']);
+                Route::post('/desktop/management/tables', [TenantDesktopManagementController::class, 'table']);
+                Route::patch('/desktop/management/tables/{diningTable}', [TenantDesktopManagementController::class, 'table']);
+                Route::post('/desktop/management/inventory', [TenantDesktopManagementController::class, 'inventory']);
+                Route::patch('/desktop/management/inventory/{inventoryItem}', [TenantDesktopManagementController::class, 'inventory']);
+            });
+
+            // Staff identity is cloud-owned: Windows Desktop uses authenticated API calls,
+            // never writes passwords or roles to its local SQLite projection.
+            Route::middleware('tenant.role:owner,admin')->group(function (): void {
+                Route::get('/desktop/users', [TenantDesktopUsersController::class, 'index']);
+                Route::post('/desktop/users', [TenantDesktopUsersController::class, 'store']);
+                Route::patch('/desktop/users/{user}', [TenantDesktopUsersController::class, 'update']);
+            });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
                 Route::post('/pairing-tokens', [WaiterPairingController::class, 'store'])

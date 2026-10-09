@@ -128,8 +128,8 @@ internal static class Program
         CheckNavigation(owner, "kitchen");
 
         await NavigateAsync(owner, "menu");
-        await CheckFormAsync(app, owner, "+ Add Menu Item", "New Menu Item", "Save Menu Item",
-            "Enter a menu item name.");
+        await CheckFormAsync(app, owner, "+ Add Menu Item (Tenant)",
+            "Restaurant · Catalog, Floors & Inventory", "Create", null);
 
         await NavigateAsync(owner, "inventory");
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
@@ -147,6 +147,8 @@ internal static class Program
 
         foreach (var route in new[] { "pos", "tables", "kitchen", "closing", "users" })
             await NavigateAsync(owner, route);
+        await CheckFormAsync(app, owner, "Add Users / Manage Roles",
+            "Restaurant · Users & Roles", "Create account", null);
 
         // A second real shell tests role visibility and command-level denial.
         await sessions.SaveAsync(TestSession("waiter"));
