@@ -53,6 +53,11 @@ jobs:
         run: |
           python -c "from PIL import Image; app=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantGlassBackground.jpg'; setup=r'desktop/src/BusinessOS.Restaurant.Desktop/Assets/RestaurantInstallerBackground.png'; a=Image.open(app); a.verify(); s=Image.open(setup); assert s.format == 'PNG', f'Installer background must be PNG, got {s.format}'; s.verify(); print(f'Validated {app} and installer-safe PNG {setup}')"
 
+      - name: Validate installer background contrast
+        working-directory: .
+        shell: pwsh
+        run: python tools/check_restaurant_installer_contrast.py
+
       - name: Restore
         run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
 
