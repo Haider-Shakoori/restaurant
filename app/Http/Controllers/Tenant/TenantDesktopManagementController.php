@@ -39,7 +39,7 @@ class TenantDesktopManagementController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
-        if ($menuCategory && array_key_exists('is_active', $data) && ! $data['is_active'] &&
+        if ($menuCategory && array_key_exists('is_active', $data) && $data['is_active'] === false &&
             MenuItem::query()->where('menu_category_id', $menuCategory->id)->where('is_available', true)->exists()) {
             throw ValidationException::withMessages(['is_active' => 'Archive or move available menu items before deactivating this category.']);
         }
@@ -47,7 +47,7 @@ class TenantDesktopManagementController extends Controller
         $entity = $menuCategory ?? new MenuCategory;
         $entity->name = trim($data['name']);
         $entity->is_active = $data['is_active'] ?? ($menuCategory?->is_active ?? true);
-        if (! $menuCategory) {
+        if ($menuCategory === null) {
             $entity->sort_order = 0;
         }
         $entity->save();
@@ -75,7 +75,7 @@ class TenantDesktopManagementController extends Controller
             'price' => $data['price'],
             'is_available' => $data['is_available'] ?? ($menuItem?->is_available ?? true),
         ]);
-        if (! $menuItem) {
+        if ($menuItem === null) {
             $entity->sort_order = 0;
         }
         $entity->save();
@@ -114,7 +114,7 @@ class TenantDesktopManagementController extends Controller
         $entity->branch_id = $data['branch_id'];
         $entity->name = trim($data['name']);
         $entity->is_active = $data['is_active'] ?? ($diningArea?->is_active ?? true);
-        if (! $diningArea) {
+        if ($diningArea === null) {
             $entity->sort_order = 0;
         }
         $entity->save();
@@ -132,7 +132,7 @@ class TenantDesktopManagementController extends Controller
             'is_active' => ['sometimes', 'boolean'],
         ]);
         $area = DiningArea::query()->findOrFail($data['dining_area_id']);
-        if (! $area->is_active) {
+        if ($area->is_active === false) {
             throw ValidationException::withMessages(['dining_area_id' => 'Select an active dining floor.']);
         }
         if ($diningTable && $diningTable->status !== DiningTable::STATUS_AVAILABLE &&
@@ -146,7 +146,7 @@ class TenantDesktopManagementController extends Controller
         $entity->name = trim($data['name']);
         $entity->capacity = (int) $data['capacity'];
         $entity->is_active = $data['is_active'] ?? ($diningTable?->is_active ?? true);
-        if (! $diningTable) {
+        if ($diningTable === null) {
             $entity->status = DiningTable::STATUS_AVAILABLE;
         }
         $entity->save();
@@ -171,7 +171,7 @@ class TenantDesktopManagementController extends Controller
             throw ValidationException::withMessages(['base_unit' => 'Units/conversions are locked once stock movements exist; use a new ingredient.']);
         }
 
-        if ($inventoryItem && array_key_exists('is_active', $data) && ! $data['is_active'] &&
+        if ($inventoryItem && array_key_exists('is_active', $data) && $data['is_active'] === false &&
             (InventoryBalance::query()->where('inventory_item_id', $inventoryItem->id)->where('quantity', '!=', 0)->exists() ||
              RecipeItem::query()->where('inventory_item_id', $inventoryItem->id)->exists())) {
             throw ValidationException::withMessages(['is_active' => 'Cannot archive an ingredient with stock or recipe references.']);
