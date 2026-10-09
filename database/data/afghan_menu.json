@@ -82,7 +82,7 @@
       "price_afn": 450,
       "preparation_time_minutes": 30,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/narenj-palaw.webp",
       "is_available": true
     },
     {
@@ -95,7 +95,7 @@
       "price_afn": 430,
       "preparation_time_minutes": 30,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/zamarud-palaw.webp",
       "is_available": true
     },
     {
@@ -108,7 +108,7 @@
       "price_afn": 300,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/shola-e-ghorbandi.webp",
       "is_available": true
     },
     {
@@ -134,7 +134,7 @@
       "price_afn": 280,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/masha-palaw.webp",
       "is_available": true
     },
     {
@@ -147,7 +147,7 @@
       "price_afn": 300,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/lobia-palaw.webp",
       "is_available": true
     },
     {
@@ -160,7 +160,7 @@
       "price_afn": 380,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/chicken-palaw.webp",
       "is_available": true
     },
     {
@@ -199,7 +199,7 @@
       "price_afn": 490,
       "preparation_time_minutes": 25,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/lamb-tikka-kebab.webp",
       "is_available": true
     },
     {
@@ -225,7 +225,7 @@
       "price_afn": 360,
       "preparation_time_minutes": 20,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/chicken-tikka-kebab.webp",
       "is_available": true
     },
     {
@@ -238,7 +238,7 @@
       "price_afn": 320,
       "preparation_time_minutes": 20,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/seekh-kebab.webp",
       "is_available": true
     },
     {
@@ -251,7 +251,7 @@
       "price_afn": 300,
       "preparation_time_minutes": 20,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/chapli-kebab.webp",
       "is_available": true
     },
     {
@@ -290,7 +290,7 @@
       "price_afn": 890,
       "preparation_time_minutes": 35,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/mixed-grill-platter.webp",
       "is_available": true
     },
     {
@@ -316,7 +316,7 @@
       "price_afn": 320,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/mantu.webp",
       "is_available": true
     },
     {
@@ -329,7 +329,7 @@
       "price_afn": 280,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/ashak.webp",
       "is_available": true
     },
     {
@@ -342,7 +342,7 @@
       "price_afn": 120,
       "preparation_time_minutes": 15,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/bolani-kachalu.webp",
       "is_available": true
     },
     {
@@ -381,7 +381,7 @@
       "price_afn": 130,
       "preparation_time_minutes": 15,
       "station_code": "GRILL",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/afghan-sambosa.webp",
       "is_available": true
     },
     {
@@ -394,7 +394,7 @@
       "price_afn": 220,
       "preparation_time_minutes": 20,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/badenjan-borani.webp",
       "is_available": true
     },
     {
@@ -420,7 +420,7 @@
       "price_afn": 250,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/aush.webp",
       "is_available": true
     },
     {
@@ -446,7 +446,7 @@
       "price_afn": 320,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/qorma-e-sabzi.webp",
       "is_available": true
     },
     {
@@ -459,7 +459,7 @@
       "price_afn": 420,
       "preparation_time_minutes": 30,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/qorma-e-gosht.webp",
       "is_available": true
     },
     {
@@ -498,7 +498,7 @@
       "price_afn": 260,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/qorma-e-bamya.webp",
       "is_available": true
     },
     {
@@ -524,7 +524,7 @@
       "price_afn": 240,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/qorma-e-lobia.webp",
       "is_available": true
     },
     {
@@ -537,7 +537,7 @@
       "price_afn": 350,
       "preparation_time_minutes": 25,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/qorma-e-kofta.webp",
       "is_available": true
     },
     {
@@ -576,7 +576,7 @@
       "price_afn": 330,
       "preparation_time_minutes": 30,
       "station_code": "MAIN",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/shorwa-e-gosht.webp",
       "is_available": true
     },
     {
@@ -615,7 +615,7 @@
       "price_afn": 30,
       "preparation_time_minutes": 10,
       "station_code": "SIDES",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/naan-e-afghani.webp",
       "is_available": true
     },
     {
@@ -680,7 +680,7 @@
       "price_afn": 140,
       "preparation_time_minutes": 10,
       "station_code": "DESSERT",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/firni.webp",
       "is_available": true
     },
     {
@@ -693,7 +693,7 @@
       "price_afn": 150,
       "preparation_time_minutes": 10,
       "station_code": "DESSERT",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/sheer-yakh.webp",
       "is_available": true
     },
     {
@@ -719,7 +719,7 @@
       "price_afn": 100,
       "preparation_time_minutes": 10,
       "station_code": "DESSERT",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/jalebi.webp",
       "is_available": true
     },
     {
@@ -784,7 +784,7 @@
       "price_afn": 80,
       "preparation_time_minutes": 5,
       "station_code": "DRINKS",
-      "image_path": null,
+      "image_path": "menu-items/afghan-sample/doogh.webp",
       "is_available": true
     },
     {
