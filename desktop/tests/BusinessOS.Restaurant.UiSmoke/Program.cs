@@ -261,7 +261,7 @@ internal static class Program
             {
                 var route = GalleryRoutes[index];
                 await NavigateAsync(window, route);
-                if (route is "settings" or "kitchen")
+                if (route is "settings" or "kitchen" or "pos")
                     AssertWorkspaceGlassSurface(window, theme, route);
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
