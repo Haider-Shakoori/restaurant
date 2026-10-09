@@ -266,6 +266,8 @@ internal static class Program
                     AssertWorkspaceGlassSurface(window, theme, route);
                 await CaptureWindowAsync(window,
                     Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
+                if (route == "settings")
+                    await CaptureSettingsTabsAsync(window, label);
                 AssertReadableActionButtons(window, label + "/" + route,
                     requireButtons: route is "tables" or "menu" or "pos");
             }
@@ -276,6 +278,48 @@ internal static class Program
         window.Height = 800;
         await NavigateAsync(window, "dashboard");
         Console.WriteLine("Gallery captured: 24 operational pages across Classic and Glass themes.");
+    }
+
+    private static async Task CaptureSettingsTabsAsync(MainWindow window, string themeLabel)
+    {
+        var tabs = Descendants<TabControl>(window)
+            .Single(x => x.Name == "RestaurantSettingsTabs");
+        var expected = new[]
+        {
+            ("kitchen", "Save restaurant workflow"),
+            ("backup", "Backup"),
+            ("printing", "Review & retry selected print"),
+            ("network", "Refresh status"),
+            ("devices", "Unpair device"),
+        };
+
+        Assert(tabs.Items.Count == expected.Length, "Settings contains five organized tabs");
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var (id, button) = expected[index];
+            var item = tabs.Items[index] as TabItem;
+            Assert(item is not null && string.Equals(item.Tag?.ToString(), id, StringComparison.Ordinal),
+                "Settings tab order includes " + id);
+            tabs.SelectedItem = item;
+            await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+            await Task.Delay(120);
+            Assert(ReferenceEquals(tabs.SelectedItem, item),
+                id + " tab is selectable and active");
+            Assert(tabs.SelectedContent is ScrollViewer,
+                id + " has an independently scrolling page");
+
+            // Check the selected tab's content, not inactive logical-tree items.
+            var content = (ScrollViewer)tabs.SelectedContent;
+            Assert(Descendants<Button>(content).Any(x =>
+                    string.Equals(x.Content?.ToString(), button, StringComparison.Ordinal)
+                    || (id == "backup" && x.Content?.ToString()?.Contains("backup", StringComparison.OrdinalIgnoreCase) == true)),
+                id + " retains its original action controls");
+            await CaptureWindowAsync(window, Path.Combine(GalleryDirectory,
+                themeLabel, "settings-tabs", $"{index + 1:00}-{id}.png"));
+        }
+
+        tabs.SelectedIndex = 0;
+        await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
     }
 
     private static double ContrastRatio(Color a, Color b)

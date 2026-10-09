@@ -83,7 +83,7 @@ jobs:
           $gallery = Join-Path $env:RUNNER_TEMP "restaurant-desktop-screenshots"
           if (!(Test-Path $gallery)) { throw "WPF screenshot directory was not created." }
           $images = @(Get-ChildItem $gallery -Filter '*.png' -Recurse)
-          if ($images.Count -lt 32) { throw "Expected 24 page + 6 modal + 2 authentication screenshots; found $($images.Count)." }
+          if ($images.Count -lt 42) { throw "Expected 24 page + 10 settings tabs + 6 modal + 2 authentication screenshots; found $($images.Count)." }
           foreach ($file in $images) {
             if ($file.Length -lt 2048) { throw "Blank/truncated screenshot: $($file.FullName)" }
           }
