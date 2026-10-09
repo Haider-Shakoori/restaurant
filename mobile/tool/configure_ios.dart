@@ -36,6 +36,16 @@ void main() {
   // suspended. The Apple-signed build still needs Push Notifications
   // capability and APNs credentials in Firebase Console.
   _ensureRemoteNotificationBackgroundMode(plist);
+  // Modern Firebase Apple SDKs require iOS 15 or later.
+  final podfile = File('ios/Podfile');
+  if (podfile.existsSync()) {
+    var pods = podfile.readAsStringSync();
+    pods = pods.replaceFirst(
+      RegExp(r"^#?\\s*platform :ios, '[0-9.]+'", multiLine: true),
+      "platform :ios, '15.0'",
+    );
+    podfile.writeAsStringSync(pods);
+  }
 
   _ensureDictionary(plist, 'NSAppTransportSecurity');
   _setBool(
