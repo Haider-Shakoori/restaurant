@@ -554,6 +554,75 @@ internal static class RestaurantOperationalPages
         editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
         panel.Children.Add(editInventory);
         panel.Children.Add(create);
+
+        var adjustStock = new Button { Content = "+ Adjust Stock Quantity", Height = 38, MinWidth = 190, Margin = new Thickness(0, 6, 0, 12) };
+        adjustStock.Click += async (_, _) =>
+        {
+            try
+            {
+                await using var lookup = factory.Create();
+                var branchRows = await lookup.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+                var ingredientRows = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+                var dialog = new Window { Title = "Audited stock adjustment", Width = 480, Height = 400,
+                    MinHeight = 355, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = System.Windows.Application.Current?.MainWindow };
+                var form = Stack();
+                form.Margin = new Thickness(18);
+                var branch = new ComboBox { ItemsSource = branchRows, DisplayMemberPath = "Name", SelectedIndex = branchRows.Count > 0 ? 0 : -1, Height = 34 };
+                var item = new ComboBox { ItemsSource = ingredientRows, DisplayMemberPath = "Name", SelectedIndex = ingredientRows.Count > 0 ? 0 : -1, Height = 34 };
+                var delta = new TextBox { Text = "0", Height = 34 };
+                var reason = new TextBox { Height = 34 };
+                foreach (var field in new (string Label, FrameworkElement Input)[]
+                {
+                    ("Branch", branch), ("Ingredient", item),
+                    ("Quantity difference in stock units (+ received / - lost)", delta),
+                    ("Reason (required for audit)", reason),
+                })
+                {
+                    form.Children.Add(new TextBlock { Text = field.Label, Margin = new Thickness(0, 8, 0, 4), TextWrapping = TextWrapping.Wrap });
+                    form.Children.Add(field.Input);
+                }
+                form.Children.Add(new TextBlock
+                {
+                    Text = "Quantity corrections retain existing average valuation. Use Purchase & Receive to establish the original unit cost.",
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 10),
+                });
+                var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                var save = new Button { Content = "Post audited adjustment", Height = 38 };
+                var adjustmentId = "DESKTOP-STOCK-" + Guid.CreateVersion7().ToString("N");
+                save.Click += async (_, _) =>
+                {
+                    try
+                    {
+                        if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                            item.SelectedItem is not LocalInventoryItem selectedItem)
+                            throw new InvalidOperationException("Select a branch and ingredient.");
+                        if (!decimal.TryParse(delta.Text, out var amount) || amount == 0)
+                            throw new InvalidOperationException("Enter a nonzero stock change.");
+                        if (string.IsNullOrWhiteSpace(reason.Text))
+                            throw new InvalidOperationException("Enter the reason for this correction.");
+                        if (amount < 0 && MessageBox.Show(dialog,
+                            $"Remove {Math.Abs(amount)} {selectedItem.BaseUnit} of {selectedItem.Name} from stock?",
+                            "Confirm negative stock adjustment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                            return;
+                        save.IsEnabled = false;
+                        var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                        await new LocalInventoryService(factory).AdjustAsync(
+                            selectedBranch.Id, selectedItem.Id, amount, adjustmentId,
+                            reason.Text.Trim(), actor, CancellationToken.None);
+                        dialog.DialogResult = true;
+                    }
+                    catch (Exception ex) { error.Text = ex.Message; save.IsEnabled = true; }
+                };
+                form.Children.Add(save);
+                form.Children.Add(error);
+                dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+                if (dialog.ShowDialog() == true)
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Audited stock adjustment posted. Refresh Inventory.");
+            }
+            catch (Exception ex) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
+        };
+        panel.Children.Add(adjustStock);
         panel.Children.Add(grid);
         return Scroll(panel);
     }
