@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
 import '../../core/models/session_credentials.dart';
-import 'menu_image_request.dart';
+import 'menu_item_photo.dart';
 
 class OrderScreen extends StatefulWidget {
   const OrderScreen({
@@ -1079,7 +1079,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 Expanded(
                   child: SizedBox(
                     width: double.infinity,
-                    child: _MenuItemImage(
+                    child: MenuItemPhoto(
                       imageUrl: item['image_url']?.toString(),
                       credentials: _imageSession,
                     ),
@@ -1392,49 +1392,26 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _bottomNav() {
-    const entries = [
-      (Icons.home_rounded, 'Home'),
-      (Icons.table_restaurant_rounded, 'Tables'),
-      (Icons.receipt_long_rounded, 'Orders'),
-      (Icons.soup_kitchen_rounded, 'Kitchen'),
-      (Icons.more_horiz_rounded, 'More'),
-    ];
-
+    // Do not advertise dead tabs: available actions must be functional.
     return Container(
-      height: 60,
+      height: 58,
       color: const Color(0xFF171B20),
-      child: Row(
-        children: List.generate(entries.length, (index) {
-          final selected = index == 0;
-          final entry = entries[index];
-
-          return Expanded(
-            child: InkWell(
-              onTap: index == 1 ? () => Navigator.of(context).maybePop() : null,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    entry.$1,
-                    size: 20,
-                    color: selected ? const Color(0xFFFFD96B) : Colors.white54,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.$2,
-                    style: TextStyle(
-                      color: selected
-                          ? const Color(0xFFFFD96B)
-                          : Colors.white54,
-                      fontSize: 10,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
+      child: Row(children: [
+        Expanded(child: TextButton.icon(
+          onPressed: null,
+          icon: const Icon(Icons.restaurant_menu_rounded,
+              color: Color(0xFFFFD96B)),
+          label: const Text('Menu',
+              style: TextStyle(color: Color(0xFFFFD96B))),
+        )),
+        Expanded(child: TextButton.icon(
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.table_restaurant_rounded,
+              color: Colors.white),
+          label: const Text('Tables',
+              style: TextStyle(color: Colors.white)),
+        )),
+      ]),
     );
   }
 
@@ -1449,39 +1426,6 @@ class _OrderScreenState extends State<OrderScreen> {
       default:
         return 'Dine In';
     }
-  }
-}
-
-class _MenuItemImage extends StatelessWidget {
-  const _MenuItemImage({required this.imageUrl, required this.credentials});
-
-  final String? imageUrl;
-  final SessionCredentials? credentials;
-
-  @override
-  Widget build(BuildContext context) {
-    final request = resolveMenuImageRequest(imageUrl, credentials);
-
-    if (request == null) return _placeholder(context);
-
-    return Image.network(
-      request.url,
-      headers: request.headers,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stackTrace) => _placeholder(context),
-    );
-  }
-
-  Widget _placeholder(BuildContext context) {
-    return Container(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      alignment: Alignment.center,
-      child: Icon(
-        Icons.restaurant_menu,
-        size: 34,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      ),
-    );
   }
 }
 
