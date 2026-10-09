@@ -102,6 +102,73 @@ public sealed class PremiumGlassThemeTests
         Assert.Contains("SetResourceReference(Border.PaddingProperty", wrapper, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Classic_and_Glass_buttons_have_distinct_accessible_palettes_and_real_text_inheritance()
+    {
+        var classic = Load("Themes", "Classic.xaml");
+        var glass = Load("Themes", "Glass.xaml");
+
+        Assert.Equal("#2563EB", BrushColor(classic, "ButtonPrimaryBrush"));
+        Assert.Equal("#F3C969", BrushColor(glass, "ButtonPrimaryBrush"));
+        Assert.Equal("#FFFFFF", BrushColor(classic, "ButtonForegroundBrush"));
+        Assert.Equal("#111827", BrushColor(glass, "ButtonForegroundBrush"));
+
+        foreach (var theme in new[] { classic, glass })
+        {
+            foreach (var (backgroundKey, foregroundKey) in new[]
+            {
+                ("ButtonPrimaryBrush", "ButtonForegroundBrush"),
+                ("ButtonHoverBrush", "ButtonForegroundBrush"),
+                ("ButtonPressedBrush", "ButtonForegroundBrush"),
+                ("ButtonSecondaryBackgroundBrush", "ButtonSecondaryForegroundBrush"),
+                ("ButtonSecondaryHoverBrush", "ButtonSecondaryForegroundBrush"),
+                ("ButtonSecondaryPressedBrush", "ButtonSecondaryForegroundBrush"),
+                ("ButtonDisabledBackgroundBrush", "ButtonDisabledForegroundBrush"),
+            })
+            {
+                var background = BrushColor(theme, backgroundKey);
+                var foreground = BrushColor(theme, foregroundKey);
+                Assert.True(ColorContrast(background, foreground) >= 4.5,
+                    $"Poor contrast between {backgroundKey} {background} and {foregroundKey} {foreground}.");
+            }
+        }
+
+        var app = Load("App.xaml");
+        Assert.Contains(app.Descendants(), element =>
+            element.Name.LocalName == "ResourceDictionary" &&
+            (string?)element.Attribute("Source") == "Styles/Buttons.xaml");
+        var buttons = Load("Styles", "Buttons.xaml");
+        var markup = buttons.ToString();
+        Assert.Contains("TextElement.Foreground", markup);
+        Assert.Contains("AncestorType={x:Type Button}", markup);
+        Assert.Contains("PremiumActionTemplate", markup);
+        Assert.Contains("PrimaryActionButton", markup);
+        Assert.Contains("SecondaryActionButton", markup);
+        Assert.Contains("ButtonSecondaryHoverBrush", markup);
+    }
+
+    private static double ColorContrast(string background, string foreground)
+    {
+        static double Channel(string hex, int start)
+        {
+            var value = Convert.ToInt32(hex.Substring(start, 2), 16) / 255d;
+            return value <= 0.04045 ? value / 12.92 :
+                Math.Pow((value + 0.055) / 1.055, 2.4);
+        }
+
+        static double Luminance(string hex)
+        {
+            var offset = hex.Length == 9 ? 3 : 1;
+            return 0.2126 * Channel(hex, offset) +
+                   0.7152 * Channel(hex, offset + 2) +
+                   0.0722 * Channel(hex, offset + 4);
+        }
+
+        var a = Luminance(background);
+        var b = Luminance(foreground);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
+
     private static string RepositoryRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
