@@ -62,7 +62,19 @@ jobs:
           flutter test
 
       - name: Build release APK
-        run: flutter build apk --release
+        env:
+          RESTAURANT_FIREBASE_API_KEY: ${{ vars.RESTAURANT_FIREBASE_API_KEY }}
+          RESTAURANT_FIREBASE_ANDROID_APP_ID: ${{ vars.RESTAURANT_FIREBASE_ANDROID_APP_ID }}
+          RESTAURANT_FIREBASE_IOS_APP_ID: ${{ vars.RESTAURANT_FIREBASE_IOS_APP_ID }}
+          RESTAURANT_FIREBASE_SENDER_ID: ${{ vars.RESTAURANT_FIREBASE_SENDER_ID }}
+          RESTAURANT_FIREBASE_PROJECT_ID: ${{ vars.RESTAURANT_FIREBASE_PROJECT_ID }}
+        run: |
+          flutter build apk --release \
+            --dart-define=RESTAURANT_FIREBASE_API_KEY="$RESTAURANT_FIREBASE_API_KEY" \
+            --dart-define=RESTAURANT_FIREBASE_ANDROID_APP_ID="$RESTAURANT_FIREBASE_ANDROID_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_IOS_APP_ID="$RESTAURANT_FIREBASE_IOS_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_SENDER_ID="$RESTAURANT_FIREBASE_SENDER_ID" \
+            --dart-define=RESTAURANT_FIREBASE_PROJECT_ID="$RESTAURANT_FIREBASE_PROJECT_ID"
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
@@ -93,7 +105,7 @@ jobs:
           flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
           rm -f test/widget_test.dart
 
-      - name: Configure iOS QR camera disclosure
+      - name: Configure iOS camera, LAN and push permissions
         run: dart run tool/configure_ios.dart
 
       - name: Generate premium Restaurant launcher icon
@@ -114,7 +126,19 @@ jobs:
           flutter test
 
       - name: Build unsigned iOS app
-        run: flutter build ios --release --no-codesign
+        env:
+          RESTAURANT_FIREBASE_API_KEY: ${{ vars.RESTAURANT_FIREBASE_API_KEY }}
+          RESTAURANT_FIREBASE_ANDROID_APP_ID: ${{ vars.RESTAURANT_FIREBASE_ANDROID_APP_ID }}
+          RESTAURANT_FIREBASE_IOS_APP_ID: ${{ vars.RESTAURANT_FIREBASE_IOS_APP_ID }}
+          RESTAURANT_FIREBASE_SENDER_ID: ${{ vars.RESTAURANT_FIREBASE_SENDER_ID }}
+          RESTAURANT_FIREBASE_PROJECT_ID: ${{ vars.RESTAURANT_FIREBASE_PROJECT_ID }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=RESTAURANT_FIREBASE_API_KEY="$RESTAURANT_FIREBASE_API_KEY" \
+            --dart-define=RESTAURANT_FIREBASE_ANDROID_APP_ID="$RESTAURANT_FIREBASE_ANDROID_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_IOS_APP_ID="$RESTAURANT_FIREBASE_IOS_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_SENDER_ID="$RESTAURANT_FIREBASE_SENDER_ID" \
+            --dart-define=RESTAURANT_FIREBASE_PROJECT_ID="$RESTAURANT_FIREBASE_PROJECT_ID"
 
       - name: Validate built iOS permissions
         shell: bash
@@ -125,10 +149,12 @@ jobs:
           CAMERA=$(/usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$PLIST")
           LOCAL=$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$PLIST")
           LAN=$(/usr/libexec/PlistBuddy -c "Print :NSAppTransportSecurity:NSAllowsLocalNetworking" "$PLIST")
+          PUSH=$(/usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PLIST")
 
           test "$CAMERA" = "Scan the BusinessOS Restaurant Desktop pairing QR code."
           test "$LOCAL" = "Connect directly to BusinessOS Restaurant Desktop over the restaurant Wi-Fi or LAN."
           test "$LAN" = "true"
+          [[ "$PUSH" == *"remote-notification"* ]]
 
           echo "Verified final Runner.app camera and local-network permissions."
 
