@@ -45,8 +45,7 @@ class RestaurantModulesController extends Controller
         if ($data['automatic_recipe_consumption_enabled'] &&
             (! $data['recipes_enabled'] || ! $data['inventory_enabled'])) {
             throw ValidationException::withMessages([
-                'automatic_recipe_consumption_enabled' =>
-                    'Automatic consumption requires both recipes and inventory.',
+                'automatic_recipe_consumption_enabled' => 'Automatic consumption requires both recipes and inventory.',
             ]);
         }
 
