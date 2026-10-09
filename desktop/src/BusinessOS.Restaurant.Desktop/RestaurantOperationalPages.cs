@@ -49,8 +49,10 @@ internal static class RestaurantOperationalPages
             {
                 var refreshed = await RefreshOperationalSnapshotAsync();
                 DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
-                    refreshed ? "Tenant changes synchronized to Desktop SQLite. Refresh this workspace."
-                        : "Changes saved online. Local catalog refresh is unavailable; reconnect and refresh before using edited items.");
+                    refreshed ? "Restaurant catalog synchronized."
+                        : "Saved online. Reconnect and sync to update local data.");
+                if (refreshed && System.Windows.Application.Current.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
             }
         }
         catch (Exception ex)
