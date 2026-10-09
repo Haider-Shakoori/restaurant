@@ -103,6 +103,8 @@ void main() {
       expect((await database.order('counter-1'))!['table_id'], isNull);
       expect(await database.pendingCount(), 3);
 
+      await database.close();
+
       // The migration must also retain the order-status query index.
       final migrated = await openDatabase(databasePath);
       final columns = await migrated.rawQuery('PRAGMA table_info(orders)');
