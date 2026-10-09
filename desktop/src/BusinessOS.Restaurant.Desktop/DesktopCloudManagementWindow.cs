@@ -56,6 +56,7 @@ internal sealed class DesktopCloudManagementWindow : Window
             TextWrapping = TextWrapping.Wrap,
         });
         var reload = new Button { Content = "Refresh from tenant", Height = 34, Width = 174, Margin = new Thickness(0, 9, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        reload.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         reload.Click += async (_, _) => await RefreshAsync();
         heading.Children.Add(reload);
         heading.Children.Add(_status);
@@ -260,6 +261,7 @@ internal sealed class DesktopCloudManagementWindow : Window
             };
             sidebar.Children.Add(_rows);
             var create = new Button { Content = "+ New " + title.TrimEnd('s'), Height = 36, Margin = new Thickness(0, 10, 0, 0) };
+            create.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             create.Click += (_, _) => Clear();
             sidebar.Children.Add(create);
             sidebar.Children.Add(new TextBlock { Text = "Production KOT and prior receipts stay immutable. In-use tables cannot be moved or disabled.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) });
@@ -282,6 +284,7 @@ internal sealed class DesktopCloudManagementWindow : Window
             if (AllowImage)
             {
                 var choose = new Button { Content = "Choose / replace menu image", Height = 34, Margin = new Thickness(0, 12, 0, 4) };
+                choose.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
                 choose.Click += (_, _) =>
                 {
                     var picker = new OpenFileDialog { Filter = "Menu images|*.jpg;*.jpeg;*.png;*.webp" };
