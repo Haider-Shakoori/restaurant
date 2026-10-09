@@ -188,6 +188,27 @@ class MobileApiClient implements SyncApi, ServerProbe {
     ).then(_data);
   }
 
+  Future<void> registerPushDevice(
+    SessionCredentials credentials, {
+    required String token,
+    required String platform,
+  }) async {
+    await _request(
+      'POST',
+      _uri(credentials.baseUrl, '/api/v1/push/devices'),
+      headers: _authHeaders(credentials),
+      body: <String, Object?>{'token': token, 'platform': platform},
+    );
+  }
+
+  Future<void> unregisterPushDevice(SessionCredentials credentials) async {
+    await _request(
+      'DELETE',
+      _uri(credentials.baseUrl, '/api/v1/push/devices'),
+      headers: _authHeaders(credentials),
+    );
+  }
+
   Map<String, String> _authHeaders(SessionCredentials credentials) {
     return <String, String>{
       ..._deviceHeaders(credentials),
