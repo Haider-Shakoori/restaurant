@@ -16,6 +16,7 @@ void main() {
   final permissions = <String>[
     'android.permission.INTERNET',
     'android.permission.CAMERA',
+    'android.permission.POST_NOTIFICATIONS',
   ];
 
   for (final permission in permissions) {
