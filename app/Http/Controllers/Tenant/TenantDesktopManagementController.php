@@ -7,9 +7,9 @@ use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\InventoryBalance;
 use App\Models\InventoryItem;
-use App\Models\RecipeItem;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
+use App\Models\RecipeItem;
 use App\Models\RestaurantBranch;
 use App\Models\StockMovement;
 use Illuminate\Http\JsonResponse;
@@ -105,7 +105,7 @@ class TenantDesktopManagementController extends Controller
         ]);
 
         if ($diningArea &&
-            ((string) $diningArea->branch_id !== (string) $data['branch_id'] || ! ($data['is_active'] ?? true)) &&
+            ((string) $diningArea->branch_id !== (string) $data['branch_id'] || ($data['is_active'] ?? true) === false) &&
             DiningTable::query()->where('dining_area_id', $diningArea->id)->where('status', '!=', DiningTable::STATUS_AVAILABLE)->exists()) {
             throw ValidationException::withMessages(['name' => 'Move or close all occupied tables before changing the floor branch or disabling it.']);
         }
@@ -136,7 +136,7 @@ class TenantDesktopManagementController extends Controller
             throw ValidationException::withMessages(['dining_area_id' => 'Select an active dining floor.']);
         }
         if ($diningTable && $diningTable->status !== DiningTable::STATUS_AVAILABLE &&
-            ((string) $diningTable->dining_area_id !== (string) $data['dining_area_id'] || ! ($data['is_active'] ?? true))) {
+            ((string) $diningTable->dining_area_id !== (string) $data['dining_area_id'] || ($data['is_active'] ?? true) === false)) {
             throw ValidationException::withMessages(['dining_area_id' => 'An occupied table cannot be moved or deactivated.']);
         }
 
