@@ -23,7 +23,7 @@ public sealed class RecipeUnitConversionTests
     {
         Assert.Throws<ArgumentException>(() => RecipeUnitConversion.ToBase(2, "ml", "g"));
         Assert.Throws<ArgumentException>(() => RecipeUnitConversion.ToBase(0.5m, "pcs", "pcs"));
-        Assert.Throws<ArgumentException>(() => RecipeUnitConversion.ToBase(0, "kg", "g"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => RecipeUnitConversion.ToBase(0, "kg", "g"));
         Assert.Throws<ArgumentException>(() => RecipeUnitConversion.ToBase(0.0000001m, "kg", "kg"));
         Assert.Equal(new[] { "g", "kg" }, RecipeUnitConversion.AllowedUnits("g"));
         Assert.Equal(new[] { "ml", "l" }, RecipeUnitConversion.AllowedUnits("l"));
