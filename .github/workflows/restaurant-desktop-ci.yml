@@ -77,6 +77,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "WPF control interaction smoke test failed." }
 
 
+      - name: Validate real WPF screenshot gallery
+        shell: pwsh
+        run: |
+          $gallery = Join-Path $env:RUNNER_TEMP "restaurant-desktop-screenshots"
+          if (!(Test-Path $gallery)) { throw "WPF screenshot directory was not created." }
+          $images = @(Get-ChildItem $gallery -Filter '*.png' -Recurse)
+          if ($images.Count -lt 32) { throw "Expected 24 page + 6 modal + 2 authentication screenshots; found $($images.Count)." }
+          foreach ($file in $images) {
+            if ($file.Length -lt 2048) { throw "Blank/truncated screenshot: $($file.FullName)" }
+          }
+          python -c "from pathlib import Path; from PIL import Image, ImageStat; import sys; ps=list(Path(sys.argv[1]).rglob('*.png')); bad=[str(p) for p in ps if ImageStat.Stat(Image.open(p).convert('L')).stddev[0]<2.0]; assert not bad, f'Screenshots appear blank: {bad}'; print(f'Validated {len(ps)} WPF PNG screenshots with real visual detail')" "$gallery"
+
+      - name: Upload Windows desktop page screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BusinessOS-Restaurant-Desktop-Screenshots
+          path: ${{ runner.temp }}/restaurant-desktop-screenshots/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Test
         run: dotnet test BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build
 
