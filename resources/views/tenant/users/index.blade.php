@@ -5,7 +5,12 @@
 @section('subheading', 'Owner, manager, waiter, cashier, kitchen and inventory access.')
 
 @section('content')
-    <div class="grid gap-6 lg:grid-cols-[1fr_22rem]">
+    <div x-data="{ query: '' }" class="space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div><h2 class="text-lg font-black">Staff directory</h2><p class="text-xs text-slate-500">{{ $users->count() }} staff accounts · Controlled role access</p></div>
+            <input x-model="query" type="search" placeholder="Search staff name or email" class="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm sm:w-80">
+        </div>
+        <div class="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div class="overflow-x-auto">
                 <table class="min-w-full text-left text-sm">
@@ -14,7 +19,7 @@
                     </thead>
                     <tbody class="divide-y divide-slate-100">
                         @forelse ($users as $user)
-                            <tr>
+                            <tr x-show="@js(strtolower($user->name.' '.$user->email)).includes(query.toLowerCase())">
                                 <td class="px-5 py-4 font-bold">{{ $user->name }}</td>
                                 <td class="px-5 py-4">{{ $user->email ?: '—' }}</td>
                                 <td class="px-5 py-4 capitalize">{{ $user->role }}</td>
@@ -79,5 +84,6 @@
                 </form>
             </section>
         </aside>
+        </div>
     </div>
 @endsection
