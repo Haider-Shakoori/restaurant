@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -183,7 +184,7 @@ internal static class Program
 
         // Schedule the click instead of invoking ShowDialog inline: WPF's nested
         // dispatcher frame can then show the modal while this runner awaits it.
-        main.Dispatcher.BeginInvoke(new Action(() => Click(create)), DispatcherPriority.Normal);
+        _ = main.Dispatcher.BeginInvoke(new Action(() => Click(create)), DispatcherPriority.Normal);
         try
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
