@@ -42,6 +42,12 @@
     <SolidColorBrush x:Key="SuccessBrush" Color="#039855" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#C0ECFDF3" />
     <SolidColorBrush x:Key="HoverBrush" Color="#8AFFFFFF" />
+    <!-- Premium charcoal actions with warm-gold interaction affordances. -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#19212D" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#313E50" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#101722" />
+    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#45505D" />
+    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#E9BC58" />
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
 
     <!-- WPF cannot do real backdrop-filter blur; blur the artwork and layer translucent surfaces over it. -->
