@@ -178,6 +178,14 @@ class InventoryService
                 return $existing->load('lines.inventoryItem');
             }
 
+            // Module switches affect new reservations only. Existing reservations
+            // still settle normally so stock and financial history remain correct.
+            $modules = $this->settings->all();
+            if (! $modules['recipes_enabled'] || ! $modules['inventory_enabled'] ||
+                ! $modules['automatic_recipe_consumption_enabled']) {
+                return null;
+            }
+
             $order = $productionItem->ticket->order;
             $branch = $order->branch ?? $order->table?->diningArea?->branch;
 
@@ -479,7 +487,10 @@ class InventoryService
                 ],
             );
 
-            if ($productionItems->isEmpty() && $consumption->lines()->doesntExist()) {
+            $modules = $this->settings->all();
+            if ($productionItems->isEmpty() && $consumption->lines()->doesntExist() &&
+                $modules['recipes_enabled'] && $modules['inventory_enabled'] &&
+                $modules['automatic_recipe_consumption_enabled']) {
                 $menuItemIds = $order->items()->pluck('menu_item_id')->filter()->unique();
                 $recipes = Recipe::query()
                     ->where('branch_id', $branch->id)
