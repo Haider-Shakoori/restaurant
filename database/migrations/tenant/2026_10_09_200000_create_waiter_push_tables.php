@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('waiter_push_devices', function (Blueprint $table): void {
             $table->id();
             $table->string('central_device_id', 40)->unique();
-            $table->foreignId('tenant_user_id')->constrained('tenant_users')->cascadeOnDelete();
+            $table->foreignId('tenant_user_id')->constrained('users')->cascadeOnDelete();
             $table->text('fcm_token');
             $table->string('platform', 12);
             $table->boolean('enabled')->default(true);
