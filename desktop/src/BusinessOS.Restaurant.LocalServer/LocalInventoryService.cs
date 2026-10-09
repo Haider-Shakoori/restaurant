@@ -11,6 +11,25 @@ public sealed record LocalReceivePurchaseOrderLineRequest(string PurchaseOrderLi
 public sealed class LocalInventoryService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static async Task<bool> ModuleEnabledAsync(
+        RestaurantDbContext db, string key, CancellationToken token)
+    {
+        var stored = await db.RestaurantSettings.AsNoTracking()
+            .Where(x => x.Key == key).Select(x => x.Value).FirstOrDefaultAsync(token);
+        // Older installations without module settings keep existing features on.
+        return stored is null || !bool.TryParse(stored, out var enabled) || enabled;
+    }
+
+    private static async Task RequireModuleAsync(
+        RestaurantDbContext db, string key, CancellationToken token)
+    {
+        if (!await ModuleEnabledAsync(db, key, token) ||
+            key == "purchasing_enabled" && !await ModuleEnabledAsync(db, "inventory_enabled", token))
+            throw new LocalSyncConflictException("module_disabled",
+                "This module is disabled in the restaurant's synchronized settings.");
+    }
+
+
     private readonly LocalDatabaseFactory _databaseFactory;
 
     public LocalInventoryService(LocalDatabaseFactory databaseFactory)
@@ -46,6 +65,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "inventory_enabled", cancellationToken);
 
         var normalizedSku = sku.Trim().ToUpperInvariant();
 
@@ -192,6 +212,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "purchasing_enabled", cancellationToken);
 
         var normalizedCode = code.Trim().ToUpperInvariant();
         if (await db.Suppliers.AnyAsync(value => value.Code == normalizedCode, cancellationToken))
@@ -278,6 +299,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "recipes_enabled", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         if (!await db.Branches.AnyAsync(value => value.Id == branchId && value.IsActive, cancellationToken))
@@ -436,6 +458,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "inventory_enabled", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var item = await RequireInventoryItemAsync(db, inventoryItemId, cancellationToken);
@@ -559,6 +582,13 @@ public sealed class LocalInventoryService
         {
             return existing;
         }
+
+        // Disabling automatic tracking must never erase or abandon an existing
+        // reservation, but new kitchen work must not deduct ingredients.
+        if (!await ModuleEnabledAsync(db, "recipes_enabled", cancellationToken) ||
+            !await ModuleEnabledAsync(db, "inventory_enabled", cancellationToken) ||
+            !await ModuleEnabledAsync(db, "automatic_recipe_consumption_enabled", cancellationToken))
+            return null;
 
         var orderItem = await db.OrderItems.SingleAsync(
             value => value.Id == kitchenItem.OrderItemId,
@@ -894,6 +924,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "purchasing_enabled", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         await RequireBranchAsync(db, branchId, cancellationToken);
@@ -1047,6 +1078,7 @@ public sealed class LocalInventoryService
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "purchasing_enabled", cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(clientReceiptId))
