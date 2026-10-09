@@ -100,7 +100,7 @@ class AfghanMenuSeederTest extends TestCase
         $path = tempnam(sys_get_temp_dir(), 'afghan-menu-');
         $this->temporaryArchives[] = $path;
         $zip = new ZipArchive;
-        $this->assertTrue($zip->open($path, ZipArchive::OVERWRITE) === true);
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
 
         $catalog = json_decode(file_get_contents(database_path('data/afghan_menu.json')), true, 512, JSON_THROW_ON_ERROR);
         foreach ($catalog['items'] as $item) {
