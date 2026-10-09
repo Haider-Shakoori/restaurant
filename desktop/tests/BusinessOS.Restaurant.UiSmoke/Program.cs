@@ -477,12 +477,12 @@ internal static class Program
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
             var opened = modal!;
-            AssertReadableActionButtons(opened, "dialog/" + ThemeManager.Current);
             await CaptureWindowAsync(opened, Path.Combine(
                 GalleryDirectory, "dialogs",
                 ThemeManager.Current.ToString().ToLowerInvariant() + "-" +
                 new string(dialogTitle.ToLowerInvariant().Select(c =>
                     char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()) + ".png"));
+            AssertReadableActionButtons(opened, "dialog/" + ThemeManager.Current);
             Assert(FindButton(opened, saveLabel) is { IsEnabled: true },
                 $"'{dialogTitle}' contains enabled '{saveLabel}'");
             Assert(Descendants<TextBox>(opened).Any(),
