@@ -1,4 +1,5 @@
 @php
+    $modules = app(\App\Services\Tenant\RestaurantSettingsService::class)->all();
     $nav = [
         ['/dashboard', 'Dashboard', true],
         ['/tables', 'Tables', in_array($role, ['owner','admin','manager','waiter'], true)],
@@ -6,8 +7,8 @@
         ['/orders', 'Orders', in_array($role, ['owner','admin','manager','waiter','cashier'], true)],
         ['/kitchen', 'Kitchen / KDS', in_array($role, ['owner','admin','manager','kitchen'], true)],
         ['/pos', 'POS & Cashier', in_array($role, ['owner','admin','manager','cashier'], true)],
-        ['/inventory', 'Inventory', in_array($role, ['owner','admin','manager','inventory'], true)],
-        ['/purchasing', 'Purchasing', in_array($role, ['owner','admin','manager','inventory'], true)],
+        ['/inventory', 'Inventory', in_array($role, ['owner','admin','manager','inventory'], true) && $modules['inventory_enabled']],
+        ['/purchasing', 'Purchasing', in_array($role, ['owner','admin','manager','inventory'], true) && $modules['inventory_enabled'] && $modules['purchasing_enabled']],
         ['/daily-closing', 'Daily Closing', in_array($role, ['owner','admin','manager','cashier'], true)],
         ['/accounting', 'Accounting', in_array($role, ['owner','admin','manager'], true)],
         ['/users', 'Users & Roles', in_array($role, ['owner','admin'], true)],
