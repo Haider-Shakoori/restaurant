@@ -14,9 +14,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'menu_category_id',
     'sku',
     'name',
+    'name_dari',
+    'name_pashto',
     'description',
     'image_path',
     'price',
+    'preparation_time_minutes',
     'is_available',
     'sort_order',
 ])]
@@ -34,6 +37,7 @@ class MenuItem extends Model
     {
         return [
             'price' => 'decimal:2',
+            'preparation_time_minutes' => 'integer',
             'is_available' => 'boolean',
         ];
     }
