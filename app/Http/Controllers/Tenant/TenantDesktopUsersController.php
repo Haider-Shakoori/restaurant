@@ -44,8 +44,9 @@ class TenantDesktopUsersController extends Controller
         return response()->json(['data' => $user->only(['id', 'name', 'email', 'phone', 'role', 'is_active'])], 201);
     }
 
-    public function update(Request $request, TenantUser $user): JsonResponse
+    public function update(Request $request, string $user): JsonResponse
     {
+        $user = TenantUser::query()->findOrFail($user);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
