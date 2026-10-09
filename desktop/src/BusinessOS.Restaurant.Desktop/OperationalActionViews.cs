@@ -320,10 +320,14 @@ internal static class OperationalActionViews
         selectHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         orderListPanel.Children.Add(selectHint);
         orderListPanel.Children.Add(grid);
+        var orderListActions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var startOrderFromList = Button("+ New order");
+        startOrderFromList.MinHeight = 42;
+        orderListActions.Children.Add(startOrderFromList);
         var useSelected = Button("Continue selected order");
         useSelected.MinHeight = 42;
-        useSelected.Margin = new Thickness(0, 12, 0, 0);
-        orderListPanel.Children.Add(useSelected);
+        orderListActions.Children.Add(useSelected);
+        orderListPanel.Children.Add(orderListActions);
         var ordersCard = Card(orderListPanel);
         Grid.SetColumn(formCard, 0);
         Grid.SetColumn(ordersCard, 2);
@@ -340,8 +344,10 @@ internal static class OperationalActionViews
             root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
             root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
             Grid.SetColumn(ordersCard, compact ? 0 : 2);
-            Grid.SetRow(ordersCard, compact ? 1 : 0);
-            ordersCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
+            Grid.SetRow(ordersCard, 0);
+            Grid.SetRow(formCard, compact ? 1 : 0);
+            ordersCard.Margin = new Thickness(0);
+            formCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
         };
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
@@ -459,7 +465,9 @@ internal static class OperationalActionViews
             else
             {
                 modifiersBox.ItemsSource = Array.Empty<ModifierChoice>();
-                menuPrice.Text = "Select an available menu item";
+                menuPrice.Text = menu.Count == 0
+                    ? "No available menu items. Synchronize your restaurant catalog before taking items."
+                    : "Select an available menu item";
             }
         };
 
@@ -660,6 +668,15 @@ internal static class OperationalActionViews
                 FocusOrder(selected);
             else
                 status.Text = "Select an active order row first.";
+        };
+        startOrderFromList.Click += (_, _) =>
+        {
+            orderIdBox.Clear();
+            grid.SelectedItem = null;
+            UpdateOrderSummary();
+            formCard.BringIntoView();
+            serviceTypeBox.Focus();
+            status.Text = "New order entry is ready; no existing order was cancelled.";
         };
         clearSelection.Click += (_, _) =>
         {
