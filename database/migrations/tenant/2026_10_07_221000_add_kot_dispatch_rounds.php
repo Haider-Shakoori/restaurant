@@ -10,57 +10,101 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('kot_number_sequences', function (Blueprint $table): void {
-            $table->ulid('id')->primary();
-            $table->foreignUlid('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->date('business_date');
-            $table->unsignedInteger('next_number')->default(1);
-            $table->timestamps();
+        // MySQL does not permit removing an index that still supports a foreign
+        // key. Install its non-unique replacement *before* dropping the legacy
+        // unique index, and make the migration safe to resume after a failed
+        // MySQL DDL statement (MySQL DDL cannot be rolled back atomically).
+        if (! Schema::hasTable('kot_number_sequences')) {
+            Schema::create('kot_number_sequences', function (Blueprint $table): void {
+                $table->ulid('id')->primary();
+                $table->foreignUlid('branch_id')->constrained('branches')->cascadeOnDelete();
+                $table->date('business_date');
+                $table->unsignedInteger('next_number')->default(1);
+                $table->timestamps();
 
-            $table->unique(['branch_id', 'business_date']);
-        });
+                $table->unique(['branch_id', 'business_date']);
+            });
+        }
 
-        Schema::create('kot_dispatch_rounds', function (Blueprint $table): void {
-            $table->ulid('id')->primary();
-            $table->foreignUlid('order_id')->constrained('orders')->cascadeOnDelete();
-            $table->unsignedSmallInteger('sequence');
-            $table->foreignId('submitted_by_user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('client_mutation_id', 80)->nullable();
-            $table->string('kot_number', 32);
-            $table->string('priority', 16)->default('normal');
-            $table->json('workflow_snapshot');
-            $table->json('service_context')->nullable();
-            $table->json('course_context')->nullable();
-            $table->timestamp('sent_at')->index();
-            $table->timestamps();
+        if (! Schema::hasTable('kot_dispatch_rounds')) {
+            Schema::create('kot_dispatch_rounds', function (Blueprint $table): void {
+                $table->ulid('id')->primary();
+                $table->foreignUlid('order_id')->constrained('orders')->cascadeOnDelete();
+                $table->unsignedSmallInteger('sequence');
+                $table->foreignId('submitted_by_user_id')->nullable()->constrained('users')->nullOnDelete();
+                $table->string('client_mutation_id', 80)->nullable();
+                $table->string('kot_number', 32);
+                $table->string('priority', 16)->default('normal');
+                $table->json('workflow_snapshot');
+                $table->json('service_context')->nullable();
+                $table->json('course_context')->nullable();
+                $table->timestamp('sent_at')->index();
+                $table->timestamps();
 
-            $table->unique(['order_id', 'sequence']);
-            $table->unique(['order_id', 'client_mutation_id']);
-            $table->index(['order_id', 'sent_at']);
-            $table->index('kot_number');
-        });
+                $table->unique(['order_id', 'sequence']);
+                $table->unique(['order_id', 'client_mutation_id']);
+                $table->index(['order_id', 'sent_at']);
+                $table->index('kot_number');
+            });
+        }
 
-        Schema::table('order_items', function (Blueprint $table): void {
-            $table->unsignedSmallInteger('dispatched_quantity')->default(0)->after('quantity');
-            $table->timestamp('last_dispatched_at')->nullable()->after('status');
-        });
+        if (! Schema::hasColumn('order_items', 'dispatched_quantity')) {
+            Schema::table('order_items', function (Blueprint $table): void {
+                $table->unsignedSmallInteger('dispatched_quantity')->default(0)->after('quantity');
+            });
+        }
 
-        Schema::table('kitchen_tickets', function (Blueprint $table): void {
-            $table->dropUnique(['order_id', 'kitchen_station_id']);
-            $table->foreignUlid('kot_dispatch_round_id')
-                ->nullable()
-                ->after('order_id')
-                ->constrained('kot_dispatch_rounds')
-                ->cascadeOnDelete();
-            $table->string('human_kot_number', 32)->nullable()->after('ticket_number');
-            $table->index(['order_id', 'kitchen_station_id']);
-            $table->index(['kot_dispatch_round_id', 'status']);
-        });
+        if (! Schema::hasColumn('order_items', 'last_dispatched_at')) {
+            Schema::table('order_items', function (Blueprint $table): void {
+                $table->timestamp('last_dispatched_at')->nullable()->after('status');
+            });
+        }
 
-        Schema::table('kitchen_ticket_items', function (Blueprint $table): void {
-            $table->dropUnique(['order_item_id']);
-            $table->index('order_item_id');
-        });
+        if (! $this->indexExists('kitchen_tickets', 'kitchen_tickets_order_id_kitchen_station_id_index')) {
+            Schema::table('kitchen_tickets', function (Blueprint $table): void {
+                $table->index(['order_id', 'kitchen_station_id']);
+            });
+        }
+
+        if ($this->indexExists('kitchen_tickets', 'kitchen_tickets_order_id_kitchen_station_id_unique')) {
+            Schema::table('kitchen_tickets', function (Blueprint $table): void {
+                $table->dropUnique(['order_id', 'kitchen_station_id']);
+            });
+        }
+
+        if (! Schema::hasColumn('kitchen_tickets', 'kot_dispatch_round_id')) {
+            Schema::table('kitchen_tickets', function (Blueprint $table): void {
+                $table->foreignUlid('kot_dispatch_round_id')
+                    ->nullable()
+                    ->after('order_id')
+                    ->constrained('kot_dispatch_rounds')
+                    ->cascadeOnDelete();
+            });
+        }
+
+        if (! Schema::hasColumn('kitchen_tickets', 'human_kot_number')) {
+            Schema::table('kitchen_tickets', function (Blueprint $table): void {
+                $table->string('human_kot_number', 32)->nullable()->after('ticket_number');
+            });
+        }
+
+        if (! $this->indexExists('kitchen_tickets', 'kitchen_tickets_kot_dispatch_round_id_status_index')) {
+            Schema::table('kitchen_tickets', function (Blueprint $table): void {
+                $table->index(['kot_dispatch_round_id', 'status']);
+            });
+        }
+
+        if (! $this->indexExists('kitchen_ticket_items', 'kitchen_ticket_items_order_item_id_index')) {
+            Schema::table('kitchen_ticket_items', function (Blueprint $table): void {
+                $table->index('order_item_id');
+            });
+        }
+
+        if ($this->indexExists('kitchen_ticket_items', 'kitchen_ticket_items_order_item_id_unique')) {
+            Schema::table('kitchen_ticket_items', function (Blueprint $table): void {
+                $table->dropUnique(['order_item_id']);
+            });
+        }
 
         $now = now();
 
@@ -82,6 +126,12 @@ return new class extends Migration
 
                 $roundId = (string) Str::ulid();
                 $kotNumber = (string) $firstTicket->ticket_number;
+
+                // A resumed migration must not create a duplicate KOT round.
+                if (DB::connection('tenant')->table('kot_dispatch_rounds')
+                    ->where('order_id', $row->order_id)->exists()) {
+                    return;
+                }
 
                 DB::connection('tenant')->table('kot_dispatch_rounds')->insert([
                     'id' => $roundId,
@@ -122,6 +172,17 @@ return new class extends Migration
                 'dispatched_quantity' => DB::raw('quantity'),
                 'last_dispatched_at' => $now,
             ]);
+    }
+
+    private function indexExists(string $table, string $name): bool
+    {
+        foreach (Schema::getIndexes($table) as $index) {
+            if (($index['name'] ?? null) === $name) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function down(): void
