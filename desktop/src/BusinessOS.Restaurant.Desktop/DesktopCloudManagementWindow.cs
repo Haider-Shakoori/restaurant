@@ -25,6 +25,7 @@ internal sealed class DesktopCloudManagementWindow : Window
     private readonly Uri _root;
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
     private readonly List<CatalogEditor> _editors = [];
+    public bool SavedChanges { get; private set; }
 
     public DesktopCloudManagementWindow(AuthSession session, string initialTab)
     {
@@ -132,6 +133,7 @@ internal sealed class DesktopCloudManagementWindow : Window
             var id = saved.TryGetProperty("data", out var item) &&
                      item.TryGetProperty("id", out var idField) ? idField.ToString() : selected?.Id;
 
+            SavedChanges = true;
             if (editor.AllowImage && !string.IsNullOrWhiteSpace(editor.ImagePath))
             {
                 if (string.IsNullOrWhiteSpace(id))
