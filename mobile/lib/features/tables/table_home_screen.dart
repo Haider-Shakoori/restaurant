@@ -5,6 +5,7 @@ import '../../app/dependencies.dart';
 import '../../core/connection/connection_mode.dart';
 import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
+import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
 
 class TableHomeScreen extends StatefulWidget {
@@ -90,6 +91,18 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
         await _refresh();
       }
     }
+  }
+
+  Future<void> _openMenu() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => MenuBrowserScreen(
+          dependencies: widget.dependencies,
+          onStartServiceOrder: _createServiceOrder,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
   }
 
   Future<void> _openTable(Map<String, Object?> table) async {
@@ -284,6 +297,31 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Restaurant menu', style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w800)),
+                        SizedBox(height: 4),
+                        Text('Browse food photos, categories and prices.'),
+                      ],
+                    ),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _openMenu,
+                    icon: const Icon(Icons.restaurant_menu_rounded),
+                    label: const Text('Browse menu'),
+                  ),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 10,
