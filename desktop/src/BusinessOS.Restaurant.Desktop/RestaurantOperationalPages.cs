@@ -335,9 +335,20 @@ internal static class RestaurantOperationalPages
         // Cloud-owned catalog edits never disappear on the next snapshot refresh.
         var editCatalog = new Button { Content = "+ Create / Edit Menu, Categories & Images", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
         editCatalog.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
-        panel.Children.Add(editCatalog);
-        panel.Children.Add(create);
-        panel.Children.Add(recipes);
+        // Group menu actions in a responsive toolbar, not full-width bars.
+        var menuActions = new WrapPanel
+        {
+            Margin = new Thickness(0, 6, 0, 12),
+            Orientation = Orientation.Horizontal,
+        };
+        foreach (var action in new[] { editCatalog, create, recipes })
+        {
+            action.HorizontalAlignment = HorizontalAlignment.Left;
+            action.MinWidth = 0;
+            action.Margin = new Thickness(0, 0, 10, 10);
+            menuActions.Children.Add(action);
+        }
+        panel.Children.Add(menuActions);
         var recipeCreate = new Button { Content = "+ Create Recipe Version", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         recipeCreate.Click += async (_, _) =>
         {
@@ -408,7 +419,9 @@ internal static class RestaurantOperationalPages
             if (dialog.ShowDialog() == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Recipe version saved. Refresh Menu to view it.");
         };
-        panel.Children.Add(recipeCreate);
+        recipeCreate.HorizontalAlignment = HorizontalAlignment.Left;
+        recipeCreate.Margin = new Thickness(0, 0, 10, 10);
+        menuActions.Children.Add(recipeCreate);
         var costPreview = new Button { Content = "Recipe Food-Cost Preview", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         costPreview.Click += async (_, _) =>
         {
@@ -467,7 +480,9 @@ internal static class RestaurantOperationalPages
             dialog.Content = costGrid;
             dialog.ShowDialog();
         };
-        panel.Children.Add(costPreview);
+        costPreview.HorizontalAlignment = HorizontalAlignment.Left;
+        costPreview.Margin = new Thickness(0, 0, 10, 10);
+        menuActions.Children.Add(costPreview);
         panel.Children.Add(grid);
         return Scroll(panel);
     }

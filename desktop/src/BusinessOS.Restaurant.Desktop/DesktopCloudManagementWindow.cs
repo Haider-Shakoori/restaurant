@@ -188,6 +188,19 @@ internal sealed class DesktopCloudManagementWindow : Window
         if (!response.IsSuccessStatusCode)
         {
             var message = $"Tenant returned HTTP {(int)response.StatusCode}.";
+            // The desktop can be newer than the deployed Laravel tenant.
+            // A 404 for a documented management route is a deployment
+            // mismatch, not an operator field validation error.
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound &&
+                response.RequestMessage?.RequestUri?.AbsolutePath.Contains("/desktop/management", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                throw new InvalidOperationException(
+                    "This restaurant tenant is missing a Desktop Management API route (" +
+                    response.RequestMessage.RequestUri.AbsolutePath +
+                    "). Update the Laravel tenant server to the matching Restaurant release, " +
+                    "clear its route cache and verify the route before retrying. " +
+                    "No local substitute changes were applied.");
+            }
             if (document.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Object)
             {
                 foreach (var field in errors.EnumerateObject())

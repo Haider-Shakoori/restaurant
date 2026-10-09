@@ -11,11 +11,12 @@ class LocalDatabase implements SyncStore {
 
   final Database _db;
 
-  static Future<LocalDatabase> open() async {
-    final root = await getDatabasesPath();
+  static Future<LocalDatabase> open({String? databasePath}) async {
+    final path = databasePath ??
+        p.join(await getDatabasesPath(), 'businessos_restaurant_waiter.db');
     final database = await openDatabase(
-      p.join(root, 'businessos_restaurant_waiter.db'),
-      version: 6,
+      path,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -206,10 +207,62 @@ class LocalDatabase implements SyncStore {
             "ALTER TABLE orders ADD COLUMN kitchen_tickets_json TEXT NOT NULL DEFAULT '[]'",
           );
         }
+        if (oldVersion < 7) {
+          // Existing installs built from the original schema have a NOT NULL
+          // table_id despite fresh installs already permitting null. Rebuild
+          // only when necessary, preserving orders and the durable outbox.
+          await _upgradeNullableOrderTable(db);
+        }
       },
     );
 
     return LocalDatabase._(database);
+  }
+
+  Future<void> close() => _db.close();
+
+  static Future<void> _upgradeNullableOrderTable(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(orders)');
+    final oldTableId = columns.where((row) => row['name'] == 'table_id');
+    if (oldTableId.isEmpty || oldTableId.first['notnull'] != 1) return;
+
+    // SQLite cannot DROP a NOT NULL column constraint in place.
+    // onUpgrade executes inside the database upgrade transaction.
+    await db.execute('''
+      CREATE TABLE orders_nullable_upgrade (
+        local_order_id TEXT PRIMARY KEY,
+        client_order_id TEXT,
+        server_id TEXT,
+        table_id TEXT,
+        branch_id TEXT,
+        service_type TEXT NOT NULL DEFAULT 'dine_in',
+        service_reference TEXT,
+        status TEXT NOT NULL,
+        guest_count INTEGER NOT NULL,
+        notes TEXT,
+        subtotal TEXT NOT NULL DEFAULT '0.00',
+        total TEXT NOT NULL DEFAULT '0.00',
+        opened_at TEXT,
+        submitted_at TEXT,
+        served_at TEXT,
+        closed_at TEXT,
+        kot_rounds_json TEXT NOT NULL DEFAULT '[]',
+        kitchen_tickets_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    const fields = 'local_order_id, client_order_id, server_id, table_id, '
+        'branch_id, service_type, service_reference, status, guest_count, '
+        'notes, subtotal, total, opened_at, submitted_at, served_at, '
+        'closed_at, kot_rounds_json, kitchen_tickets_json, updated_at';
+    await db.execute(
+      'INSERT INTO orders_nullable_upgrade ($fields) SELECT $fields FROM orders',
+    );
+    await db.execute('DROP TABLE orders');
+    await db.execute('ALTER TABLE orders_nullable_upgrade RENAME TO orders');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS orders_status_idx ON orders(status, updated_at)',
+    );
   }
 
   @override
@@ -316,6 +369,9 @@ class LocalDatabase implements SyncStore {
         ((data['cursor'] as num?)?.toInt() ?? 0).toString(),
       );
       await _setSettingTxn(txn, 'server_locked', '0');
+      // A successful setup/bootstrap supersedes any pre-login
+      // not_configured sync error left over from a prior session.
+      await _setSettingTxn(txn, 'last_sync_error', '');
       await _reapplyLocalOccupancy(txn);
     });
   }
