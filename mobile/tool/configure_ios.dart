@@ -32,6 +32,21 @@ void main() {
     'Connect directly to BusinessOS Restaurant Desktop over the restaurant Wi-Fi or LAN.',
   );
 
+  // Allow the OS to display READY notifications while the waiter app is
+  // suspended. The Apple-signed build still needs Push Notifications
+  // capability and APNs credentials in Firebase Console.
+  _ensureRemoteNotificationBackgroundMode(plist);
+  // Modern Firebase Apple SDKs require iOS 15 or later.
+  final podfile = File('ios/Podfile');
+  if (podfile.existsSync()) {
+    var pods = podfile.readAsStringSync();
+    pods = pods.replaceFirst(
+      RegExp(r"^#?\\s*platform :ios, '[0-9.]+'", multiLine: true),
+      "platform :ios, '15.0'",
+    );
+    podfile.writeAsStringSync(pods);
+  }
+
   _ensureDictionary(plist, 'NSAppTransportSecurity');
   _setBool(
     plist,
@@ -54,6 +69,17 @@ void main() {
     'NSAppTransportSecurity:NSAllowsLocalNetworking',
     'true',
   );
+}
+
+void _ensureRemoteNotificationBackgroundMode(File plist) {
+  final current = _run(plist, 'Print :UIBackgroundModes', allowFailure: true);
+  if (current.exitCode != 0) {
+    _run(plist, 'Add :UIBackgroundModes array');
+  }
+  final modes = _run(plist, 'Print :UIBackgroundModes');
+  if (!modes.stdout.toString().contains('remote-notification')) {
+    _run(plist, 'Add :UIBackgroundModes:0 string remote-notification');
+  }
 }
 
 void _setString(File plist, String key, String value) {

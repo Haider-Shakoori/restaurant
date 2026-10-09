@@ -61,6 +61,7 @@ use App\Http\Controllers\Tenant\TenantWebOrderController;
 use App\Http\Controllers\Tenant\TransferOrderTableController;
 use App\Http\Controllers\Tenant\VoidKitchenTicketItemController;
 use App\Http\Controllers\Tenant\WaiterPairingController;
+use App\Http\Controllers\Tenant\WaiterPushDeviceController;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\InitializeRestaurantTenancy;
 use Illuminate\Http\Request;
@@ -245,6 +246,9 @@ Route::middleware($tenantMiddleware)
             });
 
             Route::middleware('tenant.role:owner,admin,manager,waiter')->group(function (): void {
+                Route::post('/push/devices', [WaiterPushDeviceController::class, 'store'])->middleware('throttle:20,1');
+                Route::delete('/push/devices', [WaiterPushDeviceController::class, 'destroy'])->middleware('throttle:20,1');
+
                 Route::get('/sync/bootstrap', SyncBootstrapController::class)
                     ->name('tenant.api.sync.bootstrap');
 

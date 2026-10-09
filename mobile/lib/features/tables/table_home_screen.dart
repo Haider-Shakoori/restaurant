@@ -47,6 +47,12 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   void initState() {
     super.initState();
     _refresh();
+    widget.dependencies.pushNotifications.tappedOrderId.addListener(
+      _handlePushTap,
+    );
+    if (widget.dependencies.pushNotifications.tappedOrderId.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _handlePushTap());
+    }
     // SyncCoordinator pulls LAN/cloud changes every 30 seconds; read the
     // committed SQLite snapshots more frequently to surface new READY events
     // promptly without starting another network connection per refresh.
@@ -58,6 +64,9 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
 
   @override
   void dispose() {
+    widget.dependencies.pushNotifications.tappedOrderId.removeListener(
+      _handlePushTap,
+    );
     _readyRefreshTimer?.cancel();
     super.dispose();
   }
@@ -258,7 +267,39 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     await _refresh();
   }
 
+  void _handlePushTap() {
+    final serverId = widget.dependencies.pushNotifications.tappedOrderId.value;
+    if (serverId == null || !mounted) return;
+    widget.dependencies.pushNotifications.clearTappedOrder();
+    unawaited(_openPushedOrder(serverId));
+  }
+
+  Future<void> _openPushedOrder(String serverId) async {
+    // FCM carries a cloud order ID; local screens navigate by local_order_id.
+    // Wait for the next authenticated pull before opening if necessary.
+    var match = _orders.where(
+      (order) => order['server_id']?.toString() == serverId,
+    );
+    if (match.isEmpty) {
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+      if (!mounted) return;
+      match = _orders.where((order) =>
+          order['server_id']?.toString() == serverId);
+    }
+    if (match.isNotEmpty) {
+      await _showOrder(match.first['local_order_id']!.toString());
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Order is not synced yet. Reconnect and pull to view it.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _logout() async {
+    await widget.dependencies.pushNotifications.signOut();
     _alertTracker = null;
     _readyAlerts = const [];
     await widget.dependencies.session.logoutLocal();
