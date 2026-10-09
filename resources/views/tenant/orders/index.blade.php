@@ -456,43 +456,65 @@
             </form>
         </div>
 
-        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div class="overflow-x-auto">
-                <table class="min-w-full text-left text-sm">
-                    <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                        <tr>
-                            <th class="px-5 py-3">Opened</th>
-                            <th class="px-5 py-3">Table</th>
-                            <th class="px-5 py-3">Waiter</th>
-                            <th class="px-5 py-3 text-right">Items</th>
-                            <th class="px-5 py-3">Status</th>
-                            <th class="px-5 py-3 text-right">Total</th>
-                            <th class="px-5 py-3">Bill</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        @forelse ($orders as $order)
-                            <tr class="align-top {{ session('created_order_id') === $order->id ? 'bg-emerald-50' : 'hover:bg-slate-50' }}">
-                                <td class="px-5 py-4 whitespace-nowrap">{{ $order->opened_at?->format('M d, H:i') ?? $order->created_at?->format('M d, H:i') }}</td>
-                                <td class="px-5 py-4 font-bold">{{ $order->table?->name ?? '—' }}</td>
-                                <td class="px-5 py-4">{{ $order->waiter?->name ?? '—' }}</td>
-                                <td class="px-5 py-4 text-right">{{ $order->items->sum('quantity') }}</td>
-                                <td class="px-5 py-4">
-                                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold capitalize">{{ str_replace('_', ' ', $order->status) }}</span>
-                                </td>
-                                <td class="px-5 py-4 text-right font-black">{{ number_format((float) $order->total, 0) }} AFN</td>
-                                <td class="px-5 py-4">{{ $order->bill?->bill_number ?? '—' }}</td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="7" class="px-5 py-12 text-center text-slate-500">
-                                    No orders yet. Use <span class="font-bold text-slate-700">New Order / Take Order</span> to enter the first order.
-                                </td>
-                            </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
+        <div class="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+            @forelse ($orders as $order)
+                @php
+                    $isPaid = $order->bill?->status === 'paid';
+                    $bill = $order->bill;
+                    $cashierAllowed = in_array($currentUser?->role, ['owner', 'admin', 'manager', 'cashier'], true);
+                @endphp
+                <article class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm {{ session('created_order_id') === $order->id ? 'ring-2 ring-violet-400' : '' }}">
+                    <div class="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-950 p-4 text-white">
+                        <div>
+                            <p class="text-xs font-bold text-violet-300">#{{ substr($order->id, -8) }}</p>
+                            <h3 class="mt-1 font-black">{{ $order->table?->name ?? ucfirst(str_replace('_', ' ', $order->service_type)) }}</h3>
+                            <p class="mt-1 text-xs text-slate-300">{{ $order->waiter?->name ?? 'Unassigned waiter' }}</p>
+                        </div>
+                        <span class="rounded-lg px-2.5 py-1 text-xs font-black {{ $isPaid ? 'bg-emerald-600 text-white' : 'bg-amber-100 text-amber-900' }}">
+                            {{ $isPaid ? 'PAID' : ($bill ? 'PAYMENT DUE' : 'NOT BILLED') }}
+                        </span>
+                    </div>
+                    <div class="space-y-3 p-4">
+                        <div class="flex items-center justify-between gap-3 text-xs text-slate-500">
+                            <span>{{ $order->opened_at?->format('M d, H:i') }}</span>
+                            <span>{{ $order->items->sum('quantity') }} item(s)</span>
+                        </div>
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="rounded-lg bg-violet-100 px-2.5 py-1 text-xs font-black capitalize text-violet-800">{{ str_replace('_', ' ', $order->status) }}</span>
+                            <span class="text-lg font-black text-slate-950">{{ number_format((float) $order->total, 2) }} <small class="text-xs">AFN</small></span>
+                        </div>
+                        <p class="text-xs text-slate-500">
+                            Kitchen & service: <strong class="capitalize">{{ str_replace('_', ' ', $order->status) }}</strong>
+                            @if ($bill)
+                                · Balance due: <strong class="text-rose-700">{{ number_format((float) $bill->balance_due, 2) }} AFN</strong>
+                            @endif
+                        </p>
+                        <div class="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                            @if ($order->status === 'ready')
+                                <form method="POST" action="/orders/{{ $order->id }}/serve">@csrf
+                                    <button class="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white">Mark served</button>
+                                </form>
+                            @endif
+                            @if ($cashierAllowed && $order->status === 'served')
+                                <form method="POST" action="/orders/{{ $order->id }}/bill">@csrf
+                                    <button class="rounded-lg bg-violet-600 px-3 py-2 text-xs font-black text-white">Issue bill</button>
+                                </form>
+                            @endif
+                            @if ($cashierAllowed && $bill && $bill->status === 'open')
+                                <a class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white" href="/pos">Receive payment</a>
+                            @endif
+                            @if ($order->status === 'closed')
+                                <span class="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">Closed · Table available</span>
+                            @endif
+                        </div>
+                    </div>
+                </article>
+            @empty
+                <div class="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500 md:col-span-2">
+                    No orders match this filter. Select <strong>New Order / Take Order</strong> to begin.
+                </div>
+            @endforelse
         </div>
+
     </div>
 @endsection
