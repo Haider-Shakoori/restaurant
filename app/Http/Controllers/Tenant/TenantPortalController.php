@@ -117,6 +117,11 @@ class TenantPortalController extends Controller
                 ->orderBy('sort_order')
                 ->orderBy('name')
                 ->get(),
+            'openCashierSessions' => CashierSession::query()
+                ->with('branch')
+                ->where('status', CashierSession::STATUS_OPEN)
+                ->latest('opened_at')
+                ->get(),
             'activeBranches' => RestaurantBranch::query()
                 ->where('is_active', true)
                 ->orderBy('name')
@@ -166,6 +171,10 @@ class TenantPortalController extends Controller
         return $this->view('tenant.pos.index', [
             'bills' => Bill::query()->with(['order.table', 'branch'])->withCount('payments')->latest('issued_at')->limit(100)->get(),
             'sessions' => CashierSession::query()->with(['branch', 'cashier'])->latest('opened_at')->limit(30)->get(),
+            'branches' => RestaurantBranch::query()->where('is_active', true)->orderBy('name')->get(),
+            'readyOrders' => Order::query()->with(['table', 'waiter'])
+                ->whereIn('status', [Order::STATUS_READY, Order::STATUS_SERVED])
+                ->latest('opened_at')->limit(60)->get(),
         ]);
     }
 
