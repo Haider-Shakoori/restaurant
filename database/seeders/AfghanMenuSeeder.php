@@ -2,10 +2,10 @@
 
 namespace Database\Seeders;
 
+use App\Models\KitchenStation;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\MenuItemKitchenRoute;
-use App\Models\KitchenStation;
 use App\Models\RestaurantBranch;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
