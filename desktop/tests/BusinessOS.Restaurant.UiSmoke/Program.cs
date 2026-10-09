@@ -167,6 +167,8 @@ internal static class Program
         CheckNavigation(owner, "expenses");
         CheckNavigation(owner, "pos");
         CheckNavigation(owner, "kitchen");
+        await NavigateAsync(owner, "pos");
+        await CheckPosInteractionsAsync(owner);
 
         // The reported issue was inside the Glass-mode cloud-management dialog.
         // Open the real Dining Floors tab under Glass, check contrast, capture
@@ -219,6 +221,10 @@ internal static class Program
         await waiterVm.NavigateCommand.ExecuteAsync("purchases");
         Assert(waiterVm.CurrentRoute == initialRoute && !waiterVm.HasWorkspaceError,
             "Waiter cannot open Purchases by directly invoking route command");
+
+        await NavigateAsync(waiter, "pos");
+        Assert(FindButton(waiter, "Show cashier & billing") is null,
+            "Waiter POS never reveals cashier or payment controls");
 
         waiter.Close();
         owner.Close();
@@ -441,6 +447,76 @@ internal static class Program
         if (new FileInfo(destination).Length < 2048)
             throw new InvalidOperationException("Screenshot appears empty: " + destination);
         Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
+    }
+
+    private static async Task CheckPosInteractionsAsync(MainWindow window)
+    {
+        // Test the real WPF page on the isolated GitHub runner, not a screenshot mock.
+        var service = Descendants<ComboBox>(window).Single(x => x.Name == "PosServiceType");
+        var dineFields = Descendants<StackPanel>(window).Single(x => x.Name == "PosDineInFields");
+        var offsiteFields = Descendants<StackPanel>(window).Single(x => x.Name == "PosOffsiteFields");
+        Assert(dineFields.Visibility == Visibility.Visible && offsiteFields.Visibility == Visibility.Collapsed,
+            "Dine-in shows a table but not offsite branch and reference inputs");
+        service.SelectedItem = "counter";
+        Assert(dineFields.Visibility == Visibility.Collapsed && offsiteFields.Visibility == Visibility.Visible,
+            "Counter service switches to branch and reference inputs without a reload");
+
+        var advanced = Descendants<StackPanel>(window).Single(x => x.Name == "PosItemOptions");
+        Assert(advanced.Visibility == Visibility.Collapsed, "POS item modifiers start collapsed");
+        Click(FindButton(window, "Show modifiers & instructions")!);
+        Assert(advanced.Visibility == Visibility.Visible, "POS expands modifiers and allergy instructions");
+        Click(FindButton(window, "Hide modifiers & instructions")!);
+        Assert(advanced.Visibility == Visibility.Collapsed, "POS can collapse modifiers again");
+
+        var orderActions = Descendants<StackPanel>(window).Single(x => x.Name == "PosOrderAdjustments");
+        Click(FindButton(window, "Show course firing / void / cancel")!);
+        Assert(orderActions.Visibility == Visibility.Visible, "POS provides advanced KOT management on demand");
+        Click(FindButton(window, "Hide course firing / void / cancel")!);
+
+        Assert(Descendants<TextBox>(window).Any(x => x.Name == "PosMenuSearchBox"),
+            "POS has searchable menu");
+        Assert(Descendants<TextBox>(window).Any(x => x.Name == "PosOrderSearchBox"),
+            "POS has searchable orders");
+        var grid = Descendants<DataGrid>(window).Single(x => x.Name == "PosActiveOrdersGrid");
+        Assert(grid.IsReadOnly && grid.SelectionMode == DataGridSelectionMode.Single,
+            "Active orders list safely selects one read-only order");
+        Assert(FindButton(window, "Show cashier & billing") is not null,
+            "Owner can reveal cashier and billing");
+        Click(FindButton(window, "Show cashier & billing")!);
+        Assert(FindButton(window, "Post payment") is { IsEnabled: true },
+            "Owner cashier controls remain interactive after expansion");
+        Click(FindButton(window, "Hide cashier & billing")!);
+
+        // Select and resume a real locally persisted counter order using the
+        // cached CI-only branch. No tenant cloud, payments, or printing involved.
+        var branch = Descendants<ComboBox>(offsiteFields).First();
+        branch.SelectedIndex = 0;
+        Assert(branch.SelectedItem is not null, "POS has a cached branch for offline counter orders");
+        var open = FindButton(window, "Open new order")!;
+        Click(open);
+        var currentOrder = Descendants<TextBox>(window).First(x => x.IsReadOnly &&
+            x.Name != "PosMenuSearchBox" && x.Name != "PosOrderSearchBox");
+        await WaitUntilAsync(() => !string.IsNullOrEmpty(currentOrder.Text),
+            "offline counter order appears in POS");
+        var id = currentOrder.Text;
+        Assert(grid.Items.Cast<object>().OfType<object>().Any(),
+            "New order refreshes the active order list without navigating away");
+
+        Click(FindButton(window, "Start another order")!);
+        Assert(string.IsNullOrWhiteSpace(currentOrder.Text),
+            "New-order action clears only editor selection, not saved orders");
+        var search = Descendants<TextBox>(window).Single(x => x.Name == "PosOrderSearchBox");
+        search.Text = id;
+        Assert(grid.Items.Count == 1, "Order search filters to its actual order ID");
+        grid.SelectedIndex = 0;
+        Assert(currentOrder.Text == id, "Selecting an existing order resumes the order editor");
+        Assert(Descendants<TextBlock>(window).Any(x => x.Name == "PosSelectionSummary" &&
+            x.Text.Contains(id, StringComparison.Ordinal) == false &&
+            x.Text.Contains("AFN", StringComparison.Ordinal)),
+            "Resumed order summary displays current financial context");
+
+        // Revert to default service type so no selection leaks into later smoke.
+        service.SelectedItem = "dine_in";
     }
 
     private static void CheckNavigation(MainWindow window, string route)
