@@ -44,6 +44,14 @@ public sealed class Batch15ReleasePackagingTests
         Assert.Contains("Already activated on this computer",installer,StringComparison.Ordinal);
         Assert.Contains("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
         Assert.Contains("WizardBackImageFileDynamicDark=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+        Assert.Contains("WizardStyle=modern dark", installer, StringComparison.Ordinal);
+        Assert.Contains("WizardBackColor=#101C28", installer, StringComparison.Ordinal);
+        Assert.Contains("WizardBackImageOpacity=225", installer, StringComparison.Ordinal);
+        Assert.Contains("LicenseHelpLabel.Font.Color :=", installer, StringComparison.Ordinal);
+        Assert.Contains("ImageEnhance.Brightness(artwork).enhance(0.65)", generator, StringComparison.Ordinal);
+        Assert.Contains("Image.blend(artwork, dark_veil, alpha=0.42)", generator, StringComparison.Ordinal);
+        Assert.Contains("Validate installer background contrast", workflow, StringComparison.Ordinal);
+        Assert.Contains("check_restaurant_installer_contrast.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
         Assert.Contains("RestaurantInstallerBackground.png",generator,StringComparison.Ordinal);
         Assert.Contains("format=\"PNG\"",generator,StringComparison.Ordinal);
