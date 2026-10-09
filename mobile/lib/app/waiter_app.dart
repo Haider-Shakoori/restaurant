@@ -69,8 +69,64 @@ class _WaiterAppState extends State<WaiterApp> {
       title: strings.appName,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: const Color(0xFF155EEF),
-        scaffoldBackgroundColor: const Color(0xFFF7F8FA),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFD7A84E),
+          primary: const Color(0xFF171B20),
+          onPrimary: Colors.white,
+          secondary: const Color(0xFFEFC76D),
+          onSecondary: const Color(0xFF171B20),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF3F5F7),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF171B20),
+          foregroundColor: Colors.white,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color(0xFF171B20),
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: const Color(0xFFE2E5EA),
+            disabledForegroundColor: const Color(0xFF6D7684),
+            minimumSize: const Size(0, 46),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF171B20),
+            minimumSize: const Size(0, 44),
+            side: const BorderSide(color: Color(0xFFD2D7DE)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFD8DDE5)),
+          ),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFFE6E8EB)),
+          ),
+        ),
       ),
       builder: (context, child) {
         return Directionality(
