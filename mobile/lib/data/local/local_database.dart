@@ -219,6 +219,8 @@ class LocalDatabase implements SyncStore {
     return LocalDatabase._(database);
   }
 
+  Future<void> close() => _db.close();
+
   static Future<void> _upgradeNullableOrderTable(DatabaseExecutor db) async {
     final columns = await db.rawQuery('PRAGMA table_info(orders)');
     final oldTableId = columns.where((row) => row['name'] == 'table_id');
