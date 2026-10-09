@@ -16,6 +16,17 @@ internal static class RestaurantOperationalPages
 {
     public static async Task<FrameworkElement> CreateAsync(string route, LanDiagnosticsViewModel diagnostics)
     {
+        if (route is "inventory" or "purchases")
+        {
+            var modules = await new LocalRestaurantSettingsService(new LocalDatabaseFactory()).GetModulesAsync();
+            if (route == "inventory" && !modules.InventoryEnabled ||
+                route == "purchases" && (!modules.InventoryEnabled || !modules.PurchasingEnabled))
+            {
+                return Card("Module disabled",
+                    "This module is turned off for the restaurant. An Owner can re-enable it in Settings → Modules. Historical data is preserved.");
+            }
+        }
+
         return route switch
         {
             "dashboard" => await DashboardAsync(diagnostics),
@@ -1314,6 +1325,7 @@ internal static class RestaurantOperationalPages
         // Build each group exactly once so the original action handlers and
         // device bindings stay intact as operators move between settings tabs.
         var workflowPage = Stack();
+        var modulesPage = await RestaurantModulesPanel.CreateAsync();
         var backupPage = Stack();
         var printingPage = Stack();
         var networkPage = Stack();
@@ -1592,6 +1604,7 @@ internal static class RestaurantOperationalPages
             DataContext = diagnostics,
         };
         tabs.Items.Add(SettingsTab("kitchen", "Kitchen & KOT", workflowPage));
+        tabs.Items.Add(SettingsTab("modules", "Modules", modulesPage));
         tabs.Items.Add(SettingsTab("backup", "Backup & Restore", backupPage));
         tabs.Items.Add(SettingsTab("printing", "Printing", printingPage));
         tabs.Items.Add(SettingsTab("network", "Network & Sync", networkPage));
