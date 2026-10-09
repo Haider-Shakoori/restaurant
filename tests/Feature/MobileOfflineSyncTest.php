@@ -73,6 +73,43 @@ class MobileOfflineSyncTest extends TestCase
         parent::tearDown();
     }
 
+    public function test_waiter_push_registration_is_device_authenticated_and_can_be_revoked(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $device = $this->activateDevice($business, $domain, 'push-registration-device');
+        tenancy()->initialize($tenant);
+        [$waiter] = $this->seedRestaurant('pushwaiter@restaurant.test');
+        tenancy()->end();
+
+        $token = $this->login($domain, 'pushwaiter@restaurant.test');
+        $headers = $this->syncHeaders($token, $device);
+        $pushToken = str_repeat('z', 75);
+
+        $this->withHeaders($headers)->postJson("http://{$domain}/api/v1/push/devices", [
+            'token' => $pushToken,
+            'platform' => 'android',
+        ])->assertOk()->assertJsonPath('status', 'registered');
+
+        tenancy()->initialize($tenant);
+        $registered = \App\Models\WaiterPushDevice::query()->firstOrFail();
+        $this->assertSame((string) $waiter->id, (string) $registered->tenant_user_id);
+        $this->assertSame($pushToken, $registered->fcm_token);
+        $this->assertTrue($registered->enabled);
+        tenancy()->end();
+
+        $invalid = [...$headers, 'X-Device-Secret' => 'wrong-credential'];
+        $this->withHeaders($invalid)->postJson("http://{$domain}/api/v1/push/devices", [
+            'token' => str_repeat('b', 75),
+            'platform' => 'ios',
+        ])->assertUnprocessable();
+
+        $this->withHeaders($headers)->deleteJson("http://{$domain}/api/v1/push/devices")
+            ->assertOk()->assertJsonPath('status', 'unregistered');
+
+        tenancy()->initialize($tenant);
+        $this->assertFalse(\App\Models\WaiterPushDevice::query()->firstOrFail()->enabled);
+    }
+
     public function test_device_bound_bootstrap_push_retry_and_incremental_pull_are_resumable(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();
