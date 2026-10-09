@@ -64,7 +64,16 @@ class TenantPortalController extends Controller
     public function tables(): View
     {
         return $this->view('tenant.tables.index', [
-            'branches' => RestaurantBranch::query()->with('diningAreas.tables')->orderBy('name')->get(),
+            // Match the active restaurant floor available to Desktop and waiter devices.
+            // Archived branches/floors/tables remain in the DB for order history.
+            'branches' => RestaurantBranch::query()
+                ->where('is_active', true)
+                ->with([
+                    'diningAreas' => fn ($query) => $query->where('is_active', true)->orderBy('sort_order')->orderBy('name'),
+                    'diningAreas.tables' => fn ($query) => $query->where('is_active', true)->orderBy('code'),
+                ])
+                ->orderBy('name')
+                ->get(),
         ]);
     }
 
@@ -92,6 +101,8 @@ class TenantPortalController extends Controller
                 ->with('diningArea.branch')
                 ->where('is_active', true)
                 ->where('status', DiningTable::STATUS_AVAILABLE)
+                ->whereHas('diningArea', fn ($query) => $query->where('is_active', true)
+                    ->whereHas('branch', fn ($branches) => $branches->where('is_active', true)))
                 ->orderBy('name')
                 ->get(),
             'menuCategories' => MenuCategory::query()

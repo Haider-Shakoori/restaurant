@@ -49,8 +49,10 @@ internal static class RestaurantOperationalPages
             {
                 var refreshed = await RefreshOperationalSnapshotAsync();
                 DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
-                    refreshed ? "Tenant changes synchronized to Desktop SQLite. Refresh this workspace."
-                        : "Changes saved online. Local catalog refresh is unavailable; reconnect and refresh before using edited items.");
+                    refreshed ? "Restaurant catalog synchronized."
+                        : "Saved online. Reconnect and sync to update local data.");
+                if (refreshed && System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
             }
         }
         catch (Exception ex)
@@ -80,8 +82,11 @@ internal static class RestaurantOperationalPages
         // Cancelled orders and unavailable/reserved tables are not active service.
         var openOrders = await db.Orders.CountAsync(x =>
             x.Status != "closed" && x.Status != "cancelled");
-        var activeTables = await db.DiningTables.CountAsync(x =>
-            x.IsActive && x.Status == "occupied");
+        var activeTables = await (from table in db.DiningTables.AsNoTracking()
+            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+            where table.IsActive && area.IsActive && branch.IsActive && table.Status == "occupied"
+            select table.Id).CountAsync();
         var activeKot = await db.KitchenTickets.CountAsync(x =>
             x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
         // Read only bill timestamps and totals; interpret the business day in local time.
@@ -2498,15 +2503,9 @@ internal static class RestaurantOperationalPages
         var panel = Stack();
         var titleText = new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold };
         titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-        var subtitleText = new TextBlock
-        {
-            Text = subtitle,
-            Margin = new Thickness(0, 4, 0, 16),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        // Avoid repeating informational prose beneath every section header.
+        // Operational warnings and validation messages remain in their panels.
         panel.Children.Add(titleText);
-        panel.Children.Add(subtitleText);
         panel.Children.Add(content);
         return Scroll(panel);
     }

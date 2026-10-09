@@ -26,9 +26,12 @@ internal static class OperationalActionViews
         await using var db = factory.Create();
 
         var tables = await (from table in db.DiningTables.AsNoTracking()
-                            where table.IsActive
-                            orderby table.Name
-                            select new Choice(table.Id, $"{table.Name} ({table.Code})")).ToListAsync();
+                            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                            where table.IsActive && area.IsActive && branch.IsActive &&
+                                  table.Status == "available"
+                            orderby area.SortOrder, table.Name
+                            select new Choice(table.Id, $"{branch.Name} · {area.Name} · {table.Name} ({table.Code})")).ToListAsync();
         var menu = await db.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
             .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
         var modifierChoices = await (
@@ -791,9 +794,11 @@ internal static class OperationalActionViews
 
         var rows = await (from table in db.DiningTables.AsNoTracking()
                           join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
-                          where table.IsActive
-                          orderby area.SortOrder, table.Name
-                          select new TableChoice(table.Id, area.Name, table.Code, table.Name, table.Capacity, table.Status))
+                          join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                          where table.IsActive && area.IsActive && branch.IsActive
+                          orderby branch.Name, area.SortOrder, table.Name
+                          select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                              table.Code, table.Name, table.Capacity, table.Status))
             .ToListAsync();
 
         var activeOrders = (await (
@@ -837,8 +842,11 @@ internal static class OperationalActionViews
             .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
             .ToList();
 
-        var areas = await db.DiningAreas.AsNoTracking().Where(x => x.IsActive)
-            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync();
+        var areas = await (from area in db.DiningAreas.AsNoTracking()
+            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+            where area.IsActive && branch.IsActive
+            orderby area.SortOrder, area.Name
+            select area).ToListAsync();
         var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive)
             .OrderBy(x => x.Name).ToListAsync();
 
@@ -848,10 +856,56 @@ internal static class OperationalActionViews
             "Dining floor",
             "Live table state shared over LAN. Transfer, merge and split preserve KOT history; split only moves lines not yet sent to production."));
 
-        var manageFloor = Button("+ Add / Edit Floors & Tables");
-        manageFloor.Margin = new Thickness(0, 6, 0, 10);
+        var floorActions = new WrapPanel { Margin = new Thickness(0, 4, 0, 10) };
+        var manageFloor = Button("Manage floors & tables");
         manageFloor.Click += async (_, _) => await RestaurantOperationalPages.OpenCloudManagementAsync("tables");
-        root.Children.Add(manageFloor);
+        floorActions.Children.Add(manageFloor);
+
+        // Reference tables are Laravel-owned. Operators can explicitly pull
+        // cross-device changes without relying on a background interval.
+        var syncTables = Button("Sync from web");
+        syncTables.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        floorActions.Children.Add(syncTables);
+        var syncStatus = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(8, 10, 0, 0),
+        };
+        syncStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        floorActions.Children.Add(syncStatus);
+        syncTables.Click += async (_, _) =>
+        {
+            syncTables.IsEnabled = false;
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var refreshed = await new BusinessOS.Restaurant.Sync.OperationalDataRefreshService(
+                    new BusinessOS.Restaurant.Licensing.WindowsActivationStore(),
+                    new WindowsSessionStore(),
+                    new BusinessOS.Restaurant.Licensing.ConnectionSettingsStore(),
+                    new BusinessOS.Restaurant.Sync.CloudOperationalDataClient(http),
+                    new OperationalSnapshotStore(new LocalDatabaseFactory())).RefreshIfPossibleAsync();
+                if (!refreshed)
+                {
+                    syncStatus.Text = "Offline or cloud sync disabled.";
+                    return;
+                }
+
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Dining tables synchronized from Laravel.");
+                if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
+            }
+            catch (Exception ex)
+            {
+                syncStatus.Text = "Sync failed. " + ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, "Table sync failed.");
+            }
+            finally
+            {
+                syncTables.IsEnabled = true;
+            }
+        };
+        root.Children.Add(floorActions);
 
         var grid = DataGrid(rows);
         grid.MinHeight = 280;
@@ -1800,17 +1854,10 @@ internal static class OperationalActionViews
 
     private static StackPanel Header(string title, string subtitle)
     {
-        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+        // Keep action labels, statuses, confirmations and safety warnings intact,
+        // but avoid a second paragraph below every workspace title.
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
         panel.Children.Add(HeaderText(title, 20, true));
-
-        var subtitleBlock = new TextBlock
-        {
-            Text = subtitle,
-            Margin = new Thickness(0, 4, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        subtitleBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-        panel.Children.Add(subtitleBlock);
         return panel;
     }
 

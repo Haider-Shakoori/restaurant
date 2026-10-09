@@ -14,7 +14,9 @@ public sealed record OperationalSnapshot(
     [property: JsonPropertyName("staff")] IReadOnlyList<StaffSnapshot> Staff,
     [property: JsonPropertyName("menu")] IReadOnlyList<MenuCategorySnapshot> Menu,
     [property: JsonPropertyName("tables")] IReadOnlyList<DiningTableSnapshot> Tables,
-    [property: JsonPropertyName("kitchen")] KitchenSnapshot? Kitchen = null);
+    [property: JsonPropertyName("kitchen")] KitchenSnapshot? Kitchen = null,
+    // Backward-compatible: empty floors are included even before a table is added.
+    [property: JsonPropertyName("areas")] IReadOnlyList<DiningAreaReferenceSnapshot>? Areas = null);
 
 public sealed record BranchSnapshot(
     [property: JsonPropertyName("id")] string Id,
@@ -71,6 +73,13 @@ public sealed record DiningTableSnapshot(
     [property: JsonPropertyName("is_active")] bool IsActive,
     [property: JsonPropertyName("area")] DiningAreaSummary Area,
     [property: JsonPropertyName("branch")] BranchSummary Branch);
+
+public sealed record DiningAreaReferenceSnapshot(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("branch_id")] string BranchId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("sort_order")] int SortOrder,
+    [property: JsonPropertyName("is_active")] bool IsActive);
 
 public sealed record DiningAreaSummary(
     [property: JsonPropertyName("id")] string Id,

@@ -491,6 +491,54 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonPath('data.kitchen.routes.0.kitchen_station_id', $station->id);
     }
 
+    public function test_bootstrap_only_exposes_active_tables_in_active_floors_and_includes_empty_floors(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'sync-device-table-parity');
+
+        tenancy()->initialize($tenant);
+        [, $activeTable] = $this->seedRestaurant('parity-waiter@restaurant.test');
+        $branch = $activeTable->diningArea->branch;
+
+        DiningArea::query()->create([
+            'branch_id' => $branch->id,
+            'name' => 'Empty Upstairs',
+            'sort_order' => 2,
+            'is_active' => true,
+        ]);
+        $closedArea = DiningArea::query()->create([
+            'branch_id' => $branch->id,
+            'name' => 'Closed Terrace',
+            'sort_order' => 3,
+            'is_active' => false,
+        ]);
+        DiningTable::query()->create([
+            'dining_area_id' => $closedArea->id,
+            'code' => 'HIDDEN01',
+            'name' => 'Hidden table',
+            'capacity' => 2,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+        DiningTable::query()->create([
+            'dining_area_id' => $activeTable->dining_area_id,
+            'code' => 'ARCHIVED01',
+            'name' => 'Archived table',
+            'capacity' => 2,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => false,
+        ]);
+        tenancy()->end();
+
+        $token = $this->login($domain, 'parity-waiter@restaurant.test');
+        $this->withHeaders($this->syncHeaders($token, $credentials))
+            ->getJson("http://{$domain}/api/v1/sync/bootstrap")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.tables')
+            ->assertJsonPath('data.tables.0.id', $activeTable->id)
+            ->assertJsonCount(2, 'data.areas');
+    }
+
     public function test_mobile_sync_supports_table_transfer_unsent_split_and_merge(): void
     {
         [$business, $domain, $tenant] = $this->createActiveBusiness();

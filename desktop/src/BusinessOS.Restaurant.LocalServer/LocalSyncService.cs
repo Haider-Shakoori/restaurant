@@ -387,9 +387,18 @@ public sealed class LocalSyncService
                     "This table already has an active order.");
             }
 
-            var area = await db.DiningAreas.SingleAsync(
-                value => value.Id == table.DiningAreaId,
+            var area = await db.DiningAreas.SingleOrDefaultAsync(
+                value => value.Id == table.DiningAreaId && value.IsActive,
                 cancellationToken);
+            if (area is null || !await db.Branches.AnyAsync(
+                    value => value.Id == area.BranchId && value.IsActive,
+                    cancellationToken))
+            {
+                throw new LocalSyncConflictException(
+                    "dependency_missing",
+                    "The table's floor or branch is inactive.");
+            }
+
             branchId = area.BranchId;
         }
         else

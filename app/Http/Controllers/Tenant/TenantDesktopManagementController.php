@@ -137,8 +137,8 @@ class TenantDesktopManagementController extends Controller
             'is_active' => ['sometimes', 'boolean'],
         ]);
         $area = DiningArea::query()->findOrFail($data['dining_area_id']);
-        if ($area->is_active === false) {
-            throw ValidationException::withMessages(['dining_area_id' => 'Select an active dining floor.']);
+        if (! $area->is_active || ! $area->branch()->where('is_active', true)->exists()) {
+            throw ValidationException::withMessages(['dining_area_id' => 'Select an active dining floor and branch.']);
         }
         if ($diningTable && $diningTable->status !== DiningTable::STATUS_AVAILABLE &&
             ((string) $diningTable->dining_area_id !== (string) $data['dining_area_id'] || ($data['is_active'] ?? true) === false)) {
