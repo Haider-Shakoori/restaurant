@@ -42,14 +42,20 @@
     <SolidColorBrush x:Key="SuccessBrush" Color="#039855" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#C0ECFDF3" />
     <SolidColorBrush x:Key="HoverBrush" Color="#8AFFFFFF" />
-    <!-- Premium charcoal actions with warm-gold interaction affordances. -->
-    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#19212D" />
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#313E50" />
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#101722" />
-    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#45505D" />
-    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#E9BC58" />
-    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
-
-    <!-- WPF cannot do real backdrop-filter blur; blur the artwork and layer translucent surfaces over it. -->
+    <!-- Solid accessible actions. Both themes provide the exact same brush keys. -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#F3C969" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#E9BC58" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#D9A63B" />
+    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#D6A94B" />
+    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#9B6C15" />
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#111827" />
+    <SolidColorBrush x:Key="ButtonSecondaryBackgroundBrush" Color="#F8FAFC" />
+    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#E8EFF8" />
+    <SolidColorBrush x:Key="ButtonSecondaryPressedBrush" Color="#DCE5F0" />
+    <SolidColorBrush x:Key="ButtonSecondaryOutlineBrush" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="ButtonSecondaryForegroundBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="ButtonDisabledBackgroundBrush" Color="#E5E7EB" />
+    <SolidColorBrush x:Key="ButtonDisabledForegroundBrush" Color="#475569" />
+    <SolidColorBrush x:Key="ButtonDisabledOutlineBrush" Color="#CBD5E1" />
     <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="24" />
 </ResourceDictionary>
