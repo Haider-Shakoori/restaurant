@@ -1641,14 +1641,19 @@ internal static class RestaurantOperationalPages
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
 
-        var kitchen = await db.PrintJobs.AsNoTracking()
+        // EF Core SQLite cannot translate DateTimeOffset ordering. Read the
+        // already status-filtered queue and sort timestamps in managed code;
+        // otherwise Settings fails even on a brand-new empty restaurant.
+        var kitchen = (await db.PrintJobs.AsNoTracking()
             .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .ToArrayAsync())
             .OrderBy(job => job.CreatedAtUtc)
-            .ToArrayAsync();
-        var receipts = await db.ReceiptPrintJobs.AsNoTracking()
+            .ToArray();
+        var receipts = (await db.ReceiptPrintJobs.AsNoTracking()
             .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .ToArrayAsync())
             .OrderBy(job => job.CreatedAtUtc)
-            .ToArrayAsync();
+            .ToArray();
 
         var interrupted = kitchen.Count(job => job.Status == "printing") +
                           receipts.Count(job => job.Status == "printing");
