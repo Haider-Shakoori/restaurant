@@ -5,8 +5,8 @@ namespace App\Http\Controllers\Tenant;
 use App\Http\Controllers\Controller;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
-use App\Models\InventoryItem;
 use App\Models\InventoryBalance;
+use App\Models\InventoryItem;
 use App\Models\RecipeItem;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
@@ -47,7 +47,9 @@ class TenantDesktopManagementController extends Controller
         $entity = $menuCategory ?? new MenuCategory;
         $entity->name = trim($data['name']);
         $entity->is_active = $data['is_active'] ?? ($menuCategory?->is_active ?? true);
-        if (! $menuCategory) $entity->sort_order = 0;
+        if (! $menuCategory) {
+            $entity->sort_order = 0;
+        }
         $entity->save();
 
         return response()->json(['data' => $entity], $menuCategory ? 200 : 201);
@@ -73,7 +75,9 @@ class TenantDesktopManagementController extends Controller
             'price' => $data['price'],
             'is_available' => $data['is_available'] ?? ($menuItem?->is_available ?? true),
         ]);
-        if (! $menuItem) $entity->sort_order = 0;
+        if (! $menuItem) {
+            $entity->sort_order = 0;
+        }
         $entity->save();
 
         return response()->json(['data' => $entity], $menuItem ? 200 : 201);
@@ -108,7 +112,9 @@ class TenantDesktopManagementController extends Controller
         $entity->branch_id = $data['branch_id'];
         $entity->name = trim($data['name']);
         $entity->is_active = $data['is_active'] ?? ($diningArea?->is_active ?? true);
-        if (! $diningArea) $entity->sort_order = 0;
+        if (! $diningArea) {
+            $entity->sort_order = 0;
+        }
         $entity->save();
 
         return response()->json(['data' => $entity], $diningArea ? 200 : 201);
@@ -138,7 +144,9 @@ class TenantDesktopManagementController extends Controller
         $entity->name = trim($data['name']);
         $entity->capacity = (int) $data['capacity'];
         $entity->is_active = $data['is_active'] ?? ($diningTable?->is_active ?? true);
-        if (! $diningTable) $entity->status = DiningTable::STATUS_AVAILABLE;
+        if (! $diningTable) {
+            $entity->status = DiningTable::STATUS_AVAILABLE;
+        }
         $entity->save();
 
         return response()->json(['data' => $entity], $diningTable ? 200 : 201);
