@@ -35,6 +35,7 @@ internal sealed class DesktopUserManagementWindow : Window
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(8) };
     private readonly Button _save = new() { Content = "Create account", MinWidth = 170, Height = 36 };
     private DesktopStaffAccount? _selected;
+    public bool SavedChanges { get; private set; }
 
     public DesktopUserManagementWindow(AuthSession session)
     {
@@ -186,6 +187,7 @@ internal sealed class DesktopUserManagementWindow : Window
             request.Content = JsonContent.Create(payload, options: JsonOptions);
             using var response = await _http.SendAsync(request);
             await CheckResponseAsync(response);
+            SavedChanges = true;
             _password.Clear();
             ClearForm();
             await RefreshAsync();
