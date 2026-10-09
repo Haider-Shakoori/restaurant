@@ -38,6 +38,8 @@ use App\Http\Controllers\Tenant\RecipeController;
 use App\Http\Controllers\Tenant\RecordProductionWasteController;
 use App\Http\Controllers\Tenant\RefireKitchenTicketItemController;
 use App\Http\Controllers\Tenant\RestaurantSettingsController;
+use App\Http\Controllers\Tenant\RestaurantModulesController;
+use App\Http\Controllers\Tenant\TenantWebCashierController;
 use App\Http\Controllers\Tenant\ServeOrderController;
 use App\Http\Controllers\Tenant\StartKitchenTicketController;
 use App\Http\Controllers\Tenant\StartKitchenTicketItemController;
@@ -107,6 +109,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
             Route::middleware('tenant.role:owner,admin,manager,waiter,cashier')->group(function (): void {
                 Route::get('/orders', [TenantPortalController::class, 'orders'])->name('tenant.web.orders');
                 Route::post('/orders/take', [TenantWebOrderController::class, 'store'])->name('tenant.web.orders.take');
+                Route::post('/orders/{order}/serve', [TenantWebCashierController::class, 'serve'])->name('tenant.web.orders.serve');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,kitchen')->group(function (): void {
@@ -127,14 +130,17 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
 
             Route::middleware('tenant.role:owner,admin,manager,cashier')->group(function (): void {
                 Route::get('/pos', [TenantPortalController::class, 'pos'])->name('tenant.web.pos');
+                Route::post('/orders/{order}/bill', [TenantWebCashierController::class, 'bill'])->name('tenant.web.orders.bill');
+                Route::post('/bills/{bill}/payments', [TenantWebCashierController::class, 'pay'])->name('tenant.web.bills.payments');
+                Route::post('/cashier/sessions/open', [TenantWebCashierController::class, 'openSession'])->name('tenant.web.cashier.open');
                 Route::get('/daily-closing', [TenantPortalController::class, 'closing'])->name('tenant.web.closing');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
-                Route::get('/inventory', [TenantPortalController::class, 'inventory'])->name('tenant.web.inventory');
-                Route::get('/purchasing', [TenantPortalController::class, 'purchasing'])->name('tenant.web.purchasing');
-                Route::post('/purchasing/orders', [PurchaseOrderController::class, 'store'])->name('tenant.web.purchasing.orders.store');
-                Route::post('/purchasing/orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])->name('tenant.web.purchasing.orders.receive');
+                Route::get('/inventory', [TenantPortalController::class, 'inventory'])->middleware('restaurant.module:inventory')->name('tenant.web.inventory');
+                Route::get('/purchasing', [TenantPortalController::class, 'purchasing'])->middleware('restaurant.module:purchasing')->name('tenant.web.purchasing');
+                Route::post('/purchasing/orders', [PurchaseOrderController::class, 'store'])->middleware('restaurant.module:purchasing')->name('tenant.web.purchasing.orders.store');
+                Route::post('/purchasing/orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])->middleware('restaurant.module:purchasing')->name('tenant.web.purchasing.orders.receive');
             });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
@@ -148,6 +154,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                     ->name('tenant.web.devices.revoke');
                 Route::post('/settings/restaurant', [RestaurantSettingsController::class, 'update'])
                     ->name('tenant.web.settings.restaurant.update');
+                Route::post('/settings/modules', [RestaurantModulesController::class, 'update'])->name('tenant.web.settings.modules.update');
 
                 Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
@@ -164,8 +171,8 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
             });
 
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
-                Route::post('/setup/inventory/item', [TenantPortalSetupController::class, 'inventoryItem']);
-                Route::post('/setup/supplier', [TenantPortalSetupController::class, 'supplier']);
+                Route::post('/setup/inventory/item', [TenantPortalSetupController::class, 'inventoryItem'])->middleware('restaurant.module:inventory');
+                Route::post('/setup/supplier', [TenantPortalSetupController::class, 'supplier'])->middleware('restaurant.module:inventory');
             });
         });
     });
@@ -208,6 +215,9 @@ Route::middleware($tenantMiddleware)
 
             Route::get('/bootstrap', BootstrapController::class)
                 ->name('tenant.api.bootstrap');
+
+            Route::get('/desktop/modules', [RestaurantModulesController::class, 'show'])->name('tenant.api.desktop.modules.show');
+            Route::middleware('tenant.role:owner,admin')->post('/desktop/modules', [RestaurantModulesController::class, 'update'])->name('tenant.api.desktop.modules.update');
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
                 Route::get('/desktop/management', [TenantDesktopManagementController::class, 'index']);
@@ -387,40 +397,40 @@ Route::middleware($tenantMiddleware)
 
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
                 Route::get('/inventory/items', [InventoryItemController::class, 'index'])
-                    ->name('tenant.api.inventory.items.index');
+                    ->name('tenant.api.inventory.items.index')->middleware('restaurant.module:inventory');
 
                 Route::post('/inventory/items', [InventoryItemController::class, 'store'])
-                    ->name('tenant.api.inventory.items.store');
+                    ->name('tenant.api.inventory.items.store')->middleware('restaurant.module:inventory');
 
                 Route::post('/inventory/items/{inventoryItem}/adjustments', [InventoryItemController::class, 'adjust'])
-                    ->name('tenant.api.inventory.items.adjust');
+                    ->name('tenant.api.inventory.items.adjust')->middleware('restaurant.module:inventory');
 
                 Route::get('/inventory/movements', [StockMovementController::class, 'index'])
-                    ->name('tenant.api.inventory.movements.index');
+                    ->name('tenant.api.inventory.movements.index')->middleware('restaurant.module:inventory');
 
                 Route::get('/suppliers', [SupplierController::class, 'index'])
-                    ->name('tenant.api.suppliers.index');
+                    ->name('tenant.api.suppliers.index')->middleware('restaurant.module:inventory');
 
                 Route::post('/suppliers', [SupplierController::class, 'store'])
-                    ->name('tenant.api.suppliers.store');
+                    ->name('tenant.api.suppliers.store')->middleware('restaurant.module:inventory');
 
                 Route::get('/purchasing/orders', [PurchaseOrderController::class, 'index'])
-                    ->name('tenant.api.purchasing.orders.index');
+                    ->name('tenant.api.purchasing.orders.index')->middleware('restaurant.module:purchasing');
 
                 Route::post('/purchasing/orders', [PurchaseOrderController::class, 'store'])
-                    ->name('tenant.api.purchasing.orders.store');
+                    ->name('tenant.api.purchasing.orders.store')->middleware('restaurant.module:purchasing');
 
                 Route::get('/purchasing/orders/{purchaseOrder}', [PurchaseOrderController::class, 'show'])
-                    ->name('tenant.api.purchasing.orders.show');
+                    ->name('tenant.api.purchasing.orders.show')->middleware('restaurant.module:purchasing');
 
                 Route::post('/purchasing/orders/{purchaseOrder}/receive', [PurchaseOrderController::class, 'receive'])
-                    ->name('tenant.api.purchasing.orders.receive');
+                    ->name('tenant.api.purchasing.orders.receive')->middleware('restaurant.module:purchasing');
 
                 Route::get('/recipes', [RecipeController::class, 'index'])
-                    ->name('tenant.api.recipes.index');
+                    ->name('tenant.api.recipes.index')->middleware('restaurant.module:recipes');
 
                 Route::post('/menu/items/{menuItem}/recipes', [RecipeController::class, 'store'])
-                    ->name('tenant.api.recipes.store');
+                    ->name('tenant.api.recipes.store')->middleware('restaurant.module:recipes');
             });
 
             Route::middleware('tenant.role:owner,admin,manager,accountant')->group(function (): void {
