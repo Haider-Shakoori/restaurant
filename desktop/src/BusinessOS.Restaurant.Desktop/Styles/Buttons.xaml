@@ -1,0 +1,111 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Keep the same implicit text behavior in the installed WPF app and the
+         isolated Windows UI smoke harness. -->
+    <Style TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+        <Style.Triggers>
+            <!-- WPF implicit TextBlock styling otherwise overrides the Button's
+                 foreground when an action contains a nested text label.
+                 Both enabled and disabled buttons must follow their own brush. -->
+            <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                         Value="True">
+                <Setter Property="Foreground"
+                        Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                         Value="False">
+                <Setter Property="Foreground"
+                        Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Shared template: colors come from the themed Button.Foreground and
+         Button.Background. The scoped TextBlock style fixes a long-standing
+         inheritance bug where the global dark TextBlock style made labels
+         unreadable on dark primary buttons. -->
+    <ControlTemplate x:Key="PremiumActionTemplate" TargetType="{x:Type Button}">
+        <Border x:Name="Surface"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="12" SnapsToDevicePixels="True">
+            <ContentPresenter HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Margin="{TemplateBinding Padding}"
+                              RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Foreground}">
+                <ContentPresenter.Resources>
+                    <Style TargetType="{x:Type TextBlock}">
+                        <Setter Property="Foreground"
+                                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                    </Style>
+                </ContentPresenter.Resources>
+            </ContentPresenter>
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource ButtonFocusBrush}" />
+                <Setter TargetName="Surface" Property="BorderThickness" Value="2" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="BaseActionButton" TargetType="{x:Type Button}">
+        <Setter Property="FontFamily" Value="Segoe UI" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="18,10" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="MinHeight" Value="42" />
+        <Setter Property="Template" Value="{StaticResource PremiumActionTemplate}" />
+    </Style>
+
+    <Style x:Key="PrimaryActionButton" TargetType="{x:Type Button}"
+           BasedOn="{StaticResource BaseActionButton}">
+        <Setter Property="Background" Value="{DynamicResource ButtonPrimaryBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ButtonOutlineBrush}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonPressedBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource ButtonDisabledOutlineBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Default all operational call-to-action buttons to the primary palette. -->
+    <Style TargetType="{x:Type Button}" BasedOn="{StaticResource PrimaryActionButton}" />
+
+    <!-- Neutral actions remain opaque, dark-text and readable over both
+         blurred photography and white management-dialog backgrounds. -->
+    <Style x:Key="SecondaryActionButton" TargetType="{x:Type Button}"
+           BasedOn="{StaticResource BaseActionButton}">
+        <Setter Property="Background" Value="{DynamicResource ButtonSecondaryBackgroundBrush}" />
+        <Setter Property="Foreground" Value="{DynamicResource ButtonSecondaryForegroundBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ButtonSecondaryOutlineBrush}" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonSecondaryHoverBrush}" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+                <Setter Property="Background" Value="{DynamicResource ButtonSecondaryPressedBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Background" Value="{DynamicResource ButtonDisabledBackgroundBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource ButtonDisabledForegroundBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource ButtonDisabledOutlineBrush}" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+</ResourceDictionary>

@@ -310,6 +310,7 @@ internal static class RestaurantOperationalPages
         var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
         create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipes.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         recipes.Click += async (_, _) =>
         {
             await using var recipeDb = factory.Create();
@@ -423,6 +424,7 @@ internal static class RestaurantOperationalPages
         recipeCreate.Margin = new Thickness(0, 0, 10, 10);
         menuActions.Children.Add(recipeCreate);
         var costPreview = new Button { Content = "Recipe Food-Cost Preview", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        costPreview.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         costPreview.Click += async (_, _) =>
         {
             await using var costDb = factory.Create();
