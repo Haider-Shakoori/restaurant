@@ -173,7 +173,8 @@ internal static class Program
         // it, and confirm a theme switch never leaves dark text on dark buttons.
         ThemeManager.Apply(AppearanceTheme.Glass);
         await NavigateAsync(owner, "tables");
-        await CheckFormAsync(app, owner, "+ Add / Edit Floors & Tables",
+        Assert(FindButton(owner, "Sync from web") is not null, "Tables workspace provides explicit cloud refresh");
+        await CheckFormAsync(app, owner, "Manage floors & tables",
             "Restaurant · Catalog, Floors & Inventory", "Create", null);
         ThemeManager.Apply(AppearanceTheme.Classic);
 
