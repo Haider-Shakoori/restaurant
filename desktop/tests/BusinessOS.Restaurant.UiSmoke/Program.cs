@@ -136,6 +136,23 @@ internal static class Program
         // on this disposable runner; production startup remains unchanged.
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
+
+        // Reproduce a real offline tenant with a branch previously synchronized
+        // into the disposable CI SQLite snapshot; never seed user databases.
+        var databaseFactory = new LocalDatabaseFactory();
+        await databaseFactory.EnsureCreatedAsync();
+        await using (var database = databaseFactory.Create())
+        {
+            database.Branches.Add(new LocalBranch
+            {
+                Id = "ci-synced-branch",
+                Code = "CI-MAIN",
+                Name = "CI Main Branch (cached)",
+                IsActive = true,
+            });
+            await database.SaveChangesAsync();
+        }
+
         var vm = (MainWindowViewModel)owner.DataContext;
         await WaitUntilAsync(() => vm.CurrentPage is not null || vm.HasWorkspaceError,
             "initial Dashboard render");
