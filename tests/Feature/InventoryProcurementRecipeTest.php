@@ -31,6 +31,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class InventoryProcurementRecipeTest extends TestCase
@@ -167,6 +168,72 @@ class InventoryProcurementRecipeTest extends TestCase
         $this->assertTrue($v2->is_active);
         $this->assertSame(2, $v2->version);
         $this->assertSame(1, Recipe::query()->where('is_active', true)->count());
+    }
+
+    public function test_recipe_quantity_and_unit_convert_to_ingredient_base_without_changing_costing(): void
+    {
+        $tenant = $this->createTenant('restaurant-a', 'a.test');
+        tenancy()->initialize($tenant);
+
+        [, $branch, , $rice, $menuItem] = $this->seedProcurement(true);
+        $recipes = app(RecipeService::class);
+
+        $metric = $recipes->createVersion($branch, $menuItem, [
+            'items' => [[
+                'inventory_item_id' => $rice->id,
+                'quantity' => '0.2500',
+                'unit' => 'kg',
+            ]],
+        ]);
+
+        $this->assertSame('250.0000', $metric->items->first()->quantity_base);
+        $this->assertSame('g', $rice->base_unit);
+
+        $legacy = $recipes->createVersion($branch, $menuItem, [
+            'items' => [[
+                'inventory_item_id' => $rice->id,
+                'quantity_base' => '150.0000',
+            ]],
+        ]);
+
+        $this->assertSame('150.0000', $legacy->items->first()->quantity_base);
+        $this->assertFalse($metric->fresh()->is_active);
+        $this->assertTrue($legacy->is_active);
+    }
+
+    public function test_recipe_rejects_mixing_kilograms_with_liters_and_fractional_pieces(): void
+    {
+        $tenant = $this->createTenant('restaurant-a', 'a.test');
+        tenancy()->initialize($tenant);
+        [, $branch, , $rice, $menuItem] = $this->seedProcurement(true);
+        $service = app(RecipeService::class);
+
+        try {
+            $service->createVersion($branch, $menuItem, [
+                'items' => [[
+                    'inventory_item_id' => $rice->id,
+                    'quantity' => '2.0000',
+                    'unit' => 'l',
+                ]],
+            ]);
+            $this->fail('Incompatible recipe unit was accepted.');
+        } catch (ValidationException $ex) {
+            $this->assertArrayHasKey('items', $ex->errors());
+        }
+
+        $rice->update(['base_unit' => 'pcs']);
+        try {
+            $service->createVersion($branch, $menuItem, [
+                'items' => [[
+                    'inventory_item_id' => $rice->id,
+                    'quantity' => '1.5000',
+                    'unit' => 'pcs',
+                ]],
+            ]);
+            $this->fail('Fractional pieces were accepted.');
+        } catch (ValidationException $ex) {
+            $this->assertArrayHasKey('items', $ex->errors());
+        }
     }
 
     public function test_serving_order_consumes_recipe_stock_once_and_allows_visible_negative_stock(): void

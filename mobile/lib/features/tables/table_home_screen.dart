@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
@@ -7,6 +10,7 @@ import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
+import 'ready_pickup_alerts.dart';
 
 class TableHomeScreen extends StatefulWidget {
   const TableHomeScreen({
@@ -34,14 +38,34 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   String? _connectionStatus;
   SessionCredentials? _session;
   bool _syncing = false;
+  Timer? _readyRefreshTimer;
+  bool _refreshInProgress = false;
+  ReadyPickupTracker? _alertTracker;
+  List<ReadyPickupAlert> _readyAlerts = const [];
 
   @override
   void initState() {
     super.initState();
     _refresh();
+    // SyncCoordinator pulls LAN/cloud changes every 30 seconds; read the
+    // committed SQLite snapshots more frequently to surface new READY events
+    // promptly without starting another network connection per refresh.
+    _readyRefreshTimer = Timer.periodic(
+      const Duration(seconds: 6),
+      (_) => unawaited(_refresh()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _readyRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
+    if (_refreshInProgress) return;
+    _refreshInProgress = true;
+    try {
     final db = widget.dependencies.database;
     final values = await Future.wait<Object?>([
       db.branches(),
@@ -54,11 +78,30 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       widget.dependencies.credentials.readSession(),
     ]);
 
-    if (!mounted) {
-      return;
+    if (!mounted) return;
+
+    final nextOrders = List<Map<String, Object?>>.from(
+      values[2]! as List<Map<String, Object?>>,
+    );
+    final nextTables = List<Map<String, Object?>>.from(
+      values[1]! as List<Map<String, Object?>>,
+    );
+    final alerts = readyPickupAlerts(nextOrders, nextTables);
+    final session = values[7] as SessionCredentials?;
+    // Never share an alert's acknowledged state across tenant installations.
+    final alertScope = session?.tenantId ?? session?.deviceId ?? 'signed-out';
+    final setting = 'ready_pickup_seen_$alertScope';
+    _alertTracker ??= ReadyPickupTracker.decode(
+      await db.systemState(setting),
+    );
+    final freshAlerts = _alertTracker!.newlyReady(alerts);
+    if (freshAlerts.isNotEmpty) {
+      await db.setSystemState(setting, _alertTracker!.encode());
     }
 
+    if (!mounted) return;
     setState(() {
+      _readyAlerts = alerts;
       _branches = List<Map<String, Object?>>.from(
         values[0]! as List<Map<String, Object?>>,
       );
@@ -72,8 +115,28 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       _conflicts = values[4]! as int;
       _syncError = values[5] as String?;
       _connectionStatus = values[6] as String?;
-      _session = values[7] as SessionCredentials?;
+      _session = session;
     });
+
+    if (freshAlerts.isNotEmpty && session != null) {
+      unawaited(SystemSound.play(SystemSoundType.alert));
+      unawaited(HapticFeedback.heavyImpact());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text(
+            'READY FOR PICKUP: ${freshAlerts.map((a) => a.reference).join(', ')}',
+          ),
+          action: SnackBarAction(
+            label: 'View',
+            onPressed: () => _showOrder(freshAlerts.first.orderId),
+          ),
+        ),
+      );
+    }
+    } finally {
+      _refreshInProgress = false;
+    }
   }
 
   Future<void> _sync() async {
@@ -196,6 +259,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   }
 
   Future<void> _logout() async {
+    _alertTracker = null;
+    _readyAlerts = const [];
     await widget.dependencies.session.logoutLocal();
     widget.onLoggedOut();
   }
@@ -209,6 +274,17 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       appBar: AppBar(
         title: Text(s.tables),
         actions: [
+          IconButton(
+            tooltip: '${_readyAlerts.length} orders ready for pickup',
+            onPressed: _readyAlerts.isEmpty
+                ? null
+                : () => _showOrder(_readyAlerts.first.orderId),
+            icon: Badge(
+              isLabelVisible: _readyAlerts.isNotEmpty,
+              label: Text('${_readyAlerts.length}'),
+              child: const Icon(Icons.notifications_active_outlined),
+            ),
+          ),
           IconButton(
             tooltip: s.sync,
             onPressed: _syncing ? null : _sync,
@@ -296,6 +372,47 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                   ),
               ],
             ),
+            if (_readyAlerts.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Card(
+                color: const Color(0xFFFFF7E1),
+                margin: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: const BorderSide(color: Color(0xFFEBC46A), width: 1.5),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.notifications_active_rounded,
+                            color: Color(0xFF916312)),
+                        SizedBox(width: 8),
+                        Expanded(child: Text('READY FOR PICKUP',
+                            style: TextStyle(fontWeight: FontWeight.w900,
+                                color: Color(0xFF46330F)))),
+                      ]),
+                      const SizedBox(height: 7),
+                      const Text('Collect prepared food, deliver to the guest, '
+                          'then mark the complete order Served in POS.',
+                          style: TextStyle(color: Color(0xFF554521))),
+                      for (final alert in _readyAlerts)
+                        ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(alert.reference, style:
+                              const TextStyle(fontWeight: FontWeight.w800)),
+                          subtitle: Text('${alert.itemCount} ready item(s)'),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () => _showOrder(alert.orderId),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Card(
               margin: EdgeInsets.zero,

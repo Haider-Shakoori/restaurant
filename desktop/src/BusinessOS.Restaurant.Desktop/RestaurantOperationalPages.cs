@@ -314,16 +314,34 @@ internal static class RestaurantOperationalPages
         recipes.Click += async (_, _) =>
         {
             await using var recipeDb = factory.Create();
+            // Display every stored component in its actual ingredient stock
+            // unit; the authoritative costing/consumption quantity stays in
+            // QuantityBase, including older recipes without a selected UOM.
             var versions = await (from version in recipeDb.Recipes.AsNoTracking()
                                   join menuItem in recipeDb.MenuItems.AsNoTracking()
                                       on version.MenuItemId equals menuItem.Id
-                                  orderby menuItem.Name, version.Version descending
-                                  select new { Menu = menuItem.Name, version.Name, version.Version, version.IsActive })
-                .ToListAsync();
+                                  join branch in recipeDb.Branches.AsNoTracking()
+                                      on version.BranchId equals branch.Id
+                                  join recipeItem in recipeDb.RecipeItems.AsNoTracking()
+                                      on version.Id equals recipeItem.RecipeId
+                                  join ingredient in recipeDb.InventoryItems.AsNoTracking()
+                                      on recipeItem.InventoryItemId equals ingredient.Id
+                                  orderby menuItem.Name, version.Version descending, ingredient.Name
+                                  select new
+                                  {
+                                      Branch = branch.Name,
+                                      Menu = menuItem.Name,
+                                      Recipe = version.Name,
+                                      version.Version,
+                                      Active = version.IsActive,
+                                      Ingredient = ingredient.Name,
+                                      Quantity = recipeItem.QuantityBase,
+                                      Unit = ingredient.BaseUnit,
+                                  }).ToListAsync();
             var dialog = new Window
             {
-                Title = "Recipe Versions",
-                Width = 650, Height = 460,
+                Title = "Recipe Ingredients & Units",
+                Width = 1020, Height = 600,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
             var owner = System.Windows.Application.Current?.MainWindow;
@@ -366,34 +384,55 @@ internal static class RestaurantOperationalPages
             var menu = new ComboBox { ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
             var ingredient = new ComboBox { ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
             var quantity = new TextBox { Text = "1", Height = 34 };
+            var recipeUnit = new ComboBox { Height = 34, MinWidth = 110 };
+            var unitHelp = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 5) };
+            unitHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            ingredient.SelectionChanged += (_, _) =>
+            {
+                if (ingredient.SelectedItem is LocalInventoryItem selected)
+                {
+                    recipeUnit.ItemsSource = RecipeUnitConversion.AllowedUnits(selected.BaseUnit);
+                    recipeUnit.SelectedItem = selected.BaseUnit.ToLowerInvariant();
+                    unitHelp.Text = $"Stock is tracked in {selected.BaseUnit}. " +
+                                    "Quantity and unit will be converted to that stock unit for inventory and food cost.";
+                }
+            };
+            ingredient.SelectedIndex = ingredients.Count > 0 ? 0 : -1;
             foreach (var entry in new (string Label, FrameworkElement Input)[]
             {
                 ("Branch", branch), ("Menu item", menu), ("Ingredient", ingredient),
-                ("Quantity in base units", quantity)
+                ("Recipe quantity", quantity), ("Recipe unit (kg, g, l, ml, pcs as applicable)", recipeUnit)
             })
             {
                 form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
                 form.Children.Add(entry.Input);
             }
+            form.Children.Add(unitHelp);
             var components = new List<LocalRecipeComponentRequest>();
             var summary = new TextBlock { Text = "Add at least one ingredient.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
             var add = new Button { Content = "+ Add Recipe Ingredient", Height = 36 };
             add.Click += (_, _) =>
             {
                 if (ingredient.SelectedItem is not LocalInventoryItem selected ||
-                    !decimal.TryParse(quantity.Text, out var amount) || amount <= 0)
+                    !decimal.TryParse(quantity.Text, out var amount) || amount <= 0 ||
+                    recipeUnit.SelectedItem is not string unit)
                 {
-                    summary.Text = "Choose an ingredient and positive quantity.";
+                    summary.Text = "Choose an ingredient, positive recipe quantity and a compatible unit.";
                     return;
                 }
+                decimal quantityBase;
+                try { quantityBase = RecipeUnitConversion.ToBase(amount, unit, selected.BaseUnit); }
+                catch (ArgumentException ex) { summary.Text = ex.Message; return; }
                 if (components.Any(x => x.InventoryItemId == selected.Id))
                 {
                     summary.Text = "This ingredient has already been added.";
                     return;
                 }
-                components.Add(new LocalRecipeComponentRequest(selected.Id, amount));
+                components.Add(new LocalRecipeComponentRequest(selected.Id, quantityBase));
                 summary.Text = string.Join("\n", components.Select(x =>
-                    ingredients.First(y => y.Id == x.InventoryItemId).Name + ": " + x.QuantityBase));
+                    ingredients.First(y => y.Id == x.InventoryItemId).Name + ": " +
+                    x.QuantityBase.ToString("0.####") + " " +
+                    ingredients.First(y => y.Id == x.InventoryItemId).BaseUnit));
             };
             form.Children.Add(add);
             form.Children.Add(summary);

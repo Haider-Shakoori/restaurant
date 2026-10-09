@@ -7,6 +7,7 @@ use App\Models\MenuItem;
 use App\Models\Recipe;
 use App\Models\RestaurantBranch;
 use App\Support\Quantity;
+use App\Support\RecipeUnitConversion;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -49,7 +50,25 @@ class RecipeService
                     ]);
                 }
 
-                $quantity = Quantity::normalize((string) $component['quantity_base']);
+                if (isset($component['quantity'], $component['unit'])) {
+                    if (isset($component['quantity_base'])) {
+                        throw ValidationException::withMessages([
+                            'items' => 'Enter either quantity and unit or quantity_base, not both.',
+                        ]);
+                    }
+                    $quantity = RecipeUnitConversion::toBase(
+                        (string) $component['quantity'],
+                        (string) $component['unit'],
+                        $item->base_unit,
+                    );
+                } elseif (isset($component['quantity_base'])) {
+                    // Keep existing stock-base quantity clients backward-compatible.
+                    $quantity = Quantity::normalize((string) $component['quantity_base']);
+                } else {
+                    throw ValidationException::withMessages([
+                        'items' => 'Each recipe ingredient requires a quantity and unit.',
+                    ]);
+                }
 
                 if (Quantity::toScaled($quantity) <= 0) {
                     throw ValidationException::withMessages([
