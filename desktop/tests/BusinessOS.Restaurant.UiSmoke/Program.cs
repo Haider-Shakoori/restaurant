@@ -287,13 +287,14 @@ internal static class Program
         var expected = new[]
         {
             ("kitchen", "Save restaurant workflow"),
+            ("modules", "Sync modules from Web"),
             ("backup", "Backup"),
             ("printing", "Review & retry selected print"),
             ("network", "Refresh status"),
             ("devices", "Unpair device"),
         };
 
-        Assert(tabs.Items.Count == expected.Length, "Settings contains five organized tabs");
+        Assert(tabs.Items.Count == expected.Length, "Settings contains six organized tabs");
         for (var index = 0; index < expected.Length; index++)
         {
             var (id, button) = expected[index];
