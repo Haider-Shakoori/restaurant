@@ -369,6 +369,9 @@ class LocalDatabase implements SyncStore {
         ((data['cursor'] as num?)?.toInt() ?? 0).toString(),
       );
       await _setSettingTxn(txn, 'server_locked', '0');
+      // A successful setup/bootstrap supersedes any pre-login
+      // not_configured sync error left over from a prior session.
+      await _setSettingTxn(txn, 'last_sync_error', '');
       await _reapplyLocalOccupancy(txn);
     });
   }
