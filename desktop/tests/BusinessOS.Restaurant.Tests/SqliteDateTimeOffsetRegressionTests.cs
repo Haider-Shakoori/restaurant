@@ -21,6 +21,13 @@ public sealed class SqliteDateTimeOffsetRegressionTests
 
         Assert.DoesNotContain("orderby ticket.QueuedAt", pages, StringComparison.Ordinal);
         Assert.DoesNotContain("orderby ticket.QueuedAt", actions, StringComparison.Ordinal);
+        // POS and floor screens used to fail during navigation with
+        // 'SQLite does not support expressions of type DateTimeOffset in ORDER BY'.
+        Assert.DoesNotContain("orderby line.CreatedAtUtc", actions, StringComparison.Ordinal);
+        Assert.DoesNotContain("orderby order.UpdatedAtUtc descending", actions, StringComparison.Ordinal);
+        Assert.Contains("var orderLines = (await (", actions, StringComparison.Ordinal);
+        Assert.Contains("var activeOrders = (await (", actions, StringComparison.Ordinal);
+        Assert.Contains("var unsentLines = (await (", actions, StringComparison.Ordinal);
         Assert.DoesNotContain("orderby po.OrderedAt descending", pages, StringComparison.Ordinal);
         Assert.DoesNotContain("expense.RecordedAtUtc descending", pages, StringComparison.Ordinal);
 

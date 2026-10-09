@@ -1,0 +1,115 @@
+<Window x:Class="BusinessOS.Restaurant.Desktop.OperatorSignInWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Sign in — BusinessOS Restaurant"
+        Width="720" Height="690" MinWidth="470" MinHeight="540"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource AppBackgroundBrush}"
+        SnapsToDevicePixels="True" UseLayoutRounding="True">
+    <Grid>
+        <Image x:Name="RestaurantBackdrop"
+               Source="Assets/RestaurantGlassBackground.jpg"
+               Stretch="UniformToFill"
+               RenderOptions.BitmapScalingMode="HighQuality"
+               Effect="{DynamicResource BackgroundBlurEffect}" />
+        <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
+
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                      VerticalScrollBarVisibility="Auto">
+            <Border MaxWidth="570" Margin="28" Padding="32"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    CornerRadius="26"
+                    Background="{DynamicResource CardBackgroundBrush}"
+                    BorderBrush="{DynamicResource CardBorderBrush}"
+                    BorderThickness="1.5">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="36" ShadowDepth="8"
+                                      Opacity="0.27" Color="#10233D" />
+                </Border.Effect>
+                <StackPanel>
+                    <Grid Margin="0,0,0,21">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="62" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Width="56" Height="56" CornerRadius="18"
+                                Background="{DynamicResource BrandPrimaryBrush}">
+                            <TextBlock Text="B" FontWeight="Bold" FontSize="28"
+                                       Foreground="White"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="10,5,0,0">
+                            <TextBlock Text="BusinessOS" FontWeight="Bold" FontSize="21" />
+                            <TextBlock Text="RESTAURANT  •  SECURE WORKSPACE"
+                                       FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BrandPrimaryBrush}"
+                                       Margin="0,4,0,0" />
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock Text="Welcome back"
+                               FontSize="30" FontWeight="Bold" />
+                    <TextBlock Text="Operator sign in"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="{DynamicResource BrandPrimaryBrush}"
+                               Margin="0,3,0,6" />
+                    <TextBlock Text="Enter your restaurant operator credentials to continue."
+                               FontSize="13" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               Margin="0,0,0,22" />
+
+                    <TextBlock Text="RESTAURANT SERVER" FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBox x:Name="TenantUrlBox" MinHeight="44"
+                             Margin="0,7,0,15"
+                             ToolTip="For example https://your-restaurant.restaurant.businessos.af"
+                             AutomationProperties.Name="Licensed restaurant URL" />
+
+                    <TextBlock Text="EMAIL ADDRESS" FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBox x:Name="EmailBox" Margin="0,7,0,15" MinHeight="44"
+                             AutomationProperties.Name="Operator email" />
+
+                    <TextBlock Text="PASSWORD" FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <PasswordBox x:Name="PasswordInput"
+                                 Margin="0,7,0,18" MinHeight="44"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 Foreground="{DynamicResource TextPrimaryBrush}"
+                                 BorderBrush="{DynamicResource BorderStrongBrush}"
+                                 BorderThickness="1" Padding="11,8"
+                                 AutomationProperties.Name="Operator password" />
+
+                    <Button x:Name="SignInButton"
+                            Content="Sign in  →"
+                            MinHeight="48" FontSize="14"
+                            Click="OnSignInClick" IsDefault="True" />
+                    <Button Content="Cancel" Margin="0,10,0,0"
+                            MinHeight="38" Click="OnCancelClick" IsCancel="True"
+                            Background="{DynamicResource TopBarActionBrush}"
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            BorderBrush="{DynamicResource CardBorderBrush}"
+                            BorderThickness="1" />
+
+                    <TextBlock x:Name="StatusText"
+                               Text="First sign-in requires internet. Offline work follows your device license and operator permissions."
+                               TextWrapping="Wrap" FontSize="11.5"
+                               TextAlignment="Center" Margin="0,16,0,0"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <Border BorderBrush="{DynamicResource CardBorderBrush}"
+                            BorderThickness="0,1,0,0" Margin="0,18,0,0">
+                        <TextBlock Text="BusinessOS.af  •  Local-first restaurant operations"
+                                   Foreground="{DynamicResource TextMutedBrush}"
+                                   TextAlignment="Center" FontSize="11"
+                                   Margin="0,13,0,0" />
+                    </Border>
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</Window>

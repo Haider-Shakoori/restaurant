@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BusinessOS.Restaurant.UiSmoke</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/BusinessOS.Restaurant.Desktop/BusinessOS.Restaurant.Desktop.csproj" />
+    <ProjectReference Include="../../src/BusinessOS.Restaurant.Authentication/BusinessOS.Restaurant.Authentication.csproj" />
+    <ProjectReference Include="../../src/BusinessOS.Restaurant.Persistence/BusinessOS.Restaurant.Persistence.csproj" />
+  </ItemGroup>
+</Project>

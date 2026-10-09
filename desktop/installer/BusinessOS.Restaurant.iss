@@ -25,15 +25,17 @@ OutputDir=output
 OutputBaseFilename=BusinessOS-Restaurant-Setup-{#MyAppVersion}-win-x64
 Compression=lzma2/ultra64
 SolidCompression=yes
-WizardStyle=modern dynamic
-; Inno Setup 6.7+ supports full wizard background images. This is a
-; selected Restaurant artwork with installer opacity applied
-; so controls remain readable while the installer carries the same visual brand.
+; Keep native dark-mode labels, buttons and progress text readable over the
+; dimmed restaurant art regardless of the Windows host's light preference.
+WizardStyle=modern dark
+; Build-generated PNG uses the original restaurant art, softened and dimmed
+; exclusively for Setup. The desktop Glass JPG remains untouched.
+; Dark wizard styling supplies light native control text across ALL pages.
 WizardBackImageFile=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantInstallerBackground.png
 WizardBackImageFileDynamicDark=..\src\BusinessOS.Restaurant.Desktop\Assets\RestaurantInstallerBackground.png
-WizardBackImageOpacity=105
-WizardBackColor=#E8F1F4
-WizardBackColorDynamicDark=#0B1E2A
+WizardBackImageOpacity=225
+WizardBackColor=#101C28
+WizardBackColorDynamicDark=#101C28
 WizardImageFile=
 WizardSmallImageFile=
 ArchitecturesAllowed=x64compatible
@@ -120,7 +122,7 @@ begin
     LicenseStatusLabel.Caption :=
       'Already activated on this computer' + #13#10 +
       ExistingPlan + '  •  ' + DaysText;
-    LicenseStatusLabel.Font.Color := $005A8A11;
+    LicenseStatusLabel.Font.Color := $00A9DEA7;
     LicenseEdit.Enabled := False;
     LicenseEdit.Text := 'Activation stored securely on this PC';
   end
@@ -129,7 +131,7 @@ begin
     LicenseStatusLabel.Caption :=
       'Enter the license key generated for your restaurant.' + #13#10 +
       'The first successful Windows activation binds the license to this computer.';
-    LicenseStatusLabel.Font.Color := $006B5A48;
+    LicenseStatusLabel.Font.Color := $00DBD2C3;
     LicenseEdit.Enabled := True;
     LicenseEdit.Text := '';
   end;
@@ -196,6 +198,7 @@ begin
   LicenseHelpLabel.Width := ActivationPage.SurfaceWidth;
   LicenseHelpLabel.Height := ScaleY(42);
   LicenseHelpLabel.WordWrap := True;
+  LicenseHelpLabel.Font.Color := $00DBD2C3;
   LicenseHelpLabel.Caption :=
     'License Key' + #13#10 +
     'Initial activation requires internet. Future setup runs detect the protected activation automatically.';
@@ -285,7 +288,7 @@ begin
     LicenseStatusLabel.Caption :=
       'Activation successful' + #13#10 +
       PlanText + '  •  ' + IntToStr(Days) + ' day(s) remaining';
-    LicenseStatusLabel.Font.Color := $005A8A11;
+    LicenseStatusLabel.Font.Color := $00A9DEA7;
     LicenseEdit.Enabled := False;
     LicenseEdit.Text := 'Activation stored securely on this PC';
     Result := True;
@@ -297,7 +300,7 @@ begin
     ErrorText := 'Activation failed. Check the license key and internet connection.';
 
   LicenseStatusLabel.Caption := ErrorText;
-  LicenseStatusLabel.Font.Color := $002525C4;
+  LicenseStatusLabel.Font.Color := $00AAAAFF;
   MsgBox(ErrorText, mbError, MB_OK);
 end;
 

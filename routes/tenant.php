@@ -149,6 +149,7 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
                 Route::post('/setup/station', [TenantPortalSetupController::class, 'station']);
                 Route::post('/setup/user', [TenantPortalSetupController::class, 'user']);
+                Route::patch('/users/{user}', [TenantPortalSetupController::class, 'updateUser'])->name('tenant.web.users.update');
             });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {

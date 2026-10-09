@@ -118,6 +118,46 @@ public sealed class LocalRestaurantServer : IAsyncDisposable
             return Results.Ok(new { data });
         });
 
+        // Menu images are referenced by the local catalog and fetched by paired
+        // waiter devices. Authenticate before reading any file from disk.
+        app.MapGet("/menu-images/{fileName}", async (
+            string fileName,
+            HttpRequest request,
+            LocalServerOptions serverOptions,
+            LocalTerminalAuthenticator authenticator,
+            CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(
+                request, serverOptions, allowCloudPairing: true, token);
+            if (principal is null)
+                return Results.Unauthorized();
+
+            if (string.IsNullOrWhiteSpace(fileName) ||
+                fileName != Path.GetFileName(fileName) ||
+                fileName.Length > 100)
+                return Results.BadRequest();
+
+            var extension = Path.GetExtension(fileName).ToLowerInvariant();
+            var contentType = extension switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".webp" => "image/webp",
+                _ => null,
+            };
+            if (contentType is null)
+                return Results.NotFound();
+
+            var directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "BusinessOS", "Restaurant", "menu-images");
+            var imagePath = Path.Combine(directory, fileName);
+            if (!File.Exists(imagePath))
+                return Results.NotFound();
+
+            return Results.File(imagePath, contentType, enableRangeProcessing: true);
+        });
+
         app.MapLocalControlPlane();
         app.MapLocalDiagnostics();
         app.MapLocalSync();

@@ -3,7 +3,7 @@
                     xmlns:effects="clr-namespace:System.Windows.Media.Effects;assembly=PresentationCore">
     <!-- Pharma-style frosted shell: the restaurant artwork remains visible underneath. -->
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="#102033" />
-    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#16FFFFFF" />
+    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#46304460" />
 
     <SolidColorBrush x:Key="SurfaceBrush" Color="#C9F8FBFF" />
     <SolidColorBrush x:Key="SidebarBrush" Color="#B8F5F9FF" />
@@ -17,6 +17,12 @@
     </LinearGradientBrush>
 
     <SolidColorBrush x:Key="CardBorderBrush" Color="#D8FFFFFF" />
+    <!-- Nested rows and toolbar controls remain translucent over the blurred artwork. -->
+    <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#B6F8FBFF" />
+    <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#98EDF6FF" />
+    <SolidColorBrush x:Key="GridHeaderBackgroundBrush" Color="#B0EEF5FF" />
+    <SolidColorBrush x:Key="GridSelectedRowBrush" Color="#A6D4E8FF" />
+    <SolidColorBrush x:Key="TopBarActionBrush" Color="#92F8FBFF" />
     <SolidColorBrush x:Key="InputBackgroundBrush" Color="#D4FFFFFF" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#101828" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#344054" />
@@ -25,11 +31,15 @@
     <SolidColorBrush x:Key="BorderStrongBrush" Color="#B8C9D8E8" />
     <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#2F6BFF" />
     <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#BFD9E7FF" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
+    <SolidColorBrush x:Key="WarningSoftBrush" Color="#DFFEF3C7" />
+    <SolidColorBrush x:Key="ErrorBrush" Color="#C2413A" />
+    <SolidColorBrush x:Key="ErrorSoftBrush" Color="#DFFEE2E2" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#039855" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#C0ECFDF3" />
     <SolidColorBrush x:Key="HoverBrush" Color="#8AFFFFFF" />
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
 
     <!-- WPF cannot do real backdrop-filter blur; blur the artwork and layer translucent surfaces over it. -->
-    <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="8" />
+    <effects:BlurEffect x:Key="BackgroundBlurEffect" Radius="24" />
 </ResourceDictionary>

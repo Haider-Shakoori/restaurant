@@ -10,6 +10,102 @@ namespace BusinessOS.Restaurant.Tests;
 public sealed class InventoryProcurementTests
 {
     [Fact]
+    public async Task Desktop_one_step_purchase_posts_stock_and_completes_order()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "FLOUR", "Flour", "kg", "kg", 1m, 0m, actor, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "SUP-FLOUR", "Flour Supplier", null, null, null, actor, CancellationToken.None));
+            var purchase = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                "branch-1", supplier.GetProperty("id").GetString()!,
+                [new LocalPurchaseOrderLineRequest(item.GetProperty("id").GetString()!, 3m, 75m)],
+                "Desktop one-step purchase", actor, CancellationToken.None));
+            var poId = purchase.GetProperty("id").GetString()!;
+            var lineId = purchase.GetProperty("lines")[0].GetProperty("id").GetString()!;
+
+            await inventory.ReceivePurchaseOrderAsync(
+                poId, [new LocalReceivePurchaseOrderLineRequest(lineId, 3m)],
+                "desktop-receipt-" + poId, "Received through desktop purchase form",
+                actor, CancellationToken.None);
+
+            await using var db = factory.Create();
+            Assert.Equal("received", (await db.PurchaseOrders.SingleAsync()).Status);
+            Assert.Equal(3m, (await db.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Equal(225m, (await db.InventoryValuations.SingleAsync()).Value);
+            Assert.Single(await db.GoodsReceipts.ToListAsync());
+            Assert.Single(await db.StockMovements.ToListAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Multi_line_desktop_purchase_receives_stock_once_even_after_receipt_retry()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            var flour = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "FLOUR", "Flour", "kg", "kg", 1m, 0m, actor, CancellationToken.None));
+            var oil = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "OIL", "Cooking Oil", "l", "l", 1m, 0m, actor, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "SUP-MIX", "General Foods", null, null, null, actor, CancellationToken.None));
+            var purchase = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                "branch-1", supplier.GetProperty("id").GetString()!,
+                [
+                    new LocalPurchaseOrderLineRequest(flour.GetProperty("id").GetString()!, 3m, 75m),
+                    new LocalPurchaseOrderLineRequest(oil.GetProperty("id").GetString()!, 2m, 120m),
+                ],
+                "Desktop multi-line purchase", actor, CancellationToken.None));
+
+            Assert.Equal("465.00", purchase.GetProperty("estimated_total").GetString());
+
+            var lines = purchase.GetProperty("lines").EnumerateArray()
+                .Select(x => new LocalReceivePurchaseOrderLineRequest(
+                    x.GetProperty("id").GetString()!,
+                    x.GetProperty("inventory_item_id").GetString() == flour.GetProperty("id").GetString() ? 3m : 2m))
+                .ToArray();
+            var id = purchase.GetProperty("id").GetString()!;
+
+            var receipt = JsonSerializer.SerializeToElement(await inventory.ReceivePurchaseOrderAsync(
+                id, lines, "desktop-receipt-" + id, null, actor, CancellationToken.None));
+            var replay = JsonSerializer.SerializeToElement(await inventory.ReceivePurchaseOrderAsync(
+                id, lines, "desktop-receipt-" + id, null, actor, CancellationToken.None));
+            Assert.Equal(receipt.GetProperty("id").GetString(), replay.GetProperty("id").GetString());
+
+            await using var db = factory.Create();
+            Assert.Equal("received", (await db.PurchaseOrders.SingleAsync()).Status);
+            Assert.Equal(2, await db.StockMovements.CountAsync());
+            Assert.Equal(2, await db.InventoryBalances.CountAsync());
+            Assert.Single(await db.GoodsReceipts.ToListAsync());
+            var balances = await db.InventoryBalances.ToDictionaryAsync(x => x.InventoryItemId, x => x.Quantity);
+            Assert.Equal(3m, balances[flour.GetProperty("id").GetString()!]);
+            Assert.Equal(2m, balances[oil.GetProperty("id").GetString()!]);
+            Assert.Equal(465m, await db.InventoryValuations.SumAsync(x => x.Value));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Purchase_receipts_are_idempotent_and_update_weighted_average_stock()
     {
         var root = CreateTemporaryDirectory();
@@ -122,6 +218,96 @@ public sealed class InventoryProcurementTests
                     CancellationToken.None));
 
             Assert.False(items[0].GetProperty("low_stock").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Receipt_rejects_overdelivery_without_mutating_stock_or_order()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "OVER-RICE", "Rice for receipt validation", "g", "kg", 1000m, 0m, actor, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "OVER-SUP", "Receipt Validation Supplier", null, null, null, actor, CancellationToken.None));
+            var order = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                "branch-1", supplier.GetProperty("id").GetString()!,
+                [new LocalPurchaseOrderLineRequest(item.GetProperty("id").GetString()!, 2m, 200m)],
+                null, actor, CancellationToken.None));
+            var orderId = order.GetProperty("id").GetString()!;
+            var lineId = order.GetProperty("lines")[0].GetProperty("id").GetString()!;
+
+            var error = await Assert.ThrowsAsync<LocalSyncConflictException>(() =>
+                inventory.ReceivePurchaseOrderAsync(orderId,
+                    [new LocalReceivePurchaseOrderLineRequest(lineId, 3m)],
+                    "OVER-RECEIPT", null, actor, CancellationToken.None));
+            Assert.Equal("invalid_payload", error.Code);
+
+            await using var db = factory.Create();
+            Assert.Empty(await db.GoodsReceipts.ToArrayAsync());
+            Assert.Empty(await db.StockMovements.ToArrayAsync());
+            Assert.Empty(await db.InventoryBalances.ToArrayAsync());
+            Assert.Equal("ordered", (await db.PurchaseOrders.SingleAsync()).Status);
+            Assert.Equal(0m, (await db.PurchaseOrderLines.SingleAsync()).ReceivedBaseQuantity);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Receipt_idempotency_key_cannot_be_reused_across_purchase_orders()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+            var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "KEY-RICE", "Rice for replay validation", "g", "kg", 1000m, 0m, actor, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "KEY-SUP", "Replay Validation Supplier", null, null, null, actor, CancellationToken.None));
+            var itemId = item.GetProperty("id").GetString()!;
+            var supplierId = supplier.GetProperty("id").GetString()!;
+
+            async Task<(string OrderId, string LineId)> CreateOrderAsync()
+            {
+                var po = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                    "branch-1", supplierId, [new LocalPurchaseOrderLineRequest(itemId, 1m, 100m)],
+                    null, actor, CancellationToken.None));
+                return (po.GetProperty("id").GetString()!, po.GetProperty("lines")[0].GetProperty("id").GetString()!);
+            }
+
+            var first = await CreateOrderAsync();
+            var second = await CreateOrderAsync();
+            await inventory.ReceivePurchaseOrderAsync(first.OrderId,
+                [new LocalReceivePurchaseOrderLineRequest(first.LineId, 1m)],
+                "SHARED-GRN-ID", null, actor, CancellationToken.None);
+
+            var conflict = await Assert.ThrowsAsync<LocalSyncConflictException>(() =>
+                inventory.ReceivePurchaseOrderAsync(second.OrderId,
+                    [new LocalReceivePurchaseOrderLineRequest(second.LineId, 1m)],
+                    "SHARED-GRN-ID", null, actor, CancellationToken.None));
+            Assert.Equal("receipt_conflict", conflict.Code);
+
+            await using var db = factory.Create();
+            Assert.Single(await db.GoodsReceipts.ToArrayAsync());
+            Assert.Single(await db.StockMovements.ToArrayAsync());
+            Assert.Equal(1000m, (await db.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Equal("ordered", (await db.PurchaseOrders.SingleAsync(value => value.Id == second.OrderId)).Status);
         }
         finally
         {
@@ -281,6 +467,91 @@ public sealed class InventoryProcurementTests
                 Assert.Equal(1600m, (await db.InventoryBalances.SingleAsync()).Quantity);
                 Assert.Equal(1, await db.StockMovements.CountAsync(value => value.MovementType == "adjustment" && value.IdempotencyKey == "adjustment:branch-1:ADJ-1"));
             }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Serving_multi_ingredient_recipe_consumes_each_component_once()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var actor = InventoryUser();
+
+            async Task<string> AddIngredientAsync(string sku, string name, decimal opening)
+            {
+                var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                    sku, name, "g", "kg", 1000m, 0m, actor, CancellationToken.None));
+                var id = item.GetProperty("id").GetString()!;
+                await inventory.AdjustAsync("branch-1", id, opening, "OPEN-" + sku,
+                    "Opening inventory", actor, CancellationToken.None);
+                return id;
+            }
+
+            var riceId = await AddIngredientAsync("MULTI-RICE", "Multi Rice", 2000m);
+            var spiceId = await AddIngredientAsync("MULTI-SPICE", "Multi Spice", 1000m);
+            await inventory.CreateRecipeVersionAsync("branch-1", "item-1", "Two ingredient recipe",
+                [new LocalRecipeComponentRequest(riceId, 250m),
+                 new LocalRecipeComponentRequest(spiceId, 20m)],
+                actor, CancellationToken.None);
+
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, new OperationalSnapshotStore(factory), kitchen);
+            var cashier = new LocalCashierService(factory, inventory);
+            await PushOneAsync(sync, Waiter(), "MULTI-OPEN", "order.open", new
+            {
+                client_order_id = "MULTI-ORDER",
+                dining_table_id = "table-1",
+                guest_count = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "MULTI-ADD", "order.item.add", new
+            {
+                client_order_id = "MULTI-ORDER",
+                client_line_id = "MULTI-LINE",
+                menu_item_id = "item-1",
+                quantity = 2,
+            });
+            await PushOneAsync(sync, Waiter(), "MULTI-SUBMIT", "order.submit", new
+            {
+                client_order_id = "MULTI-ORDER",
+            });
+
+            string orderId;
+            string[] ticketIds;
+            await using (var db = factory.Create())
+            {
+                orderId = (await db.Orders.SingleAsync()).Id;
+                ticketIds = await db.KitchenTickets.Select(value => value.Id).ToArrayAsync();
+            }
+
+            foreach (var ticketId in ticketIds)
+            {
+                await kitchen.StartAsync(ticketId, Kitchen(), CancellationToken.None);
+                await kitchen.ReadyAsync(ticketId, Kitchen(), CancellationToken.None);
+            }
+
+            await cashier.ServeOrderAsync(orderId, Cashier(), CancellationToken.None);
+            await cashier.ServeOrderAsync(orderId, Cashier(), CancellationToken.None);
+
+            await using var verify = factory.Create();
+            var balances = await verify.InventoryBalances.ToDictionaryAsync(value => value.InventoryItemId);
+            Assert.Equal(1500m, balances[riceId].Quantity);
+            Assert.Equal(960m, balances[spiceId].Quantity);
+            Assert.Single(await verify.InventoryConsumptions.ToArrayAsync());
+            Assert.Equal(2, await verify.InventoryConsumptionLines.CountAsync());
+            var movements = await verify.StockMovements
+                .Where(value => value.MovementType == "consumption")
+                .ToDictionaryAsync(value => value.InventoryItemId);
+            Assert.Equal(2, movements.Count);
+            Assert.Equal(-500m, movements[riceId].QuantityDelta);
+            Assert.Equal(-40m, movements[spiceId].QuantityDelta);
         }
         finally
         {

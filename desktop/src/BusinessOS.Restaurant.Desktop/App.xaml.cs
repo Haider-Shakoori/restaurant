@@ -23,6 +23,9 @@ public partial class App : System.Windows.Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // Modal activation/sign-in windows are not the main workspace. Keep the
+        // process alive until the authenticated MainWindow is available.
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         try
         {
@@ -70,8 +73,74 @@ public partial class App : System.Windows.Application
             }
         }
 
-        var window = new MainWindow();
+        // Activation authorizes this computer; an operator still needs a tenant-bound
+        // identity. A protected prior session allows working during Internet outages.
+        var activationState = await new WindowsActivationStore().LoadAsync();
+        if (activationState is null)
+        {
+            MessageBox.Show("Restaurant activation is missing. Activate this computer before signing in.",
+                "BusinessOS Restaurant", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown();
+            return;
+        }
+
+        var sessions = new WindowsSessionStore();
+        AuthSession? session = null;
+        try
+        {
+            session = await sessions.LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "operator-session-load");
+        }
+
+        var licenseTenant = activationState.Snapshot.TenantId;
+        if (session is not null &&
+            (!string.Equals(session.TenantId, licenseTenant, StringComparison.Ordinal) ||
+             session.User is null ||
+             string.IsNullOrEmpty(RestaurantWorkspaceRoutes.DefaultRoute(session.User.Role))))
+        {
+            session = null;
+            await sessions.ClearAsync();
+        }
+
+        if (session is null)
+        {
+            var configured = await new ConnectionSettingsStore().LoadAsync();
+            var signIn = new OperatorSignInWindow(licenseTenant, configured?.TenantBaseUrl);
+            if (signIn.ShowDialog() != true || signIn.SignedInSession is null)
+            {
+                Shutdown();
+                return;
+            }
+
+            session = signIn.SignedInSession;
+        }
+
+        // Restore is a cold-start operation only. Run before MainWindow,
+        // print workers, cloud reconciliation or the LAN host can open SQLite.
+        try
+        {
+            await new LocalMaintenanceService(new LocalDatabaseFactory())
+                .ApplyPendingRestoreAsync();
+        }
+        catch (Exception exception)
+        {
+            WriteCrashLog(exception, "pending-restore");
+            MessageBox.Show(
+                "The staged restaurant database restore could not be verified. " +
+                "The desktop has not started local service to avoid risking stored orders. " +
+                "Review the recovery files and diagnostics before retrying.\\n\\n" + exception.Message,
+                "Restaurant restore needs attention",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
+
+        var window = new MainWindow(session);
         MainWindow = window;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
         window.Show();
 
         _ = InitializeServicesSafelyAsync();

@@ -44,6 +44,14 @@ public sealed class Batch15ReleasePackagingTests
         Assert.Contains("Already activated on this computer",installer,StringComparison.Ordinal);
         Assert.Contains("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
         Assert.Contains("WizardBackImageFileDynamicDark=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantInstallerBackground.png",installer,StringComparison.Ordinal);
+        Assert.Contains("WizardStyle=modern dark", installer, StringComparison.Ordinal);
+        Assert.Contains("WizardBackColor=#101C28", installer, StringComparison.Ordinal);
+        Assert.Contains("WizardBackImageOpacity=225", installer, StringComparison.Ordinal);
+        Assert.Contains("LicenseHelpLabel.Font.Color :=", installer, StringComparison.Ordinal);
+        Assert.Contains("ImageEnhance.Brightness(artwork).enhance(0.65)", generator, StringComparison.Ordinal);
+        Assert.Contains("Image.blend(artwork, dark_veil, alpha=0.42)", generator, StringComparison.Ordinal);
+        Assert.Contains("Validate installer background contrast", workflow, StringComparison.Ordinal);
+        Assert.Contains("check_restaurant_installer_contrast.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("WizardBackImageFile=..\\src\\BusinessOS.Restaurant.Desktop\\Assets\\RestaurantGlassBackground.jpg",installer,StringComparison.Ordinal);
         Assert.Contains("RestaurantInstallerBackground.png",generator,StringComparison.Ordinal);
         Assert.Contains("format=\"PNG\"",generator,StringComparison.Ordinal);
@@ -53,6 +61,43 @@ public sealed class Batch15ReleasePackagingTests
 
         Assert.True(File.Exists(background));
         Assert.True(new FileInfo(background).Length > 5_000);
+    }
+
+    [Fact]
+    public void Ci_distinguishes_unsigned_artifacts_and_publishes_verifiable_release_hashes()
+    {
+        var workflow = File.ReadAllText(Path.Combine(RepositoryRoot(),
+            ".github", "workflows", "restaurant-desktop-ci.yml"));
+        Assert.Contains("Generate release provenance and SHA-256 hashes", workflow);
+        Assert.Contains("Get-FileHash $exe -Algorithm SHA256", workflow);
+        Assert.Contains("Get-FileHash $setup.FullName -Algorithm SHA256", workflow);
+        Assert.Contains("source_commit=$env:GITHUB_SHA", workflow);
+        Assert.Contains("build_kind=unsigned_ci", workflow);
+        Assert.Contains("BusinessOS-Restaurant-release-checksums-ci", workflow);
+        Assert.Contains("if-no-files-found: error", workflow);
+    }
+
+    [Fact]
+    public void Ci_independently_verifies_unsigned_release_manifest_and_both_hashes()
+    {
+        var root = RepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root,
+            ".github", "workflows", "restaurant-desktop-ci.yml"));
+        var releaseScript = File.ReadAllText(Path.Combine(root,
+            "desktop", "installer", "Build-Release.ps1"));
+
+        Assert.Contains("Verify release provenance against built artifacts", workflow);
+        Assert.Contains("Get-AuthenticodeSignature -FilePath $exe", workflow);
+        Assert.Contains("if ($signature.Status -ne \"NotSigned\")", workflow);
+        Assert.Contains("$fields[\"source_commit\"] -ne $env:GITHUB_SHA", workflow);
+        Assert.Contains("$fields[\"build_kind\"] -ne \"unsigned_ci\"", workflow);
+        Assert.Contains("$fields[\"desktop_exe_sha256\"]", workflow);
+        Assert.Contains("$fields[\"installer_sha256\"]", workflow);
+        Assert.Contains("Get-FileHash $setup -Algorithm SHA256", workflow);
+        Assert.Contains("Test-Path -LiteralPath $CertificatePath -PathType Leaf", releaseScript);
+        Assert.Contains("IsNullOrWhiteSpace($CertificatePassword)", releaseScript);
+        Assert.Contains("SIGNED_RELEASE=false", releaseScript);
+        Assert.Contains("signtool verify /pa", releaseScript);
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using System.Text.Json;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace BusinessOS.Restaurant.Desktop;
 
@@ -38,6 +39,73 @@ public sealed class DesktopRestaurantWorkflowService
             session.User.Name,
             session.User.Role,
             session.TenantId);
+    }
+
+    /// <summary>
+    /// Operator-confirmed print recovery. Never creates another KOT round or bill.
+    /// A 'printing' state after a crash is ambiguous: staff must inspect the paper
+    /// ticket before confirming a retry to avoid duplicate food preparation.
+    /// </summary>
+    public async Task RequeuePrintJobAsync(
+        string jobId, bool isReceipt, CancellationToken token = default)
+    {
+        var actor = await CurrentPrincipalAsync(token);
+        if (actor.UserRole.Trim().ToLowerInvariant() is not ("owner" or "manager"))
+            throw new UnauthorizedAccessException("Only an Owner or Manager can retry print jobs.");
+
+        await _factory.EnsureCreatedAsync(token);
+        await using var db = _factory.Create();
+
+        string previousStatus;
+        string printerName;
+        if (isReceipt)
+        {
+            var job = await db.ReceiptPrintJobs
+                .SingleOrDefaultAsync(value => value.Id == jobId, token)
+                ?? throw new InvalidOperationException("Receipt print job was not found.");
+            previousStatus = job.Status;
+            printerName = job.PrinterName;
+            if (previousStatus is not ("failed" or "printing"))
+                throw new InvalidOperationException("Only failed or interrupted print jobs can be retried.");
+            job.Status = "pending";
+            job.Attempts = 0;
+            job.LastError = null;
+            job.PrintedAtUtc = null;
+        }
+        else
+        {
+            var job = await db.PrintJobs
+                .SingleOrDefaultAsync(value => value.Id == jobId, token)
+                ?? throw new InvalidOperationException("KOT print job was not found.");
+            previousStatus = job.Status;
+            printerName = job.PrinterName;
+            if (previousStatus is not ("failed" or "printing"))
+                throw new InvalidOperationException("Only failed or interrupted print jobs can be retried.");
+            job.Status = "pending";
+            job.Attempts = 0;
+            job.LastError = null;
+            job.PrintedAtUtc = null;
+        }
+
+        db.AuditEvents.Add(new LocalAuditEvent
+        {
+            EventId = Guid.CreateVersion7().ToString("N"),
+            Category = "printing",
+            EventType = "print.manual_retry",
+            ActorUserId = actor.UserId,
+            ActorName = actor.UserName,
+            ActorRole = actor.UserRole,
+            EntityType = isReceipt ? "receipt_print_job" : "kot_print_job",
+            EntityId = jobId,
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                previous_status = previousStatus,
+                printer = printerName,
+                operator_confirmed_possible_duplicate = true,
+            }),
+            OccurredAtUtc = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync(token);
     }
 
     public async Task<string> OpenOrderAsync(string tableId, int guestCount, string? notes = null, CancellationToken token = default)

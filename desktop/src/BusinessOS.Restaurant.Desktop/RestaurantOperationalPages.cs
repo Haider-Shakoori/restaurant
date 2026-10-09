@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using BusinessOS.Restaurant.Application.OperationalData;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -38,19 +39,41 @@ internal static class RestaurantOperationalPages
         await factory.EnsureCreatedAsync();
         await using var db = factory.Create();
 
-        var from = DateTimeOffset.UtcNow.Date;
-        var to = from.AddDays(1);
-        var openOrders = await db.Orders.CountAsync(x => x.Status != "closed");
-        var activeTables = await db.DiningTables.CountAsync(x => x.IsActive && x.Status != "available");
+        var now = DateTimeOffset.Now;
+        // Cancelled orders and unavailable/reserved tables are not active service.
+        var openOrders = await db.Orders.CountAsync(x =>
+            x.Status != "closed" && x.Status != "cancelled");
+        var activeTables = await db.DiningTables.CountAsync(x =>
+            x.IsActive && x.Status == "occupied");
         var activeKot = await db.KitchenTickets.CountAsync(x =>
             x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
-        var sales = (await db.Bills.AsNoTracking()
-                .Select(x => new { x.IssuedAt, x.Total })
-                .ToListAsync())
-            .Where(x => x.IssuedAt >= from && x.IssuedAt < to)
-            .Sum(x => x.Total);
+        // Read only bill timestamps and totals; interpret the business day in local time.
+        // The chart uses exactly the same billed totals as the headline (never sample points).
+        var billRows = await db.Bills.AsNoTracking()
+            .Select(x => new { x.IssuedAt, x.Total })
+            .ToListAsync();
+        var salesTrend = DashboardSalesTrend.Aggregate(
+            now, billRows.Select(x => (x.IssuedAt, x.Total)));
+        var sales = salesTrend.Total;
+
+        // Read-only, branch-aware inventory alerts from the same local database as
+        // the Inventory screen. No synthetic zero balances for uninitialized branches.
+        var stockBalances = await (
+            from balance in db.InventoryBalances.AsNoTracking()
+            join item in db.InventoryItems.AsNoTracking()
+                on balance.InventoryItemId equals item.Id
+            join branch in db.Branches.AsNoTracking()
+                on balance.BranchId equals branch.Id
+            where item.IsActive && branch.IsActive
+            select new DashboardStockBalance(
+                branch.Name, item.Name, item.BaseUnit, balance.Quantity, item.ReorderLevel))
+            .ToListAsync();
+        var stockAlerts = DashboardStockAlerts.Find(stockBalances);
+        var trackedReorderBalances = stockBalances.Count(row => row.ReorderLevel > 0m);
 
         var root = new StackPanel();
+
+        root.Children.Add(DashboardQuickActions());
 
         root.Children.Add(DashboardCards(
             ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
@@ -66,8 +89,8 @@ internal static class RestaurantOperationalPages
 
         var operations = DashboardPanel(
             "Restaurant Overview",
-            "Live operational snapshot",
-            BuildOperationsOverview(sales, openOrders, activeTables, activeKot));
+            $"Hourly billed sales · {salesTrend.BusinessDay:dd MMM yyyy} (local time)",
+            BuildOperationsOverview(sales, openOrders, activeTables, activeKot, salesTrend, now.Hour));
         Grid.SetColumn(operations, 0);
         overviewGrid.Children.Add(operations);
 
@@ -89,6 +112,18 @@ internal static class RestaurantOperationalPages
         Grid.SetColumn(right, 2);
         overviewGrid.Children.Add(right);
 
+        // Keep the detail column useful even on 1024 px cashier displays.
+        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.SizeChanged += (_, _) =>
+        {
+            var narrow = root.ActualWidth < 920;
+            overviewGrid.ColumnDefinitions[0].Width = new GridLength(narrow ? 1 : 3, GridUnitType.Star);
+            overviewGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            overviewGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(right, narrow ? 0 : 2);
+            Grid.SetRow(right, narrow ? 1 : 0);
+        };
         root.Children.Add(overviewGrid);
 
         var lowerGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
@@ -119,7 +154,23 @@ internal static class RestaurantOperationalPages
         Grid.SetColumn(kitchenPanel, 2);
         lowerGrid.Children.Add(kitchenPanel);
 
+        lowerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        lowerGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.SizeChanged += (_, _) =>
+        {
+            var narrow = root.ActualWidth < 770;
+            lowerGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            lowerGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(kitchenPanel, narrow ? 0 : 2);
+            Grid.SetRow(kitchenPanel, narrow ? 1 : 0);
+        };
         root.Children.Add(lowerGrid);
+        root.Children.Add(DashboardPanel(
+            "Stock Alerts",
+            stockAlerts.Count > 0
+                ? $"{stockAlerts.Count} branch ingredient balance(s) at or below reorder level"
+                : "Active branch inventory thresholds",
+            BuildStockAlertSummary(stockAlerts, stockBalances.Count, trackedReorderBalances)));
         root.Children.Add(DashboardPanel(
             "Live Operations",
             "Desktop, LAN and offline health",
@@ -215,7 +266,255 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Price", nameof(MenuRow.Price), 120));
         grid.Columns.Add(Column("Currency", nameof(MenuRow.Currency), 90));
         grid.Columns.Add(Column("Available", nameof(MenuRow.Available), 100));
-        return Section("Menu catalog", "The same local menu is served to LAN-connected waiter devices.", grid);
+        var panel = Stack();
+        panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
+        var create = new Button { Content = "+ Add Menu Item", MinWidth = 165, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += (_, _) =>
+        {
+            var dialog = new Window
+            {
+                Title = "New Menu Item",
+                Width = 500,
+                Height = 480,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var content = Stack();
+            content.Margin = new Thickness(20);
+            using var categoryDb = factory.Create();
+            var categories = categoryDb.MenuCategories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToList();
+            var category = new ComboBox { ItemsSource = categories, DisplayMemberPath = "Name", SelectedIndex = categories.Count > 0 ? 0 : -1, Height = 36 };
+            var name = new TextBox { Height = 36 };
+            var sku = new TextBox { Height = 36 };
+            var price = new TextBox { Height = 36 };
+            var image = new TextBox { Height = 36, IsReadOnly = true };
+            var browse = new Button { Content = "Choose image", Height = 36 };
+            browse.Click += (_, _) =>
+            {
+                var picker = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "Images|*.png;*.jpg;*.jpeg;*.webp",
+                    Title = "Select menu image",
+                };
+                if (picker.ShowDialog(dialog) == true) image.Text = picker.FileName;
+            };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Name", name), ("SKU", sku), ("Category", category),
+                ("Price AFN", price), ("Image", image),
+            })
+            {
+                content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 7, 0, 3) });
+                content.Children.Add(entry.Input);
+            }
+            content.Children.Add(browse);
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            content.Children.Add(feedback);
+            var save = new Button { Content = "Save Menu Item", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(name.Text))
+                        throw new InvalidOperationException("Enter a menu item name.");
+                    if (!decimal.TryParse(price.Text, out var amount) || amount < 0)
+                        throw new InvalidOperationException("Enter a valid price.");
+                    save.IsEnabled = false;
+                    string? imageUrl = null;
+                    if (!string.IsNullOrWhiteSpace(image.Text))
+                    {
+                        var extension = System.IO.Path.GetExtension(image.Text).ToLowerInvariant();
+                        if (extension is not (".png" or ".jpg" or ".jpeg" or ".webp"))
+                            throw new InvalidOperationException("Unsupported image format.");
+                        var folder = System.IO.Path.Combine(
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                            "BusinessOS", "Restaurant", "menu-images");
+                        System.IO.Directory.CreateDirectory(folder);
+                        var fileName = Guid.NewGuid().ToString("N") + extension;
+                        System.IO.File.Copy(image.Text, System.IO.Path.Combine(folder, fileName));
+                        imageUrl = "/menu-images/" + fileName;
+                    }
+                    await using var writeDb = factory.Create();
+                    writeDb.MenuItems.Add(new LocalMenuItem
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Name = name.Text.Trim(),
+                        Sku = string.IsNullOrWhiteSpace(sku.Text) ? null : sku.Text.Trim(),
+                        MenuCategoryId = (category.SelectedItem as LocalMenuCategory)?.Id,
+                        Price = amount,
+                        Currency = "AFN",
+                        ImageUrl = imageUrl,
+                        IsAvailable = true,
+                    });
+                    await writeDb.SaveChangesAsync();
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            content.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Menu item created. Refresh Menu to see it.");
+        };
+        var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipes.Click += async (_, _) =>
+        {
+            await using var recipeDb = factory.Create();
+            var versions = await (from version in recipeDb.Recipes.AsNoTracking()
+                                  join menuItem in recipeDb.MenuItems.AsNoTracking()
+                                      on version.MenuItemId equals menuItem.Id
+                                  orderby menuItem.Name, version.Version descending
+                                  select new { Menu = menuItem.Name, version.Name, version.Version, version.IsActive })
+                .ToListAsync();
+            var dialog = new Window
+            {
+                Title = "Recipe Versions",
+                Width = 650, Height = 460,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var recipeGrid = GridFor(versions);
+            recipeGrid.AutoGenerateColumns = true;
+            dialog.Content = recipeGrid;
+            dialog.ShowDialog();
+        };
+        panel.Children.Add(create);
+        panel.Children.Add(recipes);
+        var recipeCreate = new Button { Content = "+ Create Recipe Version", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipeCreate.Click += async (_, _) =>
+        {
+            await using var lookup = factory.Create();
+            var branches = await lookup.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var menuItems = await lookup.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.Name).ToListAsync();
+            var ingredients = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var dialog = new Window { Title = "New Recipe Version", Width = 480, Height = 520, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
+            var menu = new ComboBox { ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
+            var ingredient = new ComboBox { ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Text = "1", Height = 34 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branch), ("Menu item", menu), ("Ingredient", ingredient),
+                ("Quantity in base units", quantity)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(entry.Input);
+            }
+            var components = new List<LocalRecipeComponentRequest>();
+            var summary = new TextBlock { Text = "Add at least one ingredient.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            var add = new Button { Content = "+ Add Recipe Ingredient", Height = 36 };
+            add.Click += (_, _) =>
+            {
+                if (ingredient.SelectedItem is not LocalInventoryItem selected ||
+                    !decimal.TryParse(quantity.Text, out var amount) || amount <= 0)
+                {
+                    summary.Text = "Choose an ingredient and positive quantity.";
+                    return;
+                }
+                if (components.Any(x => x.InventoryItemId == selected.Id))
+                {
+                    summary.Text = "This ingredient has already been added.";
+                    return;
+                }
+                components.Add(new LocalRecipeComponentRequest(selected.Id, amount));
+                summary.Text = string.Join("\n", components.Select(x =>
+                    ingredients.First(y => y.Id == x.InventoryItemId).Name + ": " + x.QuantityBase));
+            };
+            form.Children.Add(add);
+            form.Children.Add(summary);
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Save Recipe", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
+                        throw new InvalidOperationException("Select branch, menu item and at least one ingredient.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateRecipeVersionAsync(
+                        selectedBranch.Id, selectedMenu.Id, selectedMenu.Name, components, actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Recipe version saved. Refresh Menu to view it.");
+        };
+        panel.Children.Add(recipeCreate);
+        var costPreview = new Button { Content = "Recipe Food-Cost Preview", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        costPreview.Click += async (_, _) =>
+        {
+            await using var costDb = factory.Create();
+            var valuations = await costDb.InventoryValuations.AsNoTracking().ToListAsync();
+            var components = await costDb.RecipeItems.AsNoTracking().ToListAsync();
+            var ingredients = await costDb.InventoryItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var menuItems = await costDb.MenuItems.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var branches = await costDb.Branches.AsNoTracking().ToDictionaryAsync(x => x.Id);
+            var versions = await costDb.Recipes.AsNoTracking().Where(x => x.IsActive).ToListAsync();
+            var unitCosts = valuations.ToDictionary(x => (x.BranchId, x.InventoryItemId), x => x.AverageUnitCost);
+            var componentGroups = components.ToLookup(x => x.RecipeId);
+
+            var preview = versions.Select(version =>
+            {
+                var recipeItems = componentGroups[version.Id].ToList();
+                decimal total = 0m;
+                var missing = recipeItems.Count == 0 ? 1 : 0;
+                foreach (var component in recipeItems)
+                {
+                    if (component.QuantityBase <= 0 ||
+                        !ingredients.TryGetValue(component.InventoryItemId, out var ingredient) ||
+                        !ingredient.IsActive ||
+                        !unitCosts.TryGetValue((version.BranchId, component.InventoryItemId), out var unitCost) ||
+                        unitCost <= 0)
+                    {
+                        missing++;
+                        continue;
+                    }
+                    total += component.QuantityBase * unitCost;
+                }
+
+                menuItems.TryGetValue(version.MenuItemId, out var menuItem);
+                branches.TryGetValue(version.BranchId, out var selectedBranch);
+                var salePrice = menuItem?.Price ?? 0m;
+                var reliable = missing == 0 && salePrice > 0;
+                return new
+                {
+                    Branch = selectedBranch?.Name ?? version.BranchId,
+                    Menu = menuItem?.Name ?? version.MenuItemId,
+                    version.Version,
+                    IngredientCostAfn = missing == 0 ? Math.Round(total, 2).ToString("0.00") : "N/A",
+                    SalePriceAfn = salePrice,
+                    FoodCostPercent = reliable ? Math.Round(total / salePrice * 100m, 2).ToString("0.00") + "%" : "N/A",
+                    GrossMarginAfn = reliable ? Math.Round(salePrice - total, 2).ToString("0.00") : "N/A",
+                    GrossMarginPercent = reliable ? Math.Round((salePrice - total) / salePrice * 100m, 2).ToString("0.00") + "%" : "N/A",
+                    MissingCosts = missing,
+                };
+            }).ToList();
+
+            var dialog = new Window { Title = "Estimated Recipe Food Cost (AFN)", Width = 1040, Height = 470, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var costGrid = GridFor(preview);
+            costGrid.AutoGenerateColumns = true;
+            dialog.Content = costGrid;
+            dialog.ShowDialog();
+        };
+        panel.Children.Add(costPreview);
+        panel.Children.Add(grid);
+        return Scroll(panel);
     }
 
     private static async Task<FrameworkElement> InventoryAsync()
@@ -242,7 +541,82 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Reorder", nameof(InventoryRow.ReorderLevel), 100));
         grid.Columns.Add(Column("Avg cost AFN", nameof(InventoryRow.AverageCost), 120));
         grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
-        return Section("Inventory", "Restaurant ingredients, on-hand stock, valuation and recipe consumption remain available without internet.", grid);
+        var panel = Stack();
+        panel.Children.Add(Card("Inventory", "Local ingredients, stock balances and recipe consumption."));
+        var lowStockCount = rows.Count(x => x.ReorderLevel > 0 && x.Quantity <= x.ReorderLevel);
+        if (lowStockCount > 0)
+            panel.Children.Add(Card("Reorder alert", lowStockCount + " ingredients are at or below their reorder levels. Check their stock balances before the next service."));
+        var create = new Button { Content = "+ Add Ingredient", MinWidth = 160, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += (_, _) =>
+        {
+            var dialog = new Window
+            {
+                Title = "Add Ingredient",
+                Width = 450,
+                Height = 490,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.CanResize,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var content = Stack();
+            content.Margin = new Thickness(20);
+            var name = new TextBox { Height = 36 };
+            var sku = new TextBox { Height = 36 };
+            var units = new[] { "kg", "g", "l", "ml", "pcs" };
+            var unit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
+            var purchaseUnit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
+            var factor = new TextBox { Text = "1", Height = 36 };
+            unit.SelectionChanged += (_, _) =>
+            {
+                if (purchaseUnit.SelectedItem?.ToString() == unit.SelectedItem?.ToString())
+                    factor.Text = "1";
+            };
+            var reorder = new TextBox { Text = "0", Height = 36 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Ingredient name", name), ("SKU", sku), ("Base unit (stock)", unit),
+                ("Purchase unit", purchaseUnit),
+                ("Base units per one purchase unit", factor), ("Reorder level (base unit)", reorder),
+            })
+            {
+                content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                content.Children.Add(entry.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            content.Children.Add(feedback);
+            var save = new Button { Content = "Save Ingredient", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(sku.Text))
+                        throw new InvalidOperationException("Enter ingredient name and SKU.");
+                    if (!decimal.TryParse(reorder.Text, out var level) || level < 0)
+                        throw new InvalidOperationException("Enter a non-negative reorder level.");
+                    if (!decimal.TryParse(factor.Text, out var conversion) || conversion <= 0)
+                        throw new InvalidOperationException("Enter a positive purchase-to-base unit conversion factor.");
+                    if (unit.SelectedItem?.ToString() == purchaseUnit.SelectedItem?.ToString() && conversion != 1m)
+                        throw new InvalidOperationException("The conversion factor must be 1 when purchase and stock units match.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateItemAsync(
+                        sku.Text.Trim(), name.Text.Trim(),
+                        unit.SelectedItem?.ToString() ?? "kg",
+                        purchaseUnit.SelectedItem?.ToString() ?? "kg",
+                        conversion, level, actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            content.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created. Refresh Inventory to see it.");
+        };
+        panel.Children.Add(create);
+        panel.Children.Add(grid);
+        return Scroll(panel);
     }
 
     private static async Task<FrameworkElement> PurchasesAsync()
@@ -272,17 +646,261 @@ internal static class RestaurantOperationalPages
         supplierGrid.Columns.Add(Column("Code", nameof(SupplierRow.Code), 110)); supplierGrid.Columns.Add(Column("Supplier", nameof(SupplierRow.Name), 220));
         supplierGrid.Columns.Add(Column("Phone", nameof(SupplierRow.Phone), 150)); supplierGrid.Columns.Add(Column("Email", nameof(SupplierRow.Email), 220));
         panel.Children.Add(supplierGrid);
+        var addSupplier = new Button { Content = "+ Add Supplier", Height = 38, MinWidth = 150, Margin = new Thickness(0, 10, 0, 6) };
+        addSupplier.Click += (_, _) =>
+        {
+            var dialog = new Window { Title = "Add Supplier", Width = 445, Height = 410, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var code = new TextBox { Height = 34 };
+            var name = new TextBox { Height = 34 };
+            var phone = new TextBox { Height = 34 };
+            var email = new TextBox { Height = 34 };
+            foreach (var field in new (string Label, FrameworkElement Input)[]
+            {
+                ("Supplier code", code), ("Supplier name", name), ("Phone (optional)", phone), ("Email (optional)", email)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = field.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(field.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Save Supplier", Height = 38 };
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text))
+                        throw new InvalidOperationException("Supplier code and name are required.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).CreateSupplierAsync(
+                        code.Text.Trim(), name.Text.Trim(), phone.Text.Trim(), email.Text.Trim(),
+                        null, actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Supplier saved. Refresh Purchases to see it.");
+        };
+        panel.Children.Add(addSupplier);
+
+        var purchaseButton = new Button { Content = "+ New Purchase & Receive", Height = 38, MinWidth = 200, Margin = new Thickness(0, 6, 0, 8) };
+        purchaseButton.Click += async (_, _) =>
+        {
+            var dialog = new Window { Title = "Purchase & Receive Inventory", Width = 500, Height = 550, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            await using var lookupDb = factory.Create();
+            var availableSuppliers = await lookupDb.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var availableItems = await lookupDb.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var availableBranches = await lookupDb.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            var supplier = new ComboBox { ItemsSource = availableSuppliers, DisplayMemberPath = "Name", Height = 34 };
+            var branch = new ComboBox { ItemsSource = availableBranches, DisplayMemberPath = "Name", Height = 34 };
+            var item = new ComboBox { ItemsSource = availableItems, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Text = "1", Height = 34 };
+            var cost = new TextBox { Text = "0", Height = 34 };
+            foreach (var entry in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branch), ("Supplier", supplier), ("Ingredient", item),
+                ("Purchase quantity", quantity), ("Unit cost AFN", cost)
+            })
+            {
+                form.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
+                form.Children.Add(entry.Input);
+            }
+
+            var purchaseLines = new List<(LocalInventoryItem Item, decimal Quantity, decimal UnitCost)>();
+            var linesSummary = new TextBlock { Text = "Add at least one ingredient.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            var addLine = new Button { Content = "+ Add Purchase Line", Height = 36 };
+            addLine.Click += (_, _) =>
+            {
+                if (item.SelectedItem is not LocalInventoryItem selectedItem ||
+                    !decimal.TryParse(quantity.Text, out var qty) || qty <= 0 ||
+                    !decimal.TryParse(cost.Text, out var unitCost) || unitCost < 0)
+                {
+                    linesSummary.Text = "Select an ingredient and enter a positive quantity and valid unit cost.";
+                    return;
+                }
+                if (purchaseLines.Any(x => x.Item.Id == selectedItem.Id))
+                {
+                    linesSummary.Text = "This ingredient is already in the purchase. Add each ingredient once.";
+                    return;
+                }
+                purchaseLines.Add((selectedItem, qty, unitCost));
+                var total = purchaseLines.Sum(x => x.Quantity * x.UnitCost);
+                linesSummary.Text = string.Join("\n", purchaseLines.Select(x =>
+                    x.Item.Name + ": " + x.Quantity + " " + (x.Item.PurchaseUnit ?? x.Item.BaseUnit) +
+                    " × " + x.UnitCost.ToString("0.00") + " AFN")) +
+                    "\nTotal: " + total.ToString("0.00") + " AFN";
+            };
+            form.Children.Add(addLine);
+            form.Children.Add(linesSummary);
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Create PO and Receive Stock", Height = 40 };
+            string? pendingPurchaseId = null;
+            LocalReceivePurchaseOrderLineRequest[]? pendingReceiptLines = null;
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        supplier.SelectedItem is not LocalSupplier selectedSupplier || purchaseLines.Count == 0)
+                        throw new InvalidOperationException("Select branch, supplier and at least one purchase line.");
+                    save.IsEnabled = false;
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    var inventoryService = new LocalInventoryService(factory);
+                    if (pendingPurchaseId is null)
+                    {
+                        var created = await inventoryService.CreatePurchaseOrderAsync(
+                            selectedBranch.Id, selectedSupplier.Id,
+                            purchaseLines.Select(x => new LocalPurchaseOrderLineRequest(x.Item.Id, x.Quantity, x.UnitCost)).ToArray(),
+                            "Desktop one-step purchase", actor, CancellationToken.None);
+                        var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
+                        var savedPurchaseId = snapshot.GetProperty("id").GetString()
+                            ?? throw new InvalidOperationException("Purchase order ID was not returned.");
+                        var returnedLines = snapshot.GetProperty("lines").EnumerateArray().ToArray();
+                        var savedReceiptLines = purchaseLines.Select(line =>
+                        {
+                            var savedLine = returnedLines.Single(x =>
+                                x.GetProperty("inventory_item_id").GetString() == line.Item.Id);
+                            var savedId = savedLine.GetProperty("id").GetString()
+                                ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
+                            return new LocalReceivePurchaseOrderLineRequest(savedId, line.Quantity);
+                        }).ToArray();
+                        pendingPurchaseId = savedPurchaseId;
+                        pendingReceiptLines = savedReceiptLines;
+                        branch.IsEnabled = false;
+                        supplier.IsEnabled = false;
+                        item.IsEnabled = false;
+                        quantity.IsEnabled = false;
+                        cost.IsEnabled = false;
+                        addLine.IsEnabled = false;
+                    }
+
+                    await inventoryService.ReceivePurchaseOrderAsync(pendingPurchaseId,
+                        pendingReceiptLines!, "desktop-receipt-" + pendingPurchaseId,
+                        "Received through desktop purchase form", actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex)
+                {
+                    feedback.Text = (pendingPurchaseId is null ? "" :
+                        "Purchase order already saved. Retry receiving; do not create a duplicate. ") + ex.Message;
+                    save.IsEnabled = true;
+                }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated. Refresh Purchases to see it.");
+        };
+        panel.Children.Add(purchaseButton);
+        var receivePending = new Button { Content = "Receive Outstanding PO", Height = 36, MinWidth = 205, Margin = new Thickness(0, 2, 0, 8) };
+        receivePending.Click += async (_, _) =>
+        {
+            await using var lookup = factory.Create();
+            var openOrders = await lookup.PurchaseOrders.AsNoTracking()
+                .Where(x => x.Status == "ordered" || x.Status == "partially_received")
+                .OrderByDescending(x => x.OrderedAt).ToListAsync();
+            if (openOrders.Count == 0)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info, "No outstanding purchase orders.");
+                return;
+            }
+
+            var dialog = new Window { Title = "Receive Outstanding Purchase", Width = 480, Height = 275, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var form = Stack();
+            form.Margin = new Thickness(18);
+            form.Children.Add(new TextBlock { Text = "Purchase order", Margin = new Thickness(0, 5, 0, 5) });
+            var selected = new ComboBox { ItemsSource = openOrders, DisplayMemberPath = "PoNumber", SelectedIndex = 0, Height = 36 };
+            form.Children.Add(selected);
+            form.Children.Add(new TextBlock { Text = "Receive all outstanding quantities into inventory.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 8) });
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            form.Children.Add(feedback);
+            var save = new Button { Content = "Receive Remaining Stock", Height = 38 };
+            string? pendingId = null;
+            LocalReceivePurchaseOrderLineRequest[]? receiptLines = null;
+            var receiptKey = "desktop-pending-" + Guid.NewGuid().ToString("N");
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (selected.SelectedItem is not LocalPurchaseOrder po)
+                        throw new InvalidOperationException("Select a purchase order.");
+
+                    save.IsEnabled = false;
+                    if (pendingId is null)
+                    {
+                        await using var lineDb = factory.Create();
+                        var lines = await lineDb.PurchaseOrderLines.AsNoTracking()
+                            .Where(x => x.PurchaseOrderId == po.Id).ToListAsync();
+                        if (lines.Any(x => x.ConversionFactor <= 0))
+                            throw new InvalidOperationException("Invalid purchase unit conversion.");
+                        var outstanding = lines.Where(x => x.OrderedBaseQuantity > x.ReceivedBaseQuantity).ToList();
+                        if (outstanding.Count == 0)
+                            throw new InvalidOperationException("No outstanding quantities on this purchase.");
+                        receiptLines = outstanding.Select(x => new LocalReceivePurchaseOrderLineRequest(
+                            x.Id, (x.OrderedBaseQuantity - x.ReceivedBaseQuantity) / x.ConversionFactor)).ToArray();
+                        pendingId = po.Id;
+                        selected.IsEnabled = false;
+                    }
+
+                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
+                    await new LocalInventoryService(factory).ReceivePurchaseOrderAsync(
+                        pendingId, receiptLines!, receiptKey,
+                        "Outstanding purchase received through desktop", actor, CancellationToken.None);
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            form.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Outstanding purchase received. Refresh Purchases and Inventory.");
+        };
+        panel.Children.Add(receivePending);
         panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var grid = GridFor(orders); grid.MinHeight = 230;
         grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190)); grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 220));
         grid.Columns.Add(Column("Status", nameof(PurchaseRow.Status), 120)); grid.Columns.Add(Column("Estimated AFN", nameof(PurchaseRow.Total), 140));
         grid.Columns.Add(Column("Ordered", nameof(PurchaseRow.OrderedAt), 190)); grid.Columns.Add(Column("Completed", nameof(PurchaseRow.CompletedAt), 190));
         panel.Children.Add(grid);
-        panel.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        // Receipt records remain in the database for auditing and stock
+        // reconciliation, but are not a second mandatory operator workflow.
+        var historyToggle = new Button
+        {
+            Content = "Show receipt audit history",
+            MinWidth = 220,
+            Height = 36,
+            Margin = new Thickness(0, 12, 0, 8),
+        };
+        var receiptHistory = new StackPanel { Visibility = Visibility.Collapsed };
+        receiptHistory.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var receiptGrid = GridFor(receipts); receiptGrid.MinHeight = 200;
         receiptGrid.Columns.Add(Column("GRN", nameof(ReceiptRow.Number), 210)); receiptGrid.Columns.Add(Column("Status", nameof(ReceiptRow.Status), 120));
         receiptGrid.Columns.Add(Column("Received", nameof(ReceiptRow.ReceivedAt), 200)); receiptGrid.Columns.Add(Column("Purchase order ID", nameof(ReceiptRow.PurchaseOrderId), 280));
-        panel.Children.Add(receiptGrid);
+        receiptHistory.Children.Add(receiptGrid);
+        historyToggle.Click += (_, _) =>
+        {
+            receiptHistory.Visibility = receiptHistory.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            historyToggle.Content = receiptHistory.Visibility == Visibility.Visible
+                ? "Hide receipt audit history" : "Show receipt audit history";
+        };
+        panel.Children.Add(historyToggle);
+        panel.Children.Add(receiptHistory);
         return Scroll(panel);
     }
 
@@ -310,6 +928,45 @@ internal static class RestaurantOperationalPages
         staffGrid.Columns.Add(Column("Restaurant role", nameof(StaffRow.Role), 160));
         staffGrid.Columns.Add(Column("Active", nameof(StaffRow.Active), 100));
         panel.Children.Add(staffGrid);
+        // StaffUsers is a read-only synchronized identity projection. Creating
+        // records here would not provision login credentials or permissions.
+        var manageUsers = new Button
+        {
+            Content = "Add Users / Manage Roles",
+            MinWidth = 190,
+            Height = 38,
+            Margin = new Thickness(0, 10, 0, 8),
+        };
+        manageUsers.Click += async (_, _) =>
+        {
+            try
+            {
+                // The tenant portal owns account creation and password handling.
+                // Never pass the desktop bearer token in a URL or browser query.
+                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
+                if (session is null)
+                    throw new InvalidOperationException("Sign in before managing restaurant users.");
+                var role = session.User.Role.Trim().ToLowerInvariant();
+                if (role is not ("owner" or "admin"))
+                    throw new UnauthorizedAccessException("Only the restaurant owner or administrator can manage staff accounts.");
+                if (!Uri.TryCreate(session.TenantBaseUrl, UriKind.Absolute, out var baseUri) ||
+                    baseUri.Scheme != Uri.UriSchemeHttps)
+                    throw new InvalidOperationException("A secure tenant portal URL is required.");
+                var target = new Uri(baseUri, "/users");
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = target.AbsoluteUri,
+                    UseShellExecute = true,
+                });
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info,
+                    "Users & Roles opened in the secure tenant portal. Sign in there if requested.");
+            }
+            catch (Exception ex)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
+        };
+        panel.Children.Insert(1, manageUsers);
 
         panel.Children.Add(new TextBlock { Text = "Staff shifts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
         var shiftGrid = GridFor(shifts);
@@ -349,16 +1006,15 @@ internal static class RestaurantOperationalPages
         var panel = Stack();
         panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
 
-        var form = new WrapPanel { Margin = new Thickness(0, 4, 0, 14) };
-        var branchBox = new ComboBox { ItemsSource = branches, DisplayMemberPath = nameof(ExpenseBranchChoice.Name), Width = 180, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var category = new TextBox { Text = "operations", Width = 140, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var description = new TextBox { Width = 240, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var amount = new TextBox { Text = "0", Width = 100, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var method = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Width = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var record = new Button { Content = "Record expense", MinWidth = 130, Height = 34, Margin = new Thickness(0,4,8,4) };
-        var status = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, Margin = new Thickness(8,11,0,0), TextWrapping = TextWrapping.Wrap };
-        form.Children.Add(branchBox); form.Children.Add(category); form.Children.Add(description); form.Children.Add(amount); form.Children.Add(method); form.Children.Add(record); form.Children.Add(status);
-        panel.Children.Add(form);
+        var createExpense = new Button
+        {
+            Content = "+ Create Expense",
+            MinWidth = 170,
+            Height = 42,
+            Margin = new Thickness(0, 8, 0, 14),
+            FontWeight = FontWeights.SemiBold,
+        };
+        panel.Children.Add(createExpense);
 
         var grid = GridFor(rows);
         grid.Columns.Add(Column("Date", nameof(ExpenseRow.Date), 120));
@@ -371,18 +1027,112 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(grid);
 
         var workflow = new DesktopRestaurantWorkflowService();
-        record.Click += async (_, _) =>
+        createExpense.Click += async (_, _) =>
         {
+            var owner = System.Windows.Application.Current?.MainWindow;
+            var dialog = new Window
+            {
+                Title = "Create Expense",
+                Width = 520,
+                Height = 490,
+                MinWidth = 400,
+                WindowStartupLocation = owner is null
+                    ? WindowStartupLocation.CenterScreen
+                    : WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+                Background = new SolidColorBrush(Color.FromArgb(246, 248, 250, 255)),
+                WindowStyle = WindowStyle.ToolWindow,
+            };
+            if (owner is not null) dialog.Owner = owner;
+
+            var content = new StackPanel { Margin = new Thickness(24) };
+            content.Children.Add(new TextBlock
+            {
+                Text = "New restaurant expense",
+                FontSize = 23,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 14),
+            });
+            var branchBox = new ComboBox
+            {
+                ItemsSource = branches,
+                DisplayMemberPath = nameof(ExpenseBranchChoice.Name),
+                SelectedIndex = branches.Count > 0 ? 0 : -1,
+                Height = 36,
+            };
+            var category = new TextBox { Text = "operations", Height = 36 };
+            var description = new TextBox { Height = 36 };
+            var amount = new TextBox { Height = 36 };
+            var method = new ComboBox
+            {
+                ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" },
+                SelectedIndex = 0,
+                Height = 36,
+            };
+            foreach (var field in new (string Label, FrameworkElement Input)[]
+            {
+                ("Branch", branchBox), ("Category", category), ("Description", description),
+                ("Amount (AFN)", amount), ("Payment method", method),
+            })
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = field.Label,
+                    Margin = new Thickness(0, 7, 0, 3),
+                    FontWeight = FontWeights.Medium,
+                });
+                content.Children.Add(field.Input);
+            }
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            feedback.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            content.Children.Add(feedback);
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var cancel = new Button { Content = "Cancel", MinWidth = 100, Height = 36, Margin = new Thickness(0, 0, 8, 0) };
+            var save = new Button { Content = "Save Expense", MinWidth = 135, Height = 36 };
+            cancel.Click += (_, _) => dialog.Close();
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (branchBox.SelectedItem is not ExpenseBranchChoice branch)
+                        throw new InvalidOperationException("Select a branch.");
+                    if (string.IsNullOrWhiteSpace(description.Text))
+                        throw new InvalidOperationException("Enter an expense description.");
+                    if (!decimal.TryParse(amount.Text, out var value) || value <= 0)
+                        throw new InvalidOperationException("Enter a positive expense amount.");
+                    save.IsEnabled = false;
+                    await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text,
+                        value, method.SelectedItem?.ToString() ?? "cash",
+                        DateOnly.FromDateTime(DateTime.Today));
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex)
+                {
+                    feedback.Text = ex.Message;
+                    save.IsEnabled = true;
+                }
+            };
+            actions.Children.Add(cancel);
+            actions.Children.Add(save);
+            content.Children.Add(actions);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+
+            // Blur the underlying workspace while the modal is open, restoring
+            // its original effect even if the dialog closes unexpectedly.
+            var ownerContent = owner?.Content as UIElement;
+            var previousEffect = ownerContent?.Effect;
             try
             {
-                if (branchBox.SelectedItem is not ExpenseBranchChoice branch) throw new InvalidOperationException("Select a branch.");
-                if (string.IsNullOrWhiteSpace(description.Text)) throw new InvalidOperationException("Enter an expense description.");
-                if (!decimal.TryParse(amount.Text, out var value) || value <= 0) throw new InvalidOperationException("Enter a positive expense amount.");
-                await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text, value, method.SelectedItem?.ToString() ?? "cash", DateOnly.FromDateTime(DateTime.Today));
-                status.Text = "Expense recorded locally. Refresh the page to update the ledger.";
-                description.Clear(); amount.Text = "0";
+                if (ownerContent is not null)
+                    ownerContent.Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 9 };
+                if (dialog.ShowDialog() == true)
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
+                        "Expense saved. Refresh Expenses to see the latest ledger entry.");
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            finally
+            {
+                if (ownerContent is not null) ownerContent.Effect = previousEffect;
+            }
         };
 
         return Scroll(panel);
@@ -650,6 +1400,16 @@ internal static class RestaurantOperationalPages
             "These settings drive the Desktop KOT/KDS state machine and are included in LAN bootstrap/settings APIs for cross-client alignment.",
             workflowPanel));
 
+        panel.Children.Add(Section(
+            "Backup, restore & local database health",
+            "Back up a consistent SQLite snapshot; staged restores apply only on the next cold launch before local services start.",
+            await BackupRestorePanelAsync()));
+
+        panel.Children.Add(Section(
+            "Printing & Recovery",
+            "KOT and receipt queues are independent. Interrupted spool submissions are not replayed automatically because an unconfirmed replay can cause duplicate food production.",
+            await PrinterQueueRecoveryPanelAsync(workflow)));
+
         panel.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
             ("WAITER DEVICES", diagnostics.TerminalSummary),
@@ -738,6 +1498,241 @@ internal static class RestaurantOperationalPages
         return Scroll(panel);
     }
 
+    private static async Task<FrameworkElement> BackupRestorePanelAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        var maintenance = new LocalMaintenanceService(factory);
+        var diagnostics = await maintenance.GetDiagnosticsAsync();
+
+        var panel = new StackPanel();
+        var summary = new TextBlock
+        {
+            Text = $"Integrity: {diagnostics.Integrity} · " +
+                   $"Database: {diagnostics.DatabaseBytes / 1024.0 / 1024.0:N1} MB · " +
+                   $"{diagnostics.BackupCount} backups · " +
+                   $"Restore staged: {(diagnostics.PendingRestore ? "YES" : "NO")}",
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        summary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        panel.Children.Add(summary);
+
+        var warning = new TextBlock
+        {
+            Text = "Before restoring, end the restaurant shift, stop mobile orders and " +
+                   "close all connected terminals. A restore replaces the active local " +
+                   "database at next launch; a pre-restore recovery copy is retained.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        warning.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(warning);
+
+        var buttons = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+        var backupButton = new Button
+        {
+            Content = "Create verified backup",
+            MinWidth = 180, Height = 40, Margin = new Thickness(0, 0, 12, 0),
+        };
+        var restoreButton = new Button
+        {
+            Content = "Stage database restore",
+            MinWidth = 180, Height = 40,
+        };
+        buttons.Children.Add(backupButton);
+        buttons.Children.Add(restoreButton);
+        panel.Children.Add(buttons);
+
+        var result = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        result.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        panel.Children.Add(result);
+
+        backupButton.Click += async (_, _) =>
+        {
+            backupButton.IsEnabled = false;
+            try
+            {
+                var backup = await maintenance.CreateBackupAsync();
+                result.Text = $"Backup saved: {backup.Path} · SHA-256: {backup.Sha256}. " +
+                              "Keep a safe copy outside this computer.";
+            }
+            catch (Exception exception)
+            {
+                result.Text = "Backup failed: " + exception.Message;
+            }
+            finally
+            {
+                backupButton.IsEnabled = true;
+            }
+        };
+
+        restoreButton.Click += async (_, _) =>
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select a verified BusinessOS Restaurant SQLite backup",
+                Filter = "SQLite backups (*.db)|*.db|All files (*.*)|*.*",
+                CheckFileExists = true,
+            };
+            if (picker.ShowDialog() != true)
+                return;
+
+            var confirmation = MessageBox.Show(
+                "Restore this backup only after the restaurant has stopped taking orders. " +
+                "It will replace the local database on the next launch. " +
+                "The app will first retain a safety copy of the current database. Continue?",
+                "Stage a restaurant restore",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (confirmation != MessageBoxResult.Yes)
+                return;
+
+            restoreButton.IsEnabled = false;
+            try
+            {
+                await maintenance.StageRestoreAsync(picker.FileName);
+                result.Text = "Backup validated and staged. Restart Restaurant Desktop " +
+                              "after the shift is fully stopped to apply the restore.";
+            }
+            catch (Exception exception)
+            {
+                result.Text = "Restore not staged: " + exception.Message;
+            }
+            finally
+            {
+                restoreButton.IsEnabled = true;
+            }
+        };
+
+        return panel;
+    }
+
+    private static async Task<FrameworkElement> PrinterQueueRecoveryPanelAsync(
+        DesktopRestaurantWorkflowService workflow)
+    {
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        await using var db = factory.Create();
+
+        var kitchen = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .OrderBy(job => job.CreatedAtUtc)
+            .ToArrayAsync();
+        var receipts = await db.ReceiptPrintJobs.AsNoTracking()
+            .Where(job => job.Status == "failed" || job.Status == "printing" || job.Status == "pending")
+            .OrderBy(job => job.CreatedAtUtc)
+            .ToArrayAsync();
+
+        var interrupted = kitchen.Count(job => job.Status == "printing") +
+                          receipts.Count(job => job.Status == "printing");
+        var failed = kitchen.Count(job => job.Status == "failed") +
+                     receipts.Count(job => job.Status == "failed");
+        var pending = kitchen.Count(job => job.Status == "pending") +
+                      receipts.Count(job => job.Status == "pending");
+
+        var panel = new StackPanel();
+        var header = new TextBlock
+        {
+            Text = $"{pending} pending · {failed} failed · {interrupted} require physical printer review",
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 13,
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        header.SetResourceReference(TextBlock.ForegroundProperty,
+            failed + interrupted > 0 ? "BrandPrimaryBrush" : "TextSecondaryBrush");
+        panel.Children.Add(header);
+
+        var instructions = new TextBlock
+        {
+            Text = "Before retrying, check whether the kitchen ticket or receipt already printed. " +
+                   "A manager-confirmed retry may print the same document again; it never creates another KOT round or bill.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        instructions.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        panel.Children.Add(instructions);
+
+        var retryItems = new System.Collections.ObjectModel.ObservableCollection<PrinterIssueChoice>(
+            kitchen.Where(job => job.Status != "pending")
+                .Select(job => new PrinterIssueChoice(job.Id, false,
+                    $"KOT · {job.Status.ToUpperInvariant()} · {job.DocumentName} · {job.PrinterName}"))
+                .Concat(receipts.Where(job => job.Status != "pending")
+                    .Select(job => new PrinterIssueChoice(job.Id, true,
+                        $"RECEIPT · {job.Status.ToUpperInvariant()} · {job.DocumentName} · {job.PrinterName}"))));
+
+        var choice = new ComboBox
+        {
+            ItemsSource = retryItems,
+            DisplayMemberPath = nameof(PrinterIssueChoice.Display),
+            Width = 540,
+            MaxWidth = 540,
+            Height = 38,
+            Margin = new Thickness(0, 0, 0, 8),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        panel.Children.Add(choice);
+
+        var retry = new Button
+        {
+            Content = "Review & retry selected print",
+            Height = 38,
+            MinWidth = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            IsEnabled = retryItems.Count > 0,
+        };
+        var message = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        message.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        retry.Click += async (_, _) =>
+        {
+            if (choice.SelectedItem is not PrinterIssueChoice selected)
+            {
+                message.Text = "Select a failed or interrupted printer job.";
+                return;
+            }
+
+            var answer = MessageBox.Show(
+                "Check the physical printer output first. A retry could print a duplicate " +
+                "ticket or receipt. Confirm that you have checked and want to requeue this exact job.",
+                "Confirm printer recovery",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes)
+                return;
+
+            retry.IsEnabled = false;
+            try
+            {
+                await workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt);
+                retryItems.Remove(selected);
+                message.Text = "The existing print document was requeued and audited. " +
+                               "No new order, kitchen production or payment record was created.";
+            }
+            catch (Exception exception)
+            {
+                message.Text = exception.Message;
+            }
+            finally
+            {
+                retry.IsEnabled = retryItems.Count > 0;
+            }
+        };
+
+        panel.Children.Add(retry);
+        panel.Children.Add(message);
+        return panel;
+    }
+
     private static FrameworkElement Placeholder(string route)
     {
         var note = new TextBlock
@@ -821,17 +1816,81 @@ internal static class RestaurantOperationalPages
         return border;
     }
 
+    private static FrameworkElement DashboardQuickActions()
+    {
+        // Navigate through MainWindowViewModel rather than bypassing existing
+        // page loading or permissions. Commands inherit the shell DataContext.
+        var links = new (string Label, string Route, string Hint)[]
+        {
+            ("▣  New order / POS", "pos", "Open orders and cashier"),
+            ("▦  Tables & floor", "tables", "Manage dining tables"),
+            ("☷  Kitchen / KOT", "kitchen", "Review production tickets"),
+            ("▤  Inventory", "inventory", "Review ingredient alerts"),
+        };
+
+        var wrap = new WrapPanel { Margin = new Thickness(0, 0, 0, 14) };
+        foreach (var (label, route, hint) in links)
+        {
+            var button = new Button
+            {
+                Content = label,
+                CommandParameter = route,
+                ToolTip = hint,
+                Height = 42,
+                MinWidth = 190,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 10, 8),
+                Padding = new Thickness(14, 0, 14, 0),
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+            };
+            button.SetResourceReference(Button.BackgroundProperty, "TopBarActionBrush");
+            button.SetResourceReference(Button.ForegroundProperty, "TextPrimaryBrush");
+            button.SetResourceReference(Button.BorderBrushProperty, "CardBorderBrush");
+            button.BorderThickness = new Thickness(1);
+            button.SetBinding(Button.CommandProperty,
+                new Binding(nameof(MainWindowViewModel.NavigateCommand)));
+            var visibilityProperty = route switch
+            {
+                "pos" => nameof(MainWindowViewModel.CanViewPos),
+                "tables" => nameof(MainWindowViewModel.CanViewTables),
+                "kitchen" => nameof(MainWindowViewModel.CanViewKitchen),
+                "inventory" => nameof(MainWindowViewModel.CanViewInventory),
+                _ => nameof(MainWindowViewModel.CanViewDashboard),
+            };
+            button.SetBinding(UIElement.VisibilityProperty, new Binding(visibilityProperty)
+            {
+                Converter = new BooleanToVisibilityConverter(),
+            });
+            wrap.Children.Add(button);
+        }
+
+        return wrap;
+    }
+
     private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail, Color Accent)[] values)
     {
         var wrap = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         foreach (var value in values)
             wrap.Children.Add(DashboardCard(value.Icon, value.Label, value.Value, value.Detail, value.Accent));
 
-        return new Border
+        var container = new Border
         {
             Child = wrap,
             Margin = new Thickness(0, 0, 0, 10),
         };
+        container.SizeChanged += (_, _) =>
+        {
+            var available = container.ActualWidth;
+            if (available <= 0 || !double.IsFinite(available)) return;
+
+            // KPI cards fill each row rather than clipping at lower resolutions.
+            var columns = Math.Clamp((int)((available + 10) / 245), 1, values.Length);
+            var cardWidth = Math.Max(164, Math.Floor(available / columns) - 10);
+            foreach (var card in wrap.Children.OfType<Border>())
+                card.Width = cardWidth;
+        };
+        return container;
     }
 
     private static Border DashboardCard(string icon, string title, string value, string detail, Color accent)
@@ -956,6 +2015,75 @@ internal static class RestaurantOperationalPages
         return border;
     }
 
+    private static UIElement BuildStockAlertSummary(
+        IReadOnlyList<DashboardStockAlert> alerts, int balanceCount, int configuredCount)
+    {
+        var stack = new StackPanel();
+        if (balanceCount == 0 || configuredCount == 0 || alerts.Count == 0)
+        {
+            var description = balanceCount == 0
+                ? "No active branch stock balances have been loaded."
+                : configuredCount == 0
+                    ? "Set reorder levels for ingredients to enable stock alerts."
+                    : "No ingredients are currently at or below their reorder levels.";
+            var empty = new TextBlock
+            {
+                Text = description,
+                FontSize = 12,
+                Margin = new Thickness(2, 3, 2, 6),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            stack.Children.Add(empty);
+            return stack;
+        }
+
+        foreach (var alert in alerts.Take(5))
+        {
+            var row = new Grid { Margin = new Thickness(2, 3, 2, 8) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var item = new TextBlock
+            {
+                Text = $"{alert.ItemName}  ·  {alert.BranchName}",
+                FontSize = 12.5,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 14, 0),
+            };
+            item.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+
+            var shortage = new TextBlock
+            {
+                Text = $"{alert.Quantity:N2} / {alert.ReorderLevel:N2} {alert.BaseUnit}",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+            };
+            shortage.SetResourceReference(TextBlock.ForegroundProperty,
+                alert.Quantity <= 0m ? "BrandPrimaryBrush" : "TextSecondaryBrush");
+
+            row.Children.Add(item);
+            Grid.SetColumn(shortage, 1);
+            row.Children.Add(shortage);
+            stack.Children.Add(row);
+        }
+
+        if (alerts.Count > 5)
+        {
+            var remaining = new TextBlock
+            {
+                Text = $"+ {alerts.Count - 5} more branch ingredient alert(s) · open Inventory to review all balances.",
+                FontSize = 11,
+                Margin = new Thickness(2, 2, 2, 0),
+                TextWrapping = TextWrapping.Wrap,
+            };
+            remaining.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            stack.Children.Add(remaining);
+        }
+        return stack;
+    }
+
     private static Border DashboardPanel(string title, string subtitle, UIElement content)
     {
         var titleText = new TextBlock
@@ -999,7 +2127,9 @@ internal static class RestaurantOperationalPages
         return border;
     }
 
-    private static UIElement BuildOperationsOverview(decimal sales, int orders, int tables, int kitchen)
+    private static UIElement BuildOperationsOverview(
+        decimal sales, int orders, int tables, int kitchen,
+        DashboardDailySales salesTrend, int currentHour)
     {
         var grid = new Grid { MinHeight = 178 };
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1016,38 +2146,115 @@ internal static class RestaurantOperationalPages
         metrics.Children.Add(MiniMetric("Kitchen", kitchen.ToString(), Color.FromRgb(236, 72, 153)));
         grid.Children.Add(metrics);
 
-        var chart = new Grid { Margin = new Thickness(4, 6, 4, 0) };
-        for (var i = 0; i < 5; i++)
+        var trend = salesTrend.HourlyTotals.Take(currentHour + 1).ToArray();
+        var chartArea = new Grid { Height = 138, Margin = new Thickness(4, 6, 4, 0) };
+
+        if (trend.All(amount => amount <= 0))
         {
-            chart.RowDefinitions.Add(new RowDefinition());
-            var line = new Border
+            var empty = new TextBlock
             {
-                Height = 1,
-                Opacity = 0.32,
-                VerticalAlignment = VerticalAlignment.Top,
+                Text = "No billed sales yet today — the trend will appear after the first bill.",
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
             };
-            line.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
-            Grid.SetRow(line, i);
-            chart.Children.Add(line);
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            chartArea.Children.Add(empty);
+        }
+        else
+        {
+            // Draw vectors in logical WPF units instead of scaling a fixed-width
+            // Viewbox. On 4K, Stretch.Fill distorted strokes and circular markers.
+            var plot = new Canvas
+            {
+                Height = 118,
+                ClipToBounds = true,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+            };
+            var guides = new List<Line>();
+            for (var i = 0; i < 4; i++)
+            {
+                var guide = new Line
+                {
+                    X1 = 14,
+                    Y1 = 20 + i * 29,
+                    Y2 = 20 + i * 29,
+                    StrokeThickness = 1,
+                    Opacity = 0.26,
+                };
+                guide.SetResourceReference(Shape.StrokeProperty, "BorderBrush");
+                guides.Add(guide);
+                plot.Children.Add(guide);
+            }
+
+            var peak = trend.Max();
+            Polyline? trendLine = null;
+            if (trend.Length > 1)
+            {
+                trendLine = new Polyline
+                {
+                    Stroke = new SolidColorBrush(Color.FromRgb(47, 107, 255)),
+                    StrokeThickness = 3,
+                    StrokeLineJoin = PenLineJoin.Round,
+                };
+                plot.Children.Add(trendLine);
+            }
+
+            var marker = new Ellipse
+            {
+                Width = 9, Height = 9,
+                Fill = new SolidColorBrush(Color.FromRgb(47, 107, 255)),
+                Stroke = Brushes.White,
+                StrokeThickness = 1.5,
+            };
+            plot.Children.Add(marker);
+
+            void UpdateChartGeometry()
+            {
+                if (plot.ActualWidth <= 0) return;
+                var width = plot.ActualWidth;
+                foreach (var guide in guides)
+                    guide.X2 = DashboardChartLayout.GuideEnd(width);
+
+                var points = new PointCollection();
+                for (var hour = 0; hour < trend.Length; hour++)
+                {
+                    var x = DashboardChartLayout.HourX(hour, trend.Length, width);
+                    var y = 108 - 86 * (double)(Math.Max(0m, trend[hour]) / peak);
+                    points.Add(new Point(x, y));
+                }
+
+                if (trendLine is not null)
+                    trendLine.Points = points;
+                var lastPoint = points[^1];
+                Canvas.SetLeft(marker, lastPoint.X - marker.Width / 2);
+                Canvas.SetTop(marker, lastPoint.Y - marker.Height / 2);
+            }
+
+            plot.SizeChanged += (_, _) => UpdateChartGeometry();
+            chartArea.Children.Add(plot);
         }
 
-        var baseline = new Polyline
+        var chartStack = new StackPanel();
+        chartStack.Children.Add(chartArea);
+        var timeLabels = new Grid { Margin = new Thickness(5, 0, 5, 0) };
+        timeLabels.Children.Add(new TextBlock
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(59, 130, 246)),
-            StrokeThickness = 2.2,
-            StrokeLineJoin = PenLineJoin.Round,
-            Points = new PointCollection
-            {
-                new(0, 104), new(70, 100), new(140, 101), new(210, 94),
-                new(280, 92), new(350, 82), new(420, 86), new(490, 70),
-                new(560, 74), new(630, 58), new(700, 61)
-            },
-            Stretch = Stretch.Fill,
-            Margin = new Thickness(0, 8, 0, 10),
-        };
-        chart.Children.Add(baseline);
-        Grid.SetRow(chart, 1);
-        grid.Children.Add(chart);
+            Text = "00:00",
+            FontSize = 10,
+            Foreground = Brushes.SlateGray,
+        });
+        timeLabels.Children.Add(new TextBlock
+        {
+            Text = $"{currentHour:00}:00 · local time",
+            FontSize = 10,
+            Foreground = Brushes.SlateGray,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        });
+        chartStack.Children.Add(timeLabels);
+        Grid.SetRow(chartStack, 1);
+        grid.Children.Add(chartStack);
 
         return grid;
     }
@@ -1229,7 +2436,8 @@ internal static class RestaurantOperationalPages
             AutoGenerateColumns = false,
             IsReadOnly = true,
             CanUserAddRows = false,
-            MinHeight = 430,
+            MinHeight = 220,
+            MaxHeight = 440,
             BorderThickness = new Thickness(1),
             AlternationCount = 2,
         };
@@ -1244,6 +2452,8 @@ internal static class RestaurantOperationalPages
     private sealed record KitchenRow(string Id, string TicketNumber, string Station, string Status, DateTimeOffset QueuedAt);
     private sealed record OrderRow(string Id, string ClientOrderId, string Waiter, string Status, int Guests, decimal Total, DateTimeOffset UpdatedAt);
     private sealed record MenuRow(string Sku, string Name, string Category, decimal Price, string Currency, bool Available);
+    private sealed record PrinterIssueChoice(string Id, bool Receipt, string Display);
+
     private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal Quantity, decimal ReorderLevel, decimal AverageCost, decimal StockValue);
     private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt, DateTimeOffset? CompletedAt);
     private sealed record SupplierRow(string Code, string Name, string? Phone, string? Email);

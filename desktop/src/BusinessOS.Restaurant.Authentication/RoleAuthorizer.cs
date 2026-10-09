@@ -7,6 +7,7 @@ public static class RestaurantRoles
     public const string Cashier = "cashier";
     public const string Waiter = "waiter";
     public const string Kitchen = "kitchen";
+    public const string Expo = "expo";
 }
 
 public enum RestaurantCapability

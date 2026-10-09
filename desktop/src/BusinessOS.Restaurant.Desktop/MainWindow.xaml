@@ -1,14 +1,17 @@
 <Window x:Class="BusinessOS.Restaurant.Desktop.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:nav="clr-namespace:BusinessOS.Restaurant.Desktop"
         Title="BusinessOS — Restaurant"
-        Width="1600" Height="920"
-        MinWidth="1180" MinHeight="720"
-        WindowStartupLocation="CenterScreen"
+        Width="1366" Height="830"
+        MinWidth="950" MinHeight="620"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized" SizeChanged="OnWindowSizeChanged"
         Background="{DynamicResource AppBackgroundBrush}"
         SnapsToDevicePixels="True"
         UseLayoutRounding="True">
     <Window.Resources>
+        <nav:NavigationRouteMatchConverter x:Key="NavigationRouteMatchConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="NavButton" TargetType="Button">
             <Setter Property="Height" Value="44" />
             <Setter Property="Margin" Value="0,2" />
@@ -16,19 +19,103 @@
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource BrandPrimaryBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="FontSize" Value="14" />
             <Setter Property="FontWeight" Value="Medium" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="12"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"
+                                              RecognizesAccessKey="True" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource HoverBrush}" />
                     <Setter Property="Foreground" Value="{DynamicResource BrandPrimaryBrush}" />
                 </Trigger>
+                <DataTrigger Value="True">
+                    <DataTrigger.Binding>
+                        <MultiBinding Converter="{StaticResource NavigationRouteMatchConverter}">
+                            <Binding Path="CurrentRoute" />
+                            <Binding Path="CommandParameter" RelativeSource="{RelativeSource Self}" />
+                        </MultiBinding>
+                    </DataTrigger.Binding>
+                    <Setter Property="Background" Value="{DynamicResource BrandPrimarySoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource BrandPrimaryBrush}" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                    <Setter Property="BorderThickness" Value="3,0,0,0" />
+                </DataTrigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                    <Setter Property="BorderThickness" Value="2" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55" />
+                </Trigger>
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="NotificationSurfaceStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="12" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Kind}" Value="Warning">
+                    <Setter Property="Background" Value="{DynamicResource WarningSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Error">
+                    <Setter Property="Background" Value="{DynamicResource ErrorSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource ErrorBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Success">
+                    <Setter Property="Background" Value="{DynamicResource SuccessSoftBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource SuccessBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <DataTemplate x:Key="NotificationItemTemplate">
+            <Border Style="{StaticResource NotificationSurfaceStyle}" Margin="0,0,0,8">
+                <!-- Subtle entrance on both toasts and notification history entries. -->
+                <Border.Triggers>
+                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                 From="0" To="1" Duration="0:0:0.22" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Border.Triggers>
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeLabel}"
+                                   FontSize="10" Foreground="{DynamicResource TextMutedBrush}" />
+                        <TextBlock Text="{Binding Heading}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextPrimaryBrush}" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}"
+                               FontSize="12" Margin="0,4,0,0" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
         <Style x:Key="TopBarGhostButton" TargetType="Button">
-            <Setter Property="Background" Value="#72FFFFFF" />
+            <Setter Property="Background" Value="{DynamicResource TopBarActionBrush}" />
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -37,14 +124,22 @@
     </Window.Resources>
 
     <Grid>
-        <Image Source="Assets/RestaurantGlassBackground.jpg"
+        <!-- Cache only the already-blurred decorative artwork at reduced render scale.
+             On 4K monitors the full-window shader otherwise allocates an enormous
+             intermediate surface; foreground text and controls remain vector-sharp. -->
+        <Image x:Name="RestaurantBackdrop" Source="Assets/RestaurantGlassBackground.jpg"
                Stretch="UniformToFill"
-               Effect="{DynamicResource BackgroundBlurEffect}" />
+               RenderOptions.BitmapScalingMode="HighQuality"
+               Effect="{DynamicResource BackgroundBlurEffect}">
+            <Image.CacheMode>
+                <BitmapCache RenderAtScale="0.5" />
+            </Image.CacheMode>
+        </Image>
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="286" />
+                <ColumnDefinition Width="252" />
                 <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
@@ -124,15 +219,20 @@
                                        FontSize="10"
                                        Margin="14,0,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="⌂   Dashboard"
-                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard"
+                                    Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▣   POS &amp; Orders"
-                                    Command="{Binding NavigateCommand}" CommandParameter="pos" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="pos"
+                                    Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor"
-                                    Command="{Binding NavigateCommand}" CommandParameter="tables" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="tables"
+                                    Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="☷   Kitchen / KOT"
-                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen"
+                                    Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
-                                    Command="{Binding NavigateCommand}" CommandParameter="menu" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="menu"
+                                    Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}" />
 
                             <TextBlock Text="MANAGEMENT"
                                        Foreground="{DynamicResource TextMutedBrush}"
@@ -140,15 +240,20 @@
                                        FontSize="10"
                                        Margin="14,18,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="▤   Inventory"
-                                    Command="{Binding NavigateCommand}" CommandParameter="inventory" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="inventory"
+                                    Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▥   Purchases"
-                                    Command="{Binding NavigateCommand}" CommandParameter="purchases" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="purchases"
+                                    Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="$   Expenses"
-                                    Command="{Binding NavigateCommand}" CommandParameter="expenses" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="expenses"
+                                    Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="◉   Daily Closing"
-                                    Command="{Binding NavigateCommand}" CommandParameter="closing" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="closing"
+                                    Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▥   Reports &amp; Accounting"
-                                    Command="{Binding NavigateCommand}" CommandParameter="reports" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="reports"
+                                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}" />
 
                             <TextBlock Text="SYSTEM"
                                        Foreground="{DynamicResource TextMutedBrush}"
@@ -156,9 +261,11 @@
                                        FontSize="10"
                                        Margin="14,18,0,6" />
                             <Button Style="{StaticResource NavButton}" Content="♙   Users &amp; Roles"
-                                    Command="{Binding NavigateCommand}" CommandParameter="users" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="users"
+                                    Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="⚙   Settings"
-                                    Command="{Binding NavigateCommand}" CommandParameter="settings" />
+                                    Command="{Binding NavigateCommand}" CommandParameter="settings"
+                                    Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}" />
                         </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
@@ -166,8 +273,8 @@
 
             <Grid Grid.Column="2">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="72" />
-                    <RowDefinition Height="0" />
+                    <RowDefinition Height="76" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -176,7 +283,7 @@
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0,0,0,1"
                         CornerRadius="0"
-                        Padding="20,0">
+                        Padding="16,0">
                     <Border.Effect>
                         <DropShadowEffect BlurRadius="24"
                                           ShadowDepth="5"
@@ -184,35 +291,115 @@
                                           Color="#071827" />
                     </Border.Effect>
                     <Grid>
-                        <StackPanel VerticalAlignment="Center">
-                            <TextBlock Text="{Binding PageTitle}"
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center" Grid.Column="0">
+                            <TextBlock Text="{Binding PageTitle}" TextTrimming="CharacterEllipsis"
                                        FontSize="22"
                                        FontWeight="Bold" />
-                            <TextBlock Text="{Binding PageSubtitle}"
+                            <TextBlock x:Name="HeaderSubtitle" Text="{Binding PageSubtitle}"
                                        Foreground="{DynamicResource TextMutedBrush}"
                                        Margin="0,3,0,0" />
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal"
+                        <StackPanel Grid.Column="1" Orientation="Horizontal"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center">
-                            <Border Background="{DynamicResource SuccessSoftBrush}"
+                            <Border x:Name="NetworkModeBadge" Background="{DynamicResource SuccessSoftBrush}"
                                     CornerRadius="12"
                                     Padding="12,7">
                                 <TextBlock Text="{Binding NetworkMode, StringFormat=●  {0}}"
                                            Foreground="{DynamicResource SuccessBrush}"
                                            FontWeight="SemiBold" />
                             </Border>
+                            <Border x:Name="OperatorBadge" Margin="12,0,0,0" Padding="10,7"
+                                    Background="{DynamicResource TopBarActionBrush}"
+                                    CornerRadius="10">
+                                <TextBlock Text="{Binding OperatorLabel}"
+                                           MaxWidth="165"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                            </Border>
+                            <Button x:Name="SwitchOperatorButton" Margin="8,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="Switch operator"
+                                    ToolTip="Sign in as a different restaurant operator"
+                                    Click="OnSwitchOperatorClick" />
                             <Button Margin="10,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="{Binding ThemeButtonText}"
                                     Command="{Binding ToggleThemeCommand}" />
-                            <Button Margin="8,0,0,0"
+                            <Button x:Name="RefreshButton" Margin="8,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="↻  Refresh"
                                     Command="{Binding RefreshCommand}" />
+                            <Button x:Name="NotificationBellButton" Margin="8,0,0,0"
+                                    Style="{StaticResource TopBarGhostButton}"
+                                    Content="{Binding NotificationBellLabel}"
+                                    ToolTip="Show restaurant notifications"
+                                    AutomationProperties.Name="Notifications"
+                                    Command="{Binding ToggleNotificationsCommand}" />
+                            <Popup PlacementTarget="{Binding ElementName=NotificationBellButton}"
+                                   Placement="Bottom" HorizontalOffset="-250" VerticalOffset="10"
+                                   AllowsTransparency="True" StaysOpen="False"
+                                   PopupAnimation="Fade"
+                                   IsOpen="{Binding NotificationsOpen, Mode=TwoWay}"
+                                   DataContext="{Binding DataContext, ElementName=NotificationBellButton}">
+                                <Border Width="360" MaxHeight="480" Padding="14"
+                                        Background="{DynamicResource SurfaceBrush}"
+                                        BorderBrush="{DynamicResource CardBorderBrush}"
+                                        BorderThickness="1" CornerRadius="16">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="20" ShadowDepth="5"
+                                                          Color="#0E223A" Opacity="0.25" />
+                                    </Border.Effect>
+                                    <DockPanel>
+                                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                                            <Button Content="Mark read" DockPanel.Dock="Right"
+                                                    Style="{StaticResource TopBarGhostButton}"
+                                                    Command="{Binding MarkNotificationsReadCommand}" />
+                                            <TextBlock Text="Notifications" FontSize="17"
+                                                       FontWeight="Bold" VerticalAlignment="Center" />
+                                        </DockPanel>
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled"
+                                                      MaxHeight="380">
+                                            <StackPanel>
+                                                <TextBlock Text="Recent alerts for this operator session"
+                                                           Margin="0,0,0,8" FontSize="11"
+                                                           Foreground="{DynamicResource TextMutedBrush}"/>
+                                                <ItemsControl ItemsSource="{Binding NotificationHistory}"
+                                                              ItemTemplate="{StaticResource NotificationItemTemplate}" />
+                                            </StackPanel>
+                                        </ScrollViewer>
+                                    </DockPanel>
+                                </Border>
+                            </Popup>
                         </StackPanel>
                     </Grid>
+                </Border>
+
+                <!-- Only show a recovery action when the most recent workspace load fails.
+                     A failed load never replaces the current operational page. -->
+                <Border Grid.Row="1"
+                        Visibility="{Binding HasWorkspaceError, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Background="{DynamicResource BrandPrimarySoftBrush}"
+                        BorderBrush="{DynamicResource BorderStrongBrush}"
+                        BorderThickness="0,0,0,1"
+                        Padding="16,8">
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right"
+                                Style="{StaticResource TopBarGhostButton}"
+                                Content="Retry workspace"
+                                Command="{Binding RetryWorkspaceCommand}"
+                                Margin="12,0,0,0" />
+                        <TextBlock Text="{Binding WorkspaceErrorMessage}"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </DockPanel>
                 </Border>
 
                 <Border Grid.Row="2"
@@ -220,10 +407,22 @@
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0"
                         CornerRadius="0"
-                        Padding="20">
-                    <ContentControl Content="{Binding CurrentPage}" />
+                        Padding="14">
+                    <!-- Constrain very wide 4K pages without scaling the visual tree.
+                         Smaller resolutions retain their full available width. -->
+                    <ContentControl Content="{Binding CurrentPage}"
+                                    HorizontalAlignment="Stretch"
+                                    MaxWidth="1900"
+                                    SnapsToDevicePixels="True" />
                 </Border>
             </Grid>
         </Grid>
+
+        <!-- Toast overlay belongs to the shell, not to the current page. It
+             never blocks kitchen, table or cashier actions after expiry. -->
+        <ItemsControl Grid.Row="0" Grid.Column="0" Panel.ZIndex="20"
+                      Width="355" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                      Margin="12,12,18,18" ItemsSource="{Binding ToastNotifications}"
+                      ItemTemplate="{StaticResource NotificationItemTemplate}" />
     </Grid>
 </Window>

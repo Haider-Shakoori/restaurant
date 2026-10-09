@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,12 @@ namespace BusinessOS.Restaurant.Desktop;
 
 internal static class OperationalActionViews
 {
+    // Only irreversible changes ask for confirmation. Normal order entry and
+    // KOT production remain quick single-click workflows.
+    private static bool ConfirmOperationalChange(string message, string title) =>
+        MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
+        == MessageBoxResult.Yes;
+
     public static async Task<FrameworkElement> PosAsync()
     {
         var factory = new LocalDatabaseFactory();
@@ -56,20 +63,23 @@ internal static class OperationalActionViews
             .OrderByDescending(x => x.IssuedAt)
             .Select(x => x.Row)
             .ToList();
-        var orderLines = await (
+        // SQLite cannot translate ORDER BY on DateTimeOffset; sort the projected rows in memory.
+        var orderLines = (await (
             from line in db.OrderItems.AsNoTracking()
             join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
             where order.Status != "closed" && order.Status != "cancelled" &&
                   line.Status != "voided" && line.Status != "cancelled"
-            orderby line.CreatedAtUtc
-            select new OrderLineChoice(
-                order.ClientOrderId,
-                line.ClientLineId,
-                line.ItemName,
-                line.Quantity,
-                line.Status,
-                line.RoundNumber))
-            .ToListAsync();
+            select new
+            {
+                Row = new OrderLineChoice(
+                    order.ClientOrderId, line.ClientLineId, line.ItemName,
+                    line.Quantity, line.Status, line.RoundNumber),
+                line.CreatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -202,8 +212,9 @@ internal static class OperationalActionViews
 
                 lineBox.ItemsSource = orderLines.Where(x => x.ClientOrderId == orderIdBox.Text).ToList();
                 status.Text = "Order opened locally. Add items now or later; each Send KOT creates only the next unsent production round.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
         menuBox.SelectionChanged += (_, _) =>
         {
@@ -258,18 +269,35 @@ internal static class OperationalActionViews
                 lineBox.SelectedItem = localLine;
 
                 status.Text = $"{qty} × {item.Name} added. Send KOT when this round is ready.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
+        // Prevent overlapping KOT submissions without blocking legitimate
+        // later KOT rounds after the first send completes.
+        var kotSubmission = new DesktopSubmissionGate();
         submit.Click += async (_, _) =>
         {
+            if (!kotSubmission.TryBegin()) return;
+            submit.IsEnabled = false;
             try
             {
-                if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
+                if (string.IsNullOrWhiteSpace(orderIdBox.Text))
+                    throw new InvalidOperationException("Open an order first.");
                 await workflow.SendKotAsync(orderIdBox.Text);
                 status.Text = "New KOT round sent. Previously sent items were not duplicated.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex)
+            {
+                status.Text = ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
+            finally
+            {
+                kotSubmission.Finish(lockOnSuccess: false);
+                submit.IsEnabled = true;
+            }
         };
 
         fireCourse.Click += async (_, _) =>
@@ -280,8 +308,9 @@ internal static class OperationalActionViews
                 if (!int.TryParse(fireCourseBox.Text, out var courseNumber)) throw new InvalidOperationException("Enter a course number.");
                 await workflow.FireCourseAsync(orderIdBox.Text, courseNumber);
                 status.Text = $"Course {courseNumber} fired as a new KOT round.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         voidLine.Click += async (_, _) =>
@@ -290,10 +319,23 @@ internal static class OperationalActionViews
             {
                 if (lineBox.SelectedItem is not OrderLineChoice line) throw new InvalidOperationException("Select an order line.");
                 if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a void reason.");
-                await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
+                if (!ConfirmOperationalChange(
+                    $"Void {line.ItemName} on order {line.ClientOrderId}? This will be recorded in the audit history.",
+                    "Confirm order line void"))
+                    return;
+                voidLine.IsEnabled = false;
+                try
+                {
+                    await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
+                }
+                finally
+                {
+                    voidLine.IsEnabled = true;
+                }
                 status.Text = $"{line.ItemName} voided. Reserved stock was released when production had not started.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         cancelOrder.Click += async (_, _) =>
@@ -302,10 +344,23 @@ internal static class OperationalActionViews
             {
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open/select an order first.");
                 if (string.IsNullOrWhiteSpace(voidReasonBox.Text)) throw new InvalidOperationException("Enter a cancellation reason.");
-                await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
+                if (!ConfirmOperationalChange(
+                    $"Cancel order {orderIdBox.Text}? Kitchen history and audit records will be preserved.",
+                    "Confirm order cancellation"))
+                    return;
+                cancelOrder.IsEnabled = false;
+                try
+                {
+                    await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
+                }
+                finally
+                {
+                    cancelOrder.IsEnabled = true;
+                }
                 status.Text = "Order cancelled with audit history preserved.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         var grid = DataGrid(orders);
@@ -315,8 +370,25 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
         grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
-        Grid.SetColumn(form, 0); Grid.SetColumn(grid, 2);
-        root.Children.Add(Card(form)); root.Children.Add(grid);
+        var formCard = Card(form);
+        Grid.SetColumn(formCard, 0);
+        Grid.SetColumn(grid, 2);
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.Children.Add(formCard);
+        root.Children.Add(grid);
+        root.SizeChanged += (_, _) =>
+        {
+            // On smaller Windows displays place the POS form above the orders
+            // list. The grid retains horizontal scrolling for detailed columns.
+            var compact = root.ActualWidth < 960;
+            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(440);
+            root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
+            root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(grid, compact ? 0 : 2);
+            Grid.SetRow(grid, compact ? 1 : 0);
+            grid.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
+        };
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
@@ -342,18 +414,61 @@ internal static class OperationalActionViews
         var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
         cashier.Children.Add(cashierStatus);
 
-        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        pay.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (sessionBox.SelectedItem is not CashierSessionChoice s) throw new InvalidOperationException("Select an open cashier session."); if (!decimal.TryParse(amountBox.Text, out var amount)) throw new InvalidOperationException("Enter payment amount."); await workflow.AddPaymentAsync(b.Id, s.Id, amount, paymentMethod.SelectedItem?.ToString() ?? "cash"); cashierStatus.Text = "Payment posted. A fully paid bill releases the table through the restaurant settlement workflow."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; } catch (Exception ex) { cashierStatus.Text = ex.Message; } };
+        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        // AddPaymentAsync creates a fresh client payment ID per invocation.
+        // Lock the button on successful posting until this cashier page is refreshed;
+        // repeated clicks must never create a second payment intent.
+        var paymentSubmission = new DesktopSubmissionGate();
+        pay.Click += async (_, _) =>
+        {
+            if (!paymentSubmission.TryBegin()) return;
+            pay.IsEnabled = false;
+            var posted = false;
+            try
+            {
+                if (billBox.SelectedItem is not BillChoice bill)
+                    throw new InvalidOperationException("Select a bill.");
+                if (sessionBox.SelectedItem is not CashierSessionChoice session)
+                    throw new InvalidOperationException("Select an open cashier session.");
+                if (!decimal.TryParse(amountBox.Text, out var amount) || amount <= 0)
+                    throw new InvalidOperationException("Enter a positive payment amount.");
+                await workflow.AddPaymentAsync(bill.Id, session.Id, amount,
+                    paymentMethod.SelectedItem?.ToString() ?? "cash");
+                posted = true;
+                cashierStatus.Text = "Payment posted. Refresh the cashier workspace before entering another payment.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
+            }
+            catch (Exception ex)
+            {
+                cashierStatus.Text = ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text);
+            }
+            finally
+            {
+                paymentSubmission.Finish(lockOnSuccess: posted);
+                if (!posted) pay.IsEnabled = true;
+            }
+        };
+        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
 
         var page = new StackPanel();
         page.Children.Add(root);
-        page.Children.Add(Card(cashier));
-        return new ScrollViewer { Content = page, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        // Waiters may enter orders but never see cashier-only billing/session
+        // controls. Local service authorization remains the final action gate.
+        var operatorSession = await new WindowsSessionStore().LoadAsync();
+        var role = operatorSession?.User.Role?.Trim().ToLowerInvariant();
+        if (role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier)
+            page.Children.Add(Card(cashier));
+        return new ScrollViewer
+        {
+            Content = page,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
     }
 
     public static async Task<FrameworkElement> TablesAsync()
@@ -369,48 +484,136 @@ internal static class OperationalActionViews
                           select new TableChoice(table.Id, area.Name, table.Code, table.Name, table.Capacity, table.Status))
             .ToListAsync();
 
-        var activeOrders = await (
+        var activeOrders = (await (
             from order in db.Orders.AsNoTracking()
             join table in db.DiningTables.AsNoTracking() on order.DiningTableId equals table.Id
             where order.ServiceType == "dine_in" &&
                   order.Status != "closed" &&
                   order.Status != "cancelled" &&
                   order.Status != "billed"
-            orderby order.UpdatedAtUtc descending
-            select new TableOrderChoice(
-                order.Id,
-                order.ClientOrderId,
-                table.Id,
-                table.Name,
-                order.Status,
-                order.Total))
-            .ToListAsync();
+            select new
+            {
+                Row = new TableOrderChoice(
+                    order.Id, order.ClientOrderId, table.Id, table.Name,
+                    order.Status, order.Total),
+                order.UpdatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
-        var unsentLines = await (
+        var unsentLines = (await (
             from line in db.OrderItems.AsNoTracking()
             join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
             where order.ServiceType == "dine_in" &&
                   line.KotRoundId == null &&
                   (line.Status == "pending" || line.Status == "held")
-            orderby line.CreatedAtUtc
-            select new TableSplitLineChoice(
-                order.Id,
-                line.Id,
-                line.ItemName,
-                line.Quantity,
-                line.Status))
-            .ToListAsync();
+            select new
+            {
+                Row = new TableSplitLineChoice(
+                    order.Id, line.Id, line.ItemName, line.Quantity, line.Status),
+                line.CreatedAtUtc,
+            })
+            .ToListAsync())
+            .OrderBy(x => x.CreatedAtUtc)
+            .Select(x => x.Row)
+            .ToList();
 
         var availableTables = rows
             .Where(x => x.Status == "available")
             .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
             .ToList();
 
+        var areas = await db.DiningAreas.AsNoTracking().Where(x => x.IsActive)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToListAsync();
+        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive)
+            .OrderBy(x => x.Name).ToListAsync();
+
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new StackPanel();
         root.Children.Add(Header(
             "Dining floor",
             "Live table state shared over LAN. Transfer, merge and split preserve KOT history; split only moves lines not yet sent to production."));
+
+        var manageFloor = Button("+ Add Floor / Table");
+        manageFloor.Margin = new Thickness(0, 6, 0, 10);
+        manageFloor.Click += (_, _) =>
+        {
+            var dialog = new Window
+            {
+                Title = "Manage Dining Floor",
+                Width = 470,
+                Height = 410,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            var owner = System.Windows.Application.Current?.MainWindow;
+            if (owner is not null) dialog.Owner = owner;
+            var content = new StackPanel { Margin = new Thickness(20) };
+            var mode = new ComboBox { ItemsSource = new[] { "New floor", "New table" }, SelectedIndex = 0, Height = 36 };
+            var name = new TextBox { Height = 36 };
+            var code = new TextBox { Height = 36 };
+            var capacity = new TextBox { Text = "4", Height = 36 };
+            var floor = new ComboBox { ItemsSource = areas, DisplayMemberPath = "Name", SelectedIndex = areas.Count > 0 ? 0 : -1, Height = 36 };
+            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", SelectedIndex = branches.Count > 0 ? 0 : -1, Height = 36 };
+            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            foreach (var entry in new (string Title, FrameworkElement Field)[]
+            {
+                ("Create", mode), ("Floor / table name", name), ("Table code (for tables)", code),
+                ("Seats (for tables)", capacity), ("Floor (for tables)", floor), ("Branch (for floors)", branch)
+            })
+            {
+                content.Children.Add(new TextBlock { Text = entry.Title, Margin = new Thickness(0, 6, 0, 3) });
+                content.Children.Add(entry.Field);
+            }
+            var save = Button("Save");
+            save.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(name.Text))
+                        throw new InvalidOperationException("Enter a name.");
+                    save.IsEnabled = false;
+                    await using var writeDb = factory.Create();
+                    if (mode.SelectedIndex == 0)
+                    {
+                        if (branch.SelectedItem is not LocalBranch selectedBranch)
+                            throw new InvalidOperationException("Select a branch.");
+                        writeDb.DiningAreas.Add(new LocalDiningArea
+                        {
+                            Id = Guid.NewGuid().ToString("N"), BranchId = selectedBranch.Id,
+                            Name = name.Text.Trim(), IsActive = true,
+                            SortOrder = areas.Count,
+                        });
+                    }
+                    else
+                    {
+                        if (floor.SelectedItem is not LocalDiningArea selectedFloor)
+                            throw new InvalidOperationException("Select a floor.");
+                        if (!int.TryParse(capacity.Text, out var seats) || seats < 1 || seats > 100)
+                            throw new InvalidOperationException("Seats must be between 1 and 100.");
+                        if (string.IsNullOrWhiteSpace(code.Text))
+                            throw new InvalidOperationException("Enter a table code.");
+                        writeDb.DiningTables.Add(new LocalDiningTable
+                        {
+                            Id = Guid.NewGuid().ToString("N"), DiningAreaId = selectedFloor.Id,
+                            Name = name.Text.Trim(), Code = code.Text.Trim(),
+                            Capacity = seats, Status = "available", IsActive = true,
+                        });
+                    }
+                    await writeDb.SaveChangesAsync();
+                    dialog.DialogResult = true;
+                }
+                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+            };
+            content.Children.Add(feedback);
+            content.Children.Add(save);
+            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            if (dialog.ShowDialog() == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Floor/table created. Refresh Dining Floor to see the new record.");
+        };
+        root.Children.Add(manageFloor);
 
         var grid = DataGrid(rows);
         grid.MinHeight = 280;
@@ -419,6 +622,18 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
+        // The visual floor map is the primary touch view; the detailed grid
+        // remains available without duplicating the underlying table records.
+        grid.Visibility = Visibility.Collapsed;
+        var showTableList = Button("Show table list");
+        showTableList.Click += (_, _) =>
+        {
+            grid.Visibility = grid.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            showTableList.Content = grid.Visibility == Visibility.Visible
+                ? "Hide table list" : "Show table list";
+        };
+        root.Children.Add(showTableList);
         root.Children.Add(grid);
 
         var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
@@ -434,6 +649,10 @@ internal static class OperationalActionViews
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 0),
         };
+
+        root.Children.Insert(1, BuildVisualFloorBoard(
+            rows, activeOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus));
 
         operations.Children.Add(Label("Transfer order"));
         var transferRow = new WrapPanel();
@@ -533,8 +752,9 @@ internal static class OperationalActionViews
 
                 await workflow.TransferOrderAsync(order.Id, target.Id);
                 operationStatus.Text = $"{order.ClientOrderId} transferred to {target.Label}. Refresh to see the new floor state.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         merge.Click += async (_, _) =>
@@ -548,8 +768,9 @@ internal static class OperationalActionViews
 
                 await workflow.MergeDraftOrdersAsync(target.Id, source.Id);
                 operationStatus.Text = $"{source.ClientOrderId} merged into {target.ClientOrderId}.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         move.Click += async (_, _) =>
@@ -570,8 +791,9 @@ internal static class OperationalActionViews
 
                 await workflow.MoveUnsentItemsAsync(source.Id, target.Id, ids);
                 operationStatus.Text = $"{ids.Length} unsent line(s) moved from {source.ClientOrderId} to {target.ClientOrderId}. KOT history stayed on the source order.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
         split.Click += async (_, _) =>
@@ -592,11 +814,26 @@ internal static class OperationalActionViews
 
                 await workflow.SplitUnsentItemsAsync(source.Id, target.Id, ids);
                 operationStatus.Text = $"{ids.Length} unsent line(s) split to {target.Label}. Existing KOT history was unchanged.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
-            catch (Exception ex) { operationStatus.Text = ex.Message; }
+            catch (Exception ex) { operationStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
 
-        root.Children.Add(Card(operations));
+        // Keep the floor board prominent; advanced order operations are
+        // available on demand instead of making the default page excessively long.
+        var advancedOperations = Card(operations);
+        advancedOperations.Visibility = Visibility.Collapsed;
+        var toggleAdvanced = Button("Show transfer / merge / split");
+        toggleAdvanced.Margin = new Thickness(0, 10, 0, 6);
+        toggleAdvanced.Click += (_, _) =>
+        {
+            advancedOperations.Visibility = advancedOperations.Visibility == Visibility.Visible
+                ? Visibility.Collapsed : Visibility.Visible;
+            toggleAdvanced.Content = advancedOperations.Visibility == Visibility.Visible
+                ? "Hide transfer / merge / split" : "Show transfer / merge / split";
+        };
+        root.Children.Add(toggleAdvanced);
+        root.Children.Add(advancedOperations);
         return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
@@ -649,6 +886,18 @@ internal static class OperationalActionViews
         filterRow.Children.Add(statusFilter);
         filterRow.Children.Add(statusText);
         root.Children.Add(filterRow);
+
+        // Live service counters update with the KDS refresh and aging timer.
+        // They reflect actual item status, station filter and delay thresholds.
+        var kitchenSummary = new TextBlock
+        {
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 14),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        kitchenSummary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        root.Children.Add(kitchenSummary);
 
         var board = new WrapPanel
         {
@@ -875,11 +1124,13 @@ internal static class OperationalActionViews
                         primary.IsEnabled = false;
                         await primaryAction();
                         statusText.Text = success ?? "Kitchen item updated.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         primary.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -894,14 +1145,20 @@ internal static class OperationalActionViews
                     {
                         if (string.IsNullOrWhiteSpace(actionReason.Text))
                             throw new InvalidOperationException("Enter a recall reason.");
+                        if (!ConfirmOperationalChange(
+                            $"Recall {row.ItemName} for a new kitchen handling step? Previous consumption will not be reversed.",
+                            "Confirm kitchen recall"))
+                            return;
                         recall.IsEnabled = false;
                         await workflow.RecallKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} recalled to the kitchen without reversing its prior consumption.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         recall.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -916,14 +1173,20 @@ internal static class OperationalActionViews
                     {
                         if (string.IsNullOrWhiteSpace(actionReason.Text))
                             throw new InvalidOperationException("Enter a waste reason.");
+                        if (!ConfirmOperationalChange(
+                            $"Record {row.ItemName} as production waste? Consumed ingredients will not be returned.",
+                            "Confirm kitchen waste"))
+                            return;
                         waste.IsEnabled = false;
                         await workflow.RecordKitchenWasteAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} recorded as production waste; inventory was not returned.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         waste.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -938,14 +1201,20 @@ internal static class OperationalActionViews
                     {
                         if (string.IsNullOrWhiteSpace(actionReason.Text))
                             throw new InvalidOperationException("Enter a re-fire reason.");
+                        if (!ConfirmOperationalChange(
+                            $"Re-fire {row.ItemName} as a new rush production event? This records another production.",
+                            "Confirm kitchen re-fire"))
+                            return;
                         refire.IsEnabled = false;
                         await workflow.RefireKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
                         statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
                     catch (Exception ex)
                     {
                         refire.IsEnabled = true;
                         statusText.Text = ex.Message;
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
                 };
             }
@@ -971,6 +1240,30 @@ internal static class OperationalActionViews
             return card;
         }
 
+        void UpdateKitchenSummary()
+        {
+            var stationId = (stationFilter.SelectedItem as Choice)?.Id ?? "";
+            var state = statusFilter.SelectedItem?.ToString() ?? "All states";
+            var visible = rows
+                .Where(row => string.IsNullOrWhiteSpace(stationId) || row.StationId == stationId)
+                .Where(row => state == "All states" || row.Status == state)
+                .ToArray();
+
+            var active = visible.Count(row => row.Status is "queued" or "active" or "preparing");
+            var expo = visible.Count(row => row.Status == "expo");
+            var ready = visible.Count(row => row.Status == "ready");
+            var rush = visible.Count(row => row.Priority == "rush" &&
+                row.Status is not ("completed" or "ready"));
+            var overdue = visible.Count(row =>
+                (row.Status is "queued" or "active" or "preparing" or "expo") &&
+                DateTimeOffset.UtcNow - row.QueuedAt >=
+                    TimeSpan.FromMinutes(settings.KitchenLateMinutes));
+
+            kitchenSummary.Text =
+                $"{visible.Length} visible · {active} in production · " +
+                $"{expo} expo · {ready} ready · {rush} rush · {overdue} delayed";
+        }
+
         void RenderBoard()
         {
             board.Children.Clear();
@@ -989,6 +1282,8 @@ internal static class OperationalActionViews
             {
                 board.Children.Add(BuildKitchenCard(row));
             }
+
+            UpdateKitchenSummary();
 
             if (filtered.Length == 0)
             {
@@ -1017,6 +1312,7 @@ internal static class OperationalActionViews
         var ageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         ageTimer.Tick += (_, _) =>
         {
+            UpdateKitchenSummary();
             foreach (var binding in timerBindings)
             {
                 UpdateAge(
@@ -1129,10 +1425,23 @@ internal static class OperationalActionViews
             {
                 if (branchBox.SelectedItem is not Choice branch) throw new InvalidOperationException("Select a branch.");
                 if (!DateOnly.TryParse(dateBox.Text, out var date)) throw new InvalidOperationException("Enter a valid business date.");
-                await workflow.FinalizeDailyClosingAsync(branch.Id, date);
-                status.Text = $"Business date {date:yyyy-MM-dd} finalized.";
+                if (!ConfirmOperationalChange(
+                    $"Finalize business date {date:yyyy-MM-dd} for {branch.Label}? Verify cashier and waiter shifts have closed.",
+                    "Confirm end-of-day closing"))
+                    return;
+                finalize.IsEnabled = false;
+                try
+                {
+                    await workflow.FinalizeDailyClosingAsync(branch.Id, date);
+                    status.Text = $"Business date {date:yyyy-MM-dd} finalized.";
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
+                }
+                finally
+                {
+                    finalize.IsEnabled = true;
+                }
             }
-            catch (Exception ex) { status.Text = ex.Message; }
+            catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
         root.Children.Add(Card(controls));
 
@@ -1197,6 +1506,144 @@ internal static class OperationalActionViews
         return block;
     }
 
+    private static FrameworkElement BuildVisualFloorBoard(
+        IReadOnlyList<TableChoice> tables,
+        IReadOnlyList<TableOrderChoice> activeOrders,
+        IReadOnlyList<Choice> availableTables,
+        ComboBox sourceOrderBox,
+        ComboBox targetTableBox,
+        TextBlock statusText)
+    {
+        var floor = new StackPanel { Margin = new Thickness(0, 10, 0, 12) };
+        var summary = new TextBlock
+        {
+            Text = $"{tables.Count(x => x.Status == "available")} available · " +
+                   $"{tables.Count(x => x.Status == "occupied")} occupied · " +
+                   $"{tables.Count(x => x.Status != "available" && x.Status != "occupied")} other",
+            FontSize = 13, FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 10),
+        };
+        summary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        floor.Children.Add(summary);
+
+        if (tables.Count == 0)
+        {
+            floor.Children.Add(new TextBlock
+            {
+                Text = "No active dining tables yet. Configure the restaurant floor in the tenant platform.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 5, 0, 12),
+            });
+            return floor;
+        }
+
+        foreach (var area in tables.GroupBy(x => x.Area))
+        {
+            var areaTitle = new TextBlock
+            {
+                Text = area.Key, FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 6, 0, 9),
+            };
+            areaTitle.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            floor.Children.Add(areaTitle);
+
+            var tiles = new WrapPanel();
+            foreach (var table in area)
+            {
+                var order = activeOrders.FirstOrDefault(x => x.TableId == table.Id);
+                var stateBrush = table.Status switch
+                {
+                    "available" => "SuccessBrush",
+                    "occupied" => "BrandPrimaryBrush",
+                    _ => "TextMutedBrush",
+                };
+
+                var label = new TextBlock
+                {
+                    Text = table.Name,
+                    FontSize = 18,
+                    FontWeight = FontWeights.Bold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                label.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                var subtitle = new TextBlock
+                {
+                    Text = $"Table {table.Code} · {table.Capacity} seats",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 5, 0, 12),
+                };
+                subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                var state = new TextBlock
+                {
+                    Text = table.Status.ToUpperInvariant(),
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                };
+                state.SetResourceReference(TextBlock.ForegroundProperty, stateBrush);
+
+                var body = new StackPanel { Margin = new Thickness(13) };
+                body.Children.Add(label);
+                body.Children.Add(subtitle);
+                body.Children.Add(state);
+                if (order is not null)
+                {
+                    var orderCaption = new TextBlock
+                    {
+                        Text = $"{order.ClientOrderId} · AFN {order.Total:N2}",
+                        Margin = new Thickness(0, 6, 0, 0),
+                        FontSize = 10,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    };
+                    orderCaption.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                    body.Children.Add(orderCaption);
+                }
+
+                var surface = new Border
+                {
+                    Width = 190, MinHeight = 119, CornerRadius = new CornerRadius(15),
+                    BorderThickness = new Thickness(1),
+                    Child = body,
+                };
+                surface.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+                surface.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+
+                var tile = new Button
+                {
+                    Content = surface,
+                    Padding = new Thickness(0),
+                    BorderThickness = new Thickness(0),
+                    Background = Brushes.Transparent,
+                    Margin = new Thickness(0, 0, 11, 11),
+                    ToolTip = order is null
+                        ? "Available table · select as a target for transfer/split"
+                        : "Occupied table · select its active order for operations",
+                };
+                tile.Click += (_, _) =>
+                {
+                    if (order is not null)
+                    {
+                        sourceOrderBox.SelectedItem = order;
+                        statusText.Text = $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
+                    }
+                    else if (table.Status == "available")
+                    {
+                        targetTableBox.SelectedItem = availableTables.FirstOrDefault(x => x.Id == table.Id);
+                        statusText.Text = $"Selected available table {table.Name} as transfer target.";
+                    }
+                    else
+                    {
+                        statusText.Text = $"{table.Name} is {table.Status}; review the table status before assigning it.";
+                    }
+                };
+                tiles.Children.Add(tile);
+            }
+            floor.Children.Add(tiles);
+        }
+
+        return floor;
+    }
+
     private static ComboBox Combo(object items, string member) => new()
     {
         ItemsSource = (System.Collections.IEnumerable)items,
@@ -1258,17 +1705,24 @@ internal static class OperationalActionViews
         await using var db = factory.Create();
 
         var recentCompletedCutoff = DateTimeOffset.UtcNow.AddHours(-2);
-        var tickets = await db.KitchenTickets
+        // SQLite cannot translate relational comparisons or ordering for
+        // DateTimeOffset. Keep the status predicate server-side, then evaluate
+        // the completed-ticket age and stable KDS ordering in managed code.
+        // The previous LINQ query prevented Kitchen from opening at all.
+        var ticketCandidates = await db.KitchenTickets
             .AsNoTracking()
             .Where(x => x.Status == "queued" ||
                         x.Status == "active" ||
                         x.Status == "preparing" ||
                         x.Status == "expo" ||
                         x.Status == "ready" ||
-                        (x.Status == "completed" && x.CompletedAt >= recentCompletedCutoff))
+                        x.Status == "completed")
+            .ToArrayAsync();
+        var tickets = ticketCandidates
+            .Where(x => x.Status != "completed" || x.CompletedAt >= recentCompletedCutoff)
             .OrderByDescending(x => x.Priority == "rush")
             .ThenBy(x => x.QueuedAt)
-            .ToArrayAsync();
+            .ToArray();
 
         var ticketIds = tickets.Select(x => x.Id).ToArray();
         var ticketItems = ticketIds.Length == 0

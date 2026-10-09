@@ -11,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 
 BG = (17, 18, 20, 255)
@@ -107,8 +107,11 @@ def save_desktop(root: Path) -> None:
     )
     icon.save(target / "BusinessOS.Restaurant.png", format="PNG")
 
-    # Inno Setup 6.7 wizard backgrounds are PNG/BMP assets. Keep the JPG as
-    # the WPF/app artwork source, but always generate a real PNG for Setup.
+    # Keep the original JPG unchanged for the WPF Glass theme. Inno Setup
+    # needs a separate, high-contrast dark PNG because its labels and controls
+    # are displayed OVER this full-window artwork. This transformation runs
+    # on every CI/release build, so the installed wizard never reuses the
+    # bright desktop image by accident.
     background_source = target / "RestaurantGlassBackground.jpg"
     installer_background = target / "RestaurantInstallerBackground.png"
     if not background_source.exists():
@@ -116,7 +119,13 @@ def save_desktop(root: Path) -> None:
 
     with Image.open(background_source) as background:
         background.load()
-        background.convert("RGB").save(
+        artwork = background.convert("RGB")
+        artwork = artwork.filter(ImageFilter.GaussianBlur(radius=3))
+        artwork = ImageEnhance.Color(artwork).enhance(0.78)
+        artwork = ImageEnhance.Brightness(artwork).enhance(0.65)
+        dark_veil = Image.new("RGB", artwork.size, (12, 22, 32))
+        artwork = Image.blend(artwork, dark_veil, alpha=0.42)
+        artwork.save(
             installer_background,
             format="PNG",
             optimize=True,
