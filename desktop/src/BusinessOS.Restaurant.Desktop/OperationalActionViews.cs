@@ -453,6 +453,10 @@ internal static class OperationalActionViews
         };
 
         var grid = DataGrid(orders);
+        grid.Name = "PosActiveOrdersGrid";
+        grid.MinHeight = 340;
+        grid.MaxHeight = 570;
+        grid.SelectionMode = DataGridSelectionMode.Single;
         grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
         grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
         grid.Columns.Add(Column("Waiter", nameof(OrderChoice.Waiter), 150));
@@ -460,28 +464,74 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Status", nameof(OrderChoice.Status), 120));
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
         var formCard = Card(form);
+        var orderListPanel = new StackPanel();
+        orderListPanel.Children.Add(Header("ACTIVE ORDERS",
+            "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
+        var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
+        orderOverview.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        orderListPanel.Children.Add(orderOverview);
+        var orderSearchBox = new TextBox
+        {
+            Name = "PosOrderSearchBox",
+            Height = 38,
+            Margin = new Thickness(0, 4, 8, 6),
+            ToolTip = "Find an order by number, waiter or service type",
+        };
+        System.Windows.Automation.AutomationProperties.SetName(orderSearchBox, "Search active orders");
+        var orderStatusFilter = new ComboBox
+        {
+            Name = "PosOrderStatusFilter",
+            ItemsSource = new[] { "All statuses" }.Concat(
+                orders.Select(x => x.Status).Distinct(StringComparer.OrdinalIgnoreCase)).ToArray(),
+            SelectedIndex = 0, Width = 160, Height = 38,
+            Margin = new Thickness(0, 4, 0, 6),
+        };
+        var listTools = new WrapPanel();
+        var searchGroup = new StackPanel { Width = 250 };
+        searchGroup.Children.Add(Label("Search orders"));
+        searchGroup.Children.Add(orderSearchBox);
+        listTools.Children.Add(searchGroup);
+        var filterGroup = new StackPanel();
+        filterGroup.Children.Add(Label("Status"));
+        filterGroup.Children.Add(orderStatusFilter);
+        listTools.Children.Add(filterGroup);
+        orderListPanel.Children.Add(listTools);
+        var selectHint = new TextBlock
+        {
+            Text = "Select a row to continue. Billed or cancelled orders are not editable.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 10),
+        };
+        selectHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        orderListPanel.Children.Add(selectHint);
+        orderListPanel.Children.Add(grid);
+        var useSelected = Button("Continue selected order");
+        useSelected.MinHeight = 42;
+        useSelected.Margin = new Thickness(0, 12, 0, 0);
+        orderListPanel.Children.Add(useSelected);
+        var ordersCard = Card(orderListPanel);
         Grid.SetColumn(formCard, 0);
-        Grid.SetColumn(grid, 2);
+        Grid.SetColumn(ordersCard, 2);
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.Children.Add(formCard);
-        root.Children.Add(grid);
+        root.Children.Add(ordersCard);
         root.SizeChanged += (_, _) =>
         {
             // On smaller Windows displays place the POS form above the orders
             // list. The grid retains horizontal scrolling for detailed columns.
             var compact = root.ActualWidth < 960;
-            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(440);
+            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(470);
             root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
             root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(grid, compact ? 0 : 2);
-            Grid.SetRow(grid, compact ? 1 : 0);
-            grid.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
+            Grid.SetColumn(ordersCard, compact ? 0 : 2);
+            Grid.SetRow(ordersCard, compact ? 1 : 0);
+            ordersCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
         };
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
-        var cashierStatus = new TextBlock { Foreground = System.Windows.Media.Brushes.SlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
+        var cashierStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
+        cashierStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         var branchBox = Combo(branches, "Label");
         var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
         var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260;
@@ -551,7 +601,22 @@ internal static class OperationalActionViews
         var operatorSession = await new WindowsSessionStore().LoadAsync();
         var role = operatorSession?.User.Role?.Trim().ToLowerInvariant();
         if (role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier)
-            page.Children.Add(Card(cashier));
+        {
+            var cashierCard = Card(cashier);
+            cashierCard.Visibility = Visibility.Collapsed;
+            var toggleCashier = Button("Show cashier & billing");
+            toggleCashier.MinHeight = 42;
+            toggleCashier.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            toggleCashier.Margin = new Thickness(0, 14, 0, 8);
+            toggleCashier.Click += (_, _) =>
+            {
+                var showing = cashierCard.Visibility != Visibility.Visible;
+                cashierCard.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+                toggleCashier.Content = showing ? "Hide cashier & billing" : "Show cashier & billing";
+            };
+            page.Children.Add(toggleCashier);
+            page.Children.Add(cashierCard);
+        }
         return new ScrollViewer
         {
             Content = page,
