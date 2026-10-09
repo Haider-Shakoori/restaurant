@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop;
@@ -21,6 +22,20 @@ internal static class Program
 {
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(25);
     private static int _checks;
+
+    // Every image is rendered from the real WPF window on an isolated Windows CI
+    // runner. Synthetic staff credentials and an empty local SQLite store are used;
+    // no production license, user data or privileged credentials are captured.
+    private static string GalleryDirectory => Path.Combine(
+        Environment.GetEnvironmentVariable("RUNNER_TEMP")
+            ?? throw new InvalidOperationException("RUNNER_TEMP missing."),
+        "restaurant-desktop-screenshots");
+
+    private static readonly string[] GalleryRoutes =
+    [
+        "dashboard", "pos", "tables", "kitchen", "menu", "inventory",
+        "purchases", "expenses", "closing", "reports", "users", "settings",
+    ];
 
     [STAThread]
     private static int Main()
@@ -120,6 +135,8 @@ internal static class Program
             "initial Dashboard render");
 
         Assert(!vm.HasWorkspaceError, "Dashboard opens without an error");
+        await CaptureGalleryAsync(owner);
+        await CaptureAuthWindowsAsync(owner);
         CheckNavigation(owner, "menu");
         CheckNavigation(owner, "inventory");
         CheckNavigation(owner, "purchases");
@@ -175,6 +192,112 @@ internal static class Program
         await sessions.ClearAsync();
     }
 
+    private static async Task CaptureGalleryAsync(MainWindow window)
+    {
+        var directory = GalleryDirectory;
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, "README.txt"),
+            "BusinessOS Restaurant Desktop CI screenshots\n" +
+            "Source commit: " + (Environment.GetEnvironmentVariable("GITHUB_SHA") ?? "unknown") + "\n" +
+            "These PNGs are actual WPF-rendered windows from GitHub-hosted Windows Actions.\n" +
+            "Screens use a synthetic operator and a fresh empty SQLite test database.\n" +
+            "No production license or restaurant data was used.\n" +
+            "The runner is not a physical 4K workstation, thermal printer, or LAN tablet.\n" +
+            "Classic and Glass contain all 12 operational navigation pages.\n" +
+            "Dialog screenshots are also captured during existing WPF smoke interactions.\n");
+
+        // A reproducible in-app size avoids dependence on the hosted runner's
+        // virtual desktop resolution. This is NOT a hardware/4K DPI acceptance test.
+        window.WindowState = WindowState.Normal;
+        window.Width = 1440;
+        window.Height = 900;
+        foreach (var (theme, label) in new[]
+        {
+            (AppearanceTheme.Classic, "classic"),
+            (AppearanceTheme.Glass, "glass"),
+        })
+        {
+            ThemeManager.Apply(theme);
+            for (var index = 0; index < GalleryRoutes.Length; index++)
+            {
+                var route = GalleryRoutes[index];
+                await NavigateAsync(window, route);
+                await CaptureWindowAsync(window,
+                    Path.Combine(directory, label, $"{index + 1:00}-{route}.png"));
+            }
+        }
+
+        ThemeManager.Apply(AppearanceTheme.Classic);
+        window.Width = 1280;
+        window.Height = 800;
+        await NavigateAsync(window, "dashboard");
+        Console.WriteLine("Gallery captured: 24 operational pages across Classic and Glass themes.");
+    }
+
+    private static async Task CaptureAuthWindowsAsync(MainWindow owner)
+    {
+        var signIn = new OperatorSignInWindow(
+            "isolated-test-tenant", "https://restaurant-ci.example.test")
+        {
+            Owner = owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        try
+        {
+            signIn.Show();
+            await CaptureWindowAsync(signIn, Path.Combine(GalleryDirectory, "authentication", "operator-sign-in.png"));
+        }
+        finally
+        {
+            signIn.Close();
+        }
+
+        var activation = new ActivationWindow
+        {
+            Owner = owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        try
+        {
+            activation.Show();
+            await CaptureWindowAsync(activation, Path.Combine(GalleryDirectory, "authentication", "license-activation.png"));
+        }
+        finally
+        {
+            activation.Close();
+        }
+    }
+
+    private static async Task CaptureWindowAsync(Window window, string destination)
+    {
+        await window.Dispatcher.InvokeAsync(window.UpdateLayout, DispatcherPriority.Render);
+        await Task.Delay(160); // allow nested WPF content and fonts to finish rendering
+
+        // Capture WPF client content, including the shell's sidebar and toolbar.
+        // RenderTargetBitmap works without a physical monitor/print device.
+        var content = window.Content as FrameworkElement
+            ?? throw new InvalidOperationException("Screenshot window has no WPF content.");
+        content.UpdateLayout();
+        var width = (int)Math.Ceiling(content.ActualWidth);
+        var height = (int)Math.Ceiling(content.ActualHeight);
+        if (width < 240 || height < 180)
+            throw new InvalidOperationException(
+                $"Screenshot '{Path.GetFileName(destination)}' has invalid layout {width}x{height}.");
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using (var stream = File.Create(destination))
+            encoder.Save(stream);
+
+        if (new FileInfo(destination).Length < 2048)
+            throw new InvalidOperationException("Screenshot appears empty: " + destination);
+        Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
+    }
+
     private static void CheckNavigation(MainWindow window, string route)
     {
         var button = FindNavigation(window, route);
@@ -226,6 +349,10 @@ internal static class Program
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
             var opened = modal!;
+            await CaptureWindowAsync(opened, Path.Combine(
+                GalleryDirectory, "dialogs",
+                new string(dialogTitle.ToLowerInvariant().Select(c =>
+                    char.IsAsciiLetterOrDigit(c) ? c : '-').ToArray()) + ".png"));
             Assert(FindButton(opened, saveLabel) is { IsEnabled: true },
                 $"'{dialogTitle}' contains enabled '{saveLabel}'");
             Assert(Descendants<TextBox>(opened).Any(),
