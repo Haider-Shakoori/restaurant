@@ -314,16 +314,34 @@ internal static class RestaurantOperationalPages
         recipes.Click += async (_, _) =>
         {
             await using var recipeDb = factory.Create();
+            // Display every stored component in its actual ingredient stock
+            // unit; the authoritative costing/consumption quantity stays in
+            // QuantityBase, including older recipes without a selected UOM.
             var versions = await (from version in recipeDb.Recipes.AsNoTracking()
                                   join menuItem in recipeDb.MenuItems.AsNoTracking()
                                       on version.MenuItemId equals menuItem.Id
-                                  orderby menuItem.Name, version.Version descending
-                                  select new { Menu = menuItem.Name, version.Name, version.Version, version.IsActive })
-                .ToListAsync();
+                                  join branch in recipeDb.Branches.AsNoTracking()
+                                      on version.BranchId equals branch.Id
+                                  join recipeItem in recipeDb.RecipeItems.AsNoTracking()
+                                      on version.Id equals recipeItem.RecipeId
+                                  join ingredient in recipeDb.InventoryItems.AsNoTracking()
+                                      on recipeItem.InventoryItemId equals ingredient.Id
+                                  orderby menuItem.Name, version.Version descending, ingredient.Name
+                                  select new
+                                  {
+                                      Branch = branch.Name,
+                                      Menu = menuItem.Name,
+                                      Recipe = version.Name,
+                                      version.Version,
+                                      Active = version.IsActive,
+                                      Ingredient = ingredient.Name,
+                                      Quantity = recipeItem.QuantityBase,
+                                      Unit = ingredient.BaseUnit,
+                                  }).ToListAsync();
             var dialog = new Window
             {
-                Title = "Recipe Versions",
-                Width = 650, Height = 460,
+                Title = "Recipe Ingredients & Units",
+                Width = 1020, Height = 600,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
             var owner = System.Windows.Application.Current?.MainWindow;
