@@ -28,8 +28,9 @@ class DesktopManagementRouteContractTest extends TestCase
         ];
 
         foreach ($expected as [$method, $path]) {
-            $route = $routes->first(fn ($route) =>
-                $route->uri() === $path && in_array($method, $route->methods(), true));
+            $route = $routes->first(
+                fn ($route) => $route->uri() === $path && in_array($method, $route->methods(), true)
+            );
 
             $this->assertNotNull($route, "Missing {$method} {$path} in deployed tenant API contract");
             $middleware = $route->gatherMiddleware();
