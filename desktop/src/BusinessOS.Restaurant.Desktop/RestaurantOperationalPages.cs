@@ -325,7 +325,9 @@ internal static class RestaurantOperationalPages
         // snapshot would silently disappear after the next cloud refresh.
         var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
         create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var moduleFlags = await new LocalRestaurantSettingsService(factory).GetModulesAsync();
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
+        recipes.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
         recipes.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         recipes.Click += async (_, _) =>
         {
