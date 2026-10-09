@@ -153,6 +153,8 @@ internal static class Program
         var button = FindNavigation(window, route)
             ?? throw new InvalidOperationException($"Navigation button '{route}' not found.");
         var previousPage = vm.CurrentPage;
+        await WaitUntilAsync(() => button.Command?.CanExecute(button.CommandParameter) == true,
+            $"'{route}' navigation command becomes available");
         Click(button);
         await WaitUntilAsync(() => vm.HasWorkspaceError ||
             (vm.CurrentRoute == route && vm.CurrentPage is not null &&
@@ -227,8 +229,17 @@ internal static class Program
         }
     }
 
-    private static void Click(Button button) =>
+    private static void Click(Button button)
+    {
+        if (!button.IsEnabled) throw new InvalidOperationException("Cannot invoke a disabled button.");
+
+        // ButtonBase.OnClick invokes the Click handlers, then the bound ICommand.
+        // Raising the routed event alone does not execute the navigation binding.
         button.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent, button));
+        var command = button.Command;
+        if (command is not null && command.CanExecute(button.CommandParameter))
+            command.Execute(button.CommandParameter);
+    }
 
     private static void Assert(bool condition, string message)
     {
