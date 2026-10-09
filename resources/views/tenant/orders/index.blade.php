@@ -261,6 +261,9 @@
                                                     @click="addItem(items.find(item => item.id === '{{ $item->id }}'))"
                                                     class="group rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50"
                                                 >
+                                                    @if ($item->image_url)
+                                                        <img src="{{ $item->image_url }}" loading="lazy" alt="{{ $item->name }}" class="mb-3 aspect-[4/3] w-full rounded-lg object-cover" onerror="this.style.display='none'">
+                                                    @endif
                                                     <div class="flex items-start justify-between gap-3">
                                                         <div>
                                                             <p class="font-bold text-slate-950">{{ $item->name }}</p>
