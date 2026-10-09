@@ -221,11 +221,30 @@ internal static class Program
 
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {
-        if (root is T match) yield return match;
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        var visited = new HashSet<DependencyObject>();
+        return Traverse(root);
+
+        IEnumerable<T> Traverse(DependencyObject node)
         {
-            foreach (var descendant in Descendants<T>(VisualTreeHelper.GetChild(root, i)))
-                yield return descendant;
+            if (!visited.Add(node)) yield break;
+            if (node is T match) yield return match;
+
+            // Workspace pages and modal forms are generated dynamically.
+            // Logical children exist before layout realizes the full visual tree.
+            foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>())
+            {
+                foreach (var descendant in Traverse(child))
+                    yield return descendant;
+            }
+
+            if (node is Visual)
+            {
+                for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+                {
+                    foreach (var descendant in Traverse(VisualTreeHelper.GetChild(node, i)))
+                        yield return descendant;
+                }
+            }
         }
     }
 
