@@ -34,6 +34,8 @@ class _WaiterAppState extends State<WaiterApp> {
     final session = await widget.dependencies.credentials.readSession();
 
     if (session != null) {
+      await widget.dependencies.pushNotifications.initialize();
+      unawaited(widget.dependencies.pushNotifications.registerAfterLogin());
       widget.dependencies.syncCoordinator.start();
       unawaited(widget.dependencies.syncCoordinator.syncNow());
     }
@@ -50,6 +52,7 @@ class _WaiterAppState extends State<WaiterApp> {
   @override
   void dispose() {
     unawaited(widget.dependencies.syncCoordinator.dispose());
+    unawaited(widget.dependencies.pushNotifications.dispose());
     super.dispose();
   }
 
