@@ -270,8 +270,8 @@ internal static class OperationalActionViews
 
         var grid = DataGrid(orders);
         grid.Name = "PosActiveOrdersGrid";
-        grid.MinHeight = 340;
-        grid.MaxHeight = 570;
+        grid.MinHeight = 110;
+        grid.MaxHeight = 380;
         grid.SelectionMode = DataGridSelectionMode.Single;
         grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
         grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
@@ -319,6 +319,14 @@ internal static class OperationalActionViews
         };
         selectHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         orderListPanel.Children.Add(selectHint);
+        var emptyOrderHint = new TextBlock
+        {
+            Text = "No orders match your search. Choose + New order to begin service.",
+            Margin = new Thickness(0, 10, 0, 12),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        emptyOrderHint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        orderListPanel.Children.Add(emptyOrderHint);
         orderListPanel.Children.Add(grid);
         var orderListActions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
         var startOrderFromList = Button("+ New order");
@@ -639,6 +647,8 @@ internal static class OperationalActionViews
                  (x.Waiter?.Contains(term, StringComparison.OrdinalIgnoreCase) == true) ||
                  x.ServiceType.Contains(term, StringComparison.OrdinalIgnoreCase))).ToArray();
             grid.ItemsSource = shown;
+            grid.MinHeight = shown.Length == 0 ? 110 : 300;
+            emptyOrderHint.Visibility = shown.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
             orderOverview.Text = $"{orders.Count(x => x.Status is not ("closed" or "cancelled"))} open orders  ·  " +
                 $"{bills.Count} open bills  ·  {sessions.Count} cashier sessions  ·  {shown.Length} shown";
             grid.SelectedItem = shown.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text);
