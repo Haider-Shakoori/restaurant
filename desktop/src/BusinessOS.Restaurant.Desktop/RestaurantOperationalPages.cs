@@ -928,8 +928,8 @@ internal static class RestaurantOperationalPages
         staffGrid.Columns.Add(Column("Restaurant role", nameof(StaffRow.Role), 160));
         staffGrid.Columns.Add(Column("Active", nameof(StaffRow.Active), 100));
         panel.Children.Add(staffGrid);
-        // StaffUsers is a read-only synchronized identity projection. Creating
-        // records here would not provision login credentials or permissions.
+        // The local staff grid is a read-only projection; edits go through cloud
+        // owner/admin authorization and immediately create genuine login identities.
         var manageUsers = new Button
         {
             Content = "Add Users / Manage Roles",
@@ -941,25 +941,15 @@ internal static class RestaurantOperationalPages
         {
             try
             {
-                // The tenant portal owns account creation and password handling.
-                // Never pass the desktop bearer token in a URL or browser query.
-                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
-                if (session is null)
-                    throw new InvalidOperationException("Sign in before managing restaurant users.");
-                var role = session.User.Role.Trim().ToLowerInvariant();
-                if (role is not ("owner" or "admin"))
-                    throw new UnauthorizedAccessException("Only the restaurant owner or administrator can manage staff accounts.");
-                if (!Uri.TryCreate(session.TenantBaseUrl, UriKind.Absolute, out var baseUri) ||
-                    baseUri.Scheme != Uri.UriSchemeHttps)
-                    throw new InvalidOperationException("A secure tenant portal URL is required.");
-                var target = new Uri(baseUri, "/users");
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                    ?? throw new InvalidOperationException("Sign in before managing restaurant users.");
+                var dialog = new DesktopUserManagementWindow(session)
                 {
-                    FileName = target.AbsoluteUri,
-                    UseShellExecute = true,
-                });
+                    Owner = System.Windows.Application.Current?.MainWindow,
+                };
+                dialog.ShowDialog();
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Info,
-                    "Users & Roles opened in the secure tenant portal. Sign in there if requested.");
+                    "Changes to cloud staff are reflected locally after the next operational data refresh.");
             }
             catch (Exception ex)
             {
