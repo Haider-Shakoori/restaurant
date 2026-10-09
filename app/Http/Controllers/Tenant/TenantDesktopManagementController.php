@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\InventoryItem;
+use App\Models\InventoryBalance;
+use App\Models\RecipeItem;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\RestaurantBranch;
@@ -155,8 +157,14 @@ class TenantDesktopManagementController extends Controller
         ]);
         if ($inventoryItem && StockMovement::query()->where('inventory_item_id', $inventoryItem->id)->exists() &&
             ($inventoryItem->base_unit !== Str::lower($data['base_unit']) ||
-             (string) $inventoryItem->purchase_to_base_factor != (string) $data['purchase_to_base_factor'])) {
+             (float) $inventoryItem->purchase_to_base_factor !== (float) $data['purchase_to_base_factor'])) {
             throw ValidationException::withMessages(['base_unit' => 'Units/conversions are locked once stock movements exist; use a new ingredient.']);
+        }
+
+        if ($inventoryItem && array_key_exists('is_active', $data) && ! $data['is_active'] &&
+            (InventoryBalance::query()->where('inventory_item_id', $inventoryItem->id)->where('quantity', '!=', 0)->exists() ||
+             RecipeItem::query()->where('inventory_item_id', $inventoryItem->id)->exists())) {
+            throw ValidationException::withMessages(['is_active' => 'Cannot archive an ingredient with stock or recipe references.']);
         }
 
         $entity = $inventoryItem ?? new InventoryItem;
