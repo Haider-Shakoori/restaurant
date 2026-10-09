@@ -580,7 +580,7 @@ internal static class OperationalActionViews
                 }
 
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Dining tables synchronized from Laravel.");
-                if (System.Windows.Application.Current.MainWindow?.DataContext is MainWindowViewModel vm)
+                if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
                     await vm.RefreshCommand.ExecuteAsync(null);
             }
             catch (Exception ex)

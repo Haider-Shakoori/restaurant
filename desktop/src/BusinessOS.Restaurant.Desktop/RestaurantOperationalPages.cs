@@ -51,7 +51,7 @@ internal static class RestaurantOperationalPages
                 DesktopNoticeEvents.Publish(refreshed ? DesktopNoticeLevel.Success : DesktopNoticeLevel.Info,
                     refreshed ? "Restaurant catalog synchronized."
                         : "Saved online. Reconnect and sync to update local data.");
-                if (refreshed && System.Windows.Application.Current.MainWindow?.DataContext is MainWindowViewModel vm)
+                if (refreshed && System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
                     await vm.RefreshCommand.ExecuteAsync(null);
             }
         }
