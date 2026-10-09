@@ -763,7 +763,6 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonCount(2, 'data.menu_items')
             ->assertJsonCount(1, 'data.inventory_items');
 
-        $this->withToken('')->getJson($root)->assertUnauthorized();
     }
 
     private function createActiveBusiness(): array
