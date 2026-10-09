@@ -536,83 +536,9 @@ internal static class OperationalActionViews
             "Dining floor",
             "Live table state shared over LAN. Transfer, merge and split preserve KOT history; split only moves lines not yet sent to production."));
 
-        var manageFloor = Button("+ Add Floor / Table");
+        var manageFloor = Button("+ Add / Edit Floors & Tables");
         manageFloor.Margin = new Thickness(0, 6, 0, 10);
-        manageFloor.Click += (_, _) =>
-        {
-            var dialog = new Window
-            {
-                Title = "Manage Dining Floor",
-                Width = 470,
-                Height = 410,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ResizeMode = ResizeMode.NoResize,
-            };
-            var owner = System.Windows.Application.Current?.MainWindow;
-            if (owner is not null) dialog.Owner = owner;
-            var content = new StackPanel { Margin = new Thickness(20) };
-            var mode = new ComboBox { ItemsSource = new[] { "New floor", "New table" }, SelectedIndex = 0, Height = 36 };
-            var name = new TextBox { Height = 36 };
-            var code = new TextBox { Height = 36 };
-            var capacity = new TextBox { Text = "4", Height = 36 };
-            var floor = new ComboBox { ItemsSource = areas, DisplayMemberPath = "Name", SelectedIndex = areas.Count > 0 ? 0 : -1, Height = 36 };
-            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", SelectedIndex = branches.Count > 0 ? 0 : -1, Height = 36 };
-            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
-            foreach (var entry in new (string Title, FrameworkElement Field)[]
-            {
-                ("Create", mode), ("Floor / table name", name), ("Table code (for tables)", code),
-                ("Seats (for tables)", capacity), ("Floor (for tables)", floor), ("Branch (for floors)", branch)
-            })
-            {
-                content.Children.Add(new TextBlock { Text = entry.Title, Margin = new Thickness(0, 6, 0, 3) });
-                content.Children.Add(entry.Field);
-            }
-            var save = Button("Save");
-            save.Click += async (_, _) =>
-            {
-                try
-                {
-                    if (string.IsNullOrWhiteSpace(name.Text))
-                        throw new InvalidOperationException("Enter a name.");
-                    save.IsEnabled = false;
-                    await using var writeDb = factory.Create();
-                    if (mode.SelectedIndex == 0)
-                    {
-                        if (branch.SelectedItem is not LocalBranch selectedBranch)
-                            throw new InvalidOperationException("Select a branch.");
-                        writeDb.DiningAreas.Add(new LocalDiningArea
-                        {
-                            Id = Guid.NewGuid().ToString("N"), BranchId = selectedBranch.Id,
-                            Name = name.Text.Trim(), IsActive = true,
-                            SortOrder = areas.Count,
-                        });
-                    }
-                    else
-                    {
-                        if (floor.SelectedItem is not LocalDiningArea selectedFloor)
-                            throw new InvalidOperationException("Select a floor.");
-                        if (!int.TryParse(capacity.Text, out var seats) || seats < 1 || seats > 100)
-                            throw new InvalidOperationException("Seats must be between 1 and 100.");
-                        if (string.IsNullOrWhiteSpace(code.Text))
-                            throw new InvalidOperationException("Enter a table code.");
-                        writeDb.DiningTables.Add(new LocalDiningTable
-                        {
-                            Id = Guid.NewGuid().ToString("N"), DiningAreaId = selectedFloor.Id,
-                            Name = name.Text.Trim(), Code = code.Text.Trim(),
-                            Capacity = seats, Status = "available", IsActive = true,
-                        });
-                    }
-                    await writeDb.SaveChangesAsync();
-                    dialog.DialogResult = true;
-                }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
-            };
-            content.Children.Add(feedback);
-            content.Children.Add(save);
-            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Floor/table created. Refresh Dining Floor to see the new record.");
-        };
+        manageFloor.Click += async (_, _) => await RestaurantOperationalPages.OpenCloudManagementAsync("tables");
         root.Children.Add(manageFloor);
 
         var grid = DataGrid(rows);
