@@ -72,6 +72,7 @@ class MobileSyncService
             'device_id' => $device->id,
             'user' => $this->userSnapshot($user),
             'branches' => $this->branchSnapshot(),
+            'areas' => $this->areaSnapshot(),
             'staff' => $this->staffSnapshot(),
             'menu' => $this->menuSnapshot(),
             'kitchen' => $this->kitchenSnapshot(),
@@ -897,11 +898,24 @@ class MobileSyncService
         ];
     }
 
+    private function areaSnapshot(): array
+    {
+        return DiningArea::query()
+            ->where('is_active', true)
+            ->whereHas('branch', fn ($query) => $query->where('is_active', true))
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get(['id', 'branch_id', 'name', 'sort_order', 'is_active'])
+            ->toArray();
+    }
+
     private function tableSnapshot(): array
     {
         return DiningTable::query()
             ->with('diningArea.branch')
             ->where('is_active', true)
+            ->whereHas('diningArea', fn ($query) => $query->where('is_active', true)
+                ->whereHas('branch', fn ($branches) => $branches->where('is_active', true)))
             ->orderBy('code')
             ->get()
             ->map(fn (DiningTable $table) => $this->singleTableSnapshot($table))

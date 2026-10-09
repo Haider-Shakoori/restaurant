@@ -2498,15 +2498,9 @@ internal static class RestaurantOperationalPages
         var panel = Stack();
         var titleText = new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold };
         titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-        var subtitleText = new TextBlock
-        {
-            Text = subtitle,
-            Margin = new Thickness(0, 4, 0, 16),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        // Avoid repeating informational prose beneath every section header.
+        // Operational warnings and validation messages remain in their panels.
         panel.Children.Add(titleText);
-        panel.Children.Add(subtitleText);
         panel.Children.Add(content);
         return Scroll(panel);
     }

@@ -43,6 +43,13 @@ class TenantPortalSetupController extends Controller
             'name' => ['required', 'string', 'max:255'],
         ]);
 
+        $branch = RestaurantBranch::query()->findOrFail($data['branch_id']);
+        if (! $branch->is_active) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'branch_id' => 'Choose an active branch.',
+            ]);
+        }
+
         DiningArea::query()->create([
             ...$data,
             'sort_order' => 0,
@@ -60,6 +67,13 @@ class TenantPortalSetupController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'capacity' => ['required', 'integer', 'min:1', 'max:100'],
         ]);
+
+        $area = DiningArea::query()->with('branch')->findOrFail($data['dining_area_id']);
+        if (! $area->is_active || ! $area->branch->is_active) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'dining_area_id' => 'Choose an active dining area and branch.',
+            ]);
+        }
 
         DiningTable::query()->create([
             ...$data,

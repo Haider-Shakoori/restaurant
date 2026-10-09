@@ -52,12 +52,7 @@ internal sealed class DesktopCloudManagementWindow : Window
         var root = new DockPanel { Margin = new Thickness(18) };
         var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
         heading.Children.Add(new TextBlock { Text = "Restaurant management", FontSize = 23, FontWeight = FontWeights.Bold });
-        heading.Children.Add(new TextBlock
-        {
-            Text = "These edits are saved to the tenant server, not a disposable local catalog snapshot. " +
-                   "Refresh the Desktop workspace after server synchronization to see updated menu/floor/stock reference data.",
-            TextWrapping = TextWrapping.Wrap,
-        });
+        // The online status and save availability below provide actionable feedback.
         var reload = new Button { Content = "Refresh from tenant", Height = 34, Width = 174, Margin = new Thickness(0, 9, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
         reload.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         reload.Click += async (_, _) => await RefreshAsync();

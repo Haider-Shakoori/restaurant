@@ -13,6 +13,8 @@ class DiningTableController extends Controller
         $tables = DiningTable::query()
             ->with(['diningArea.branch'])
             ->where('is_active', true)
+            ->whereHas('diningArea', fn ($query) => $query->where('is_active', true)
+                ->whereHas('branch', fn ($branches) => $branches->where('is_active', true)))
             ->orderBy('code')
             ->get()
             ->map(fn (DiningTable $table) => [

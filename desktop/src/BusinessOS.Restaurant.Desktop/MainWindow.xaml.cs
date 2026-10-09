@@ -32,7 +32,7 @@ public partial class MainWindow : Window
         // top-bar collisions. The full details return automatically when resized.
         var compact = ActualWidth < 1240;
         OperatorBadge.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        HeaderSubtitle.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        HeaderSubtitle.Visibility = Visibility.Collapsed;
         SwitchOperatorButton.Content = compact ? "Switch" : "Switch operator";
         RefreshButton.Content = compact ? "↻" : "↻  Refresh";
         RefreshButton.ToolTip = "Refresh the current workspace";

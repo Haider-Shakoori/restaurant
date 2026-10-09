@@ -299,9 +299,9 @@
                             <TextBlock Text="{Binding PageTitle}" TextTrimming="CharacterEllipsis"
                                        FontSize="22"
                                        FontWeight="Bold" />
-                            <TextBlock x:Name="HeaderSubtitle" Text="{Binding PageSubtitle}"
-                                       Foreground="{DynamicResource TextMutedBrush}"
-                                       Margin="0,3,0,0" />
+                            <!-- Page names are enough: remove repeated decorative descriptions. -->
+                            <TextBlock x:Name="HeaderSubtitle" Visibility="Collapsed"
+                                       Text="{Binding PageSubtitle}" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal"

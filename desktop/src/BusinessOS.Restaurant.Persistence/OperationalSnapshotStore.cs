@@ -224,6 +224,28 @@ public sealed class OperationalSnapshotStore
             });
         }
 
+        // v1 snapshots may not contain standalone areas. When present, they
+        // are authoritative even for dining floors with zero tables.
+        foreach (var areaSnapshot in snapshot.Areas ?? [])
+        {
+            var areaEntity = await db.DiningAreas.FindAsync([areaSnapshot.Id], cancellationToken);
+            if (areaEntity is null)
+            {
+                areaEntity = new LocalDiningArea
+                {
+                    Id = areaSnapshot.Id,
+                    BranchId = areaSnapshot.BranchId,
+                    Name = areaSnapshot.Name,
+                };
+                db.DiningAreas.Add(areaEntity);
+            }
+
+            areaEntity.BranchId = areaSnapshot.BranchId;
+            areaEntity.Name = areaSnapshot.Name;
+            areaEntity.SortOrder = areaSnapshot.SortOrder;
+            areaEntity.IsActive = areaSnapshot.IsActive;
+        }
+
         foreach (var table in snapshot.Tables)
         {
             var branch = await db.Branches.FindAsync([table.Branch.Id], cancellationToken);
@@ -255,6 +277,8 @@ public sealed class OperationalSnapshotStore
 
             area.BranchId = table.Branch.Id;
             area.Name = table.Area.Name;
+            // Use the standalone area's sort order where available; legacy
+            // table-only snapshots still carry enough information to recover it.
             area.IsActive = true;
 
             var tableEntity = await db.DiningTables.FindAsync([table.Id], cancellationToken);
@@ -276,7 +300,14 @@ public sealed class OperationalSnapshotStore
             tableEntity.Code = table.Code;
             tableEntity.Name = table.Name;
             tableEntity.Capacity = table.Capacity;
-            tableEntity.Status = table.Status;
+            // A cloud catalog refresh must never free an occupied local table
+            // while an offline dine-in order is still open on this Windows host.
+            var hasLocalActiveOrder = await db.Orders.AsNoTracking().AnyAsync(
+                order => order.DiningTableId == table.Id &&
+                         order.ServiceType == "dine_in" &&
+                         order.Status != "closed" && order.Status != "cancelled",
+                cancellationToken);
+            tableEntity.Status = hasLocalActiveOrder ? "occupied" : table.Status;
             tableEntity.IsActive = table.IsActive;
         }
 
@@ -313,11 +344,14 @@ public sealed class OperationalSnapshotStore
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        var tables = await db.DiningTables
-            .Where(value => value.IsActive)
-            .OrderBy(value => value.Code)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
+        // Filter parent activation as well. This matches the Laravel page,
+        // API and cloud bootstrap and avoids missing-area dictionary lookups.
+        var tables = await (from table in db.DiningTables.AsNoTracking()
+            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+            where table.IsActive && area.IsActive && branch.IsActive
+            orderby table.Code
+            select table).ToListAsync(cancellationToken);
 
         var areas = await db.DiningAreas
             .Where(value => value.IsActive)

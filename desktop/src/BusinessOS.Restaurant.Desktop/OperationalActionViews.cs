@@ -1488,17 +1488,10 @@ internal static class OperationalActionViews
 
     private static StackPanel Header(string title, string subtitle)
     {
-        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+        // Keep action labels, statuses, confirmations and safety warnings intact,
+        // but avoid a second paragraph below every workspace title.
+        var panel = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
         panel.Children.Add(HeaderText(title, 20, true));
-
-        var subtitleBlock = new TextBlock
-        {
-            Text = subtitle,
-            Margin = new Thickness(0, 4, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        subtitleBlock.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-        panel.Children.Add(subtitleBlock);
         return panel;
     }
 
