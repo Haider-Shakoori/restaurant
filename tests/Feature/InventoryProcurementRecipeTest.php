@@ -31,6 +31,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 
 class InventoryProcurementRecipeTest extends TestCase
@@ -216,7 +217,7 @@ class InventoryProcurementRecipeTest extends TestCase
                 ]],
             ]);
             $this->fail('Incompatible recipe unit was accepted.');
-        } catch (\Illuminate\Validation\ValidationException $ex) {
+        } catch (ValidationException $ex) {
             $this->assertArrayHasKey('items', $ex->errors());
         }
 
@@ -230,7 +231,7 @@ class InventoryProcurementRecipeTest extends TestCase
                 ]],
             ]);
             $this->fail('Fractional pieces were accepted.');
-        } catch (\Illuminate\Validation\ValidationException $ex) {
+        } catch (ValidationException $ex) {
             $this->assertArrayHasKey('items', $ex->errors());
         }
     }
