@@ -83,17 +83,18 @@ internal static class OperationalActionViews
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(440) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(470) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var form = new StackPanel();
         form.Children.Add(Header(
-            "Restaurant order",
-            "Open dine-in, takeaway, delivery or counter orders. Send KOT repeatedly; only unsent items go in the next round."));
+            "POS & Orders",
+            "Open a new order or resume an active order. Only unsent items are included when you send a new KOT round."));
 
         var serviceTypeBox = new ComboBox
         {
+            Name = "PosServiceType",
             ItemsSource = new[] { "dine_in", "takeaway", "delivery", "counter" },
             SelectedIndex = 0,
             Height = 34,
@@ -108,6 +109,17 @@ internal static class OperationalActionViews
         };
         var guestBox = new TextBox { Text = "1", Margin = new Thickness(0, 4, 0, 10), Height = 34 };
         var menuBox = Combo(menu, "Display");
+        menuBox.Name = "PosMenuItems";
+        var menuSearchBox = new TextBox
+        {
+            Name = "PosMenuSearchBox",
+            Height = 36,
+            Margin = new Thickness(0, 4, 0, 6),
+            ToolTip = "Search available menu products by name",
+        };
+        System.Windows.Automation.AutomationProperties.SetName(menuSearchBox, "Search menu items");
+        var menuPrice = new TextBlock { Margin = new Thickness(0, 2, 0, 8) };
+        menuPrice.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         var qtyBox = new TextBox { Text = "1", Margin = new Thickness(0, 4, 0, 6), Height = 34 };
         var seatBox = new TextBox { Margin = new Thickness(0, 4, 8, 6), Height = 34, Width = 80 };
         var courseBox = new TextBox { Margin = new Thickness(0, 4, 8, 6), Height = 34, Width = 80 };
@@ -128,17 +140,52 @@ internal static class OperationalActionViews
         var fireCourseBox = new TextBox { Width = 80, Height = 34, Margin = new Thickness(0, 4, 8, 6) };
         var voidReasonBox = new TextBox { Height = 34, Margin = new Thickness(0, 4, 8, 6), MinWidth = 220 };
         var lineBox = Combo(orderLines, "Display");
-        var status = new TextBlock { Foreground = Brushes.SlateGray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0) };
+        status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        var selectionSummary = new TextBlock
+        {
+            Name = "PosSelectionSummary",
+            Text = "No order selected · Open an order or choose one from Active orders.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 8, 0, 12),
+            FontWeight = FontWeights.SemiBold,
+        };
+        selectionSummary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
+        form.Children.Add(Label("1 · SERVICE"));
         form.Children.Add(Label("Service type")); form.Children.Add(serviceTypeBox);
-        form.Children.Add(Label("Branch (required for non-dine-in)")); form.Children.Add(orderBranchBox);
-        form.Children.Add(Label("Table (required for dine-in)")); form.Children.Add(tableBox);
-        form.Children.Add(Label("Takeaway / delivery / counter reference")); form.Children.Add(serviceReferenceBox);
+        var dineFields = new StackPanel { Name = "PosDineInFields" };
+        dineFields.Children.Add(Label("Table")); dineFields.Children.Add(tableBox);
+        var offsiteFields = new StackPanel { Name = "PosOffsiteFields" };
+        offsiteFields.Children.Add(Label("Branch")); offsiteFields.Children.Add(orderBranchBox);
+        offsiteFields.Children.Add(Label("Customer / delivery / pickup reference"));
+        offsiteFields.Children.Add(serviceReferenceBox);
+        form.Children.Add(dineFields);
+        form.Children.Add(offsiteFields);
         form.Children.Add(Label("Guests")); form.Children.Add(guestBox);
-        var open = Button("Open order");
+        void UpdateServiceFields()
+        {
+            var dineIn = string.Equals(serviceTypeBox.SelectedItem?.ToString(), "dine_in",
+                StringComparison.Ordinal);
+            dineFields.Visibility = dineIn ? Visibility.Visible : Visibility.Collapsed;
+            offsiteFields.Visibility = dineIn ? Visibility.Collapsed : Visibility.Visible;
+        }
+        serviceTypeBox.SelectionChanged += (_, _) => UpdateServiceFields();
+        UpdateServiceFields();
+
+        var open = Button("Open new order");
+        open.MinHeight = 42;
         form.Children.Add(open);
-        form.Children.Add(Label("Current order")); form.Children.Add(orderIdBox);
+        form.Children.Add(Label("2 · CURRENT ORDER"));
+        form.Children.Add(Label("Selected order (read-only)")); form.Children.Add(orderIdBox);
+        form.Children.Add(selectionSummary);
+        var clearSelection = Button("Start another order");
+        clearSelection.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        form.Children.Add(clearSelection);
+        form.Children.Add(Label("3 · ADD ITEMS"));
+        form.Children.Add(Label("Search menu")); form.Children.Add(menuSearchBox);
         form.Children.Add(Label("Menu item")); form.Children.Add(menuBox);
+        form.Children.Add(menuPrice);
         form.Children.Add(Label("Quantity")); form.Children.Add(qtyBox);
 
         var seatCourseRow = new WrapPanel();
@@ -147,39 +194,79 @@ internal static class OperationalActionViews
         seatCourseRow.Children.Add(Label("Course"));
         seatCourseRow.Children.Add(courseBox);
         seatCourseRow.Children.Add(courseNameBox);
-        form.Children.Add(seatCourseRow);
+        var advancedItemDetails = new StackPanel { Name = "PosItemOptions", Visibility = Visibility.Collapsed };
+        advancedItemDetails.Children.Add(seatCourseRow);
 
         var itemFlags = new WrapPanel();
         itemFlags.Children.Add(heldBox);
         itemFlags.Children.Add(rushBox);
-        form.Children.Add(itemFlags);
-
-        form.Children.Add(Label("Modifiers")); form.Children.Add(modifiersBox);
-        form.Children.Add(Label("Item note")); form.Children.Add(itemNotesBox);
-        form.Children.Add(Label("Kitchen instruction")); form.Children.Add(kitchenInstructionsBox);
-        form.Children.Add(Label("Allergy / special warning")); form.Children.Add(allergyBox);
+        advancedItemDetails.Children.Add(itemFlags);
+        advancedItemDetails.Children.Add(Label("Modifiers")); advancedItemDetails.Children.Add(modifiersBox);
+        advancedItemDetails.Children.Add(Label("Item note")); advancedItemDetails.Children.Add(itemNotesBox);
+        advancedItemDetails.Children.Add(Label("Kitchen instruction")); advancedItemDetails.Children.Add(kitchenInstructionsBox);
+        advancedItemDetails.Children.Add(Label("Allergy / special warning")); advancedItemDetails.Children.Add(allergyBox);
+        var toggleItemOptions = Button("Show modifiers & instructions");
+        toggleItemOptions.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        toggleItemOptions.Click += (_, _) =>
+        {
+            var showing = advancedItemDetails.Visibility != Visibility.Visible;
+            advancedItemDetails.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+            toggleItemOptions.Content = showing ? "Hide modifiers & instructions" : "Show modifiers & instructions";
+        };
+        form.Children.Add(toggleItemOptions);
+        form.Children.Add(advancedItemDetails);
 
         var add = Button("Add item");
         var submit = Button("Send new KOT round");
-        form.Children.Add(add);
-        form.Children.Add(submit);
-
+        add.MinHeight = 44;
+        submit.MinHeight = 44;
+        var kitchenActions = new WrapPanel { Margin = new Thickness(0, 8, 0, 6) };
+        kitchenActions.Children.Add(add);
+        kitchenActions.Children.Add(submit);
+        form.Children.Add(kitchenActions);
+        form.Children.Add(Label("4 · KITCHEN & ORDER ADJUSTMENTS"));
+        var advancedOrderActions = new StackPanel
+        {
+            Name = "PosOrderAdjustments",
+            Visibility = Visibility.Collapsed,
+        };
         var courseRow = new WrapPanel();
         courseRow.Children.Add(fireCourseBox);
         var fireCourse = Button("Fire course");
         courseRow.Children.Add(fireCourse);
-        form.Children.Add(courseRow);
+        advancedOrderActions.Children.Add(courseRow);
 
-        form.Children.Add(Label("Existing order line"));
-        form.Children.Add(lineBox);
+        advancedOrderActions.Children.Add(Label("Existing order line"));
+        advancedOrderActions.Children.Add(lineBox);
         var voidRow = new WrapPanel();
         voidRow.Children.Add(voidReasonBox);
         var voidLine = Button("Void selected line");
         var cancelOrder = Button("Cancel order");
         voidRow.Children.Add(voidLine);
         voidRow.Children.Add(cancelOrder);
-        form.Children.Add(voidRow);
+        advancedOrderActions.Children.Add(voidRow);
+        var toggleOrderActions = Button("Show course firing / void / cancel");
+        toggleOrderActions.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        toggleOrderActions.Click += (_, _) =>
+        {
+            var showing = advancedOrderActions.Visibility != Visibility.Visible;
+            advancedOrderActions.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+            toggleOrderActions.Content = showing ? "Hide course firing / void / cancel" : "Show course firing / void / cancel";
+        };
+        form.Children.Add(toggleOrderActions);
+        form.Children.Add(advancedOrderActions);
         form.Children.Add(status);
+        menuSearchBox.TextChanged += (_, _) =>
+        {
+            var selected = menuBox.SelectedItem as MenuChoice;
+            var term = menuSearchBox.Text.Trim();
+            var filtered = menu.Where(x => x.Name.Contains(term, StringComparison.OrdinalIgnoreCase)).ToArray();
+            menuBox.ItemsSource = filtered;
+            if (selected is not null && filtered.Contains(selected))
+                menuBox.SelectedItem = selected;
+            else if (filtered.Length == 1)
+                menuBox.SelectedIndex = 0;
+        };
 
         open.Click += async (_, _) =>
         {
@@ -221,10 +308,12 @@ internal static class OperationalActionViews
             if (menuBox.SelectedItem is MenuChoice selected)
             {
                 modifiersBox.ItemsSource = modifierChoices.Where(x => x.MenuItemId == selected.Id).ToList();
+                menuPrice.Text = $"Unit price: AFN {selected.Price:N2} (modifier charges may apply)";
             }
             else
             {
                 modifiersBox.ItemsSource = Array.Empty<ModifierChoice>();
+                menuPrice.Text = "Select an available menu item";
             }
         };
 
