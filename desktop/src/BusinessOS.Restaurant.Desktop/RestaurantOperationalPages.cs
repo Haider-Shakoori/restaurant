@@ -16,11 +16,12 @@ internal static class RestaurantOperationalPages
 {
     public static async Task<FrameworkElement> CreateAsync(string route, LanDiagnosticsViewModel diagnostics)
     {
-        if (route is "inventory" or "purchases")
+        if (route is "inventory" or "purchases" or "recipes")
         {
             var modules = await new LocalRestaurantSettingsService(new LocalDatabaseFactory()).GetModulesAsync();
             if (route == "inventory" && !modules.InventoryEnabled ||
-                route == "purchases" && (!modules.InventoryEnabled || !modules.PurchasingEnabled))
+                route == "purchases" && (!modules.InventoryEnabled || !modules.PurchasingEnabled) ||
+                route == "recipes" && !modules.RecipesEnabled)
             {
                 return Card("Module disabled",
                     "This module is turned off for the restaurant. An Owner can re-enable it in Settings → Modules. Historical data is preserved.");
@@ -34,6 +35,7 @@ internal static class RestaurantOperationalPages
             "kitchen" => await OperationalActionViews.KitchenAsync(),
             "pos" => await OperationalActionViews.PosAsync(),
             "menu" => await MenuAsync(),
+            "recipes" => await MenuAsync(recipesOnly: true),
             "inventory" => await InventoryAsync(),
             "purchases" => await PurchasesAsync(),
             "users" => await UsersAsync(),
@@ -327,7 +329,7 @@ internal static class RestaurantOperationalPages
         return Section("POS & active orders", "Desktop and mobile orders share the same local SQLite order store.", grid);
     }
 
-    private static async Task<FrameworkElement> MenuAsync()
+    private static async Task<FrameworkElement> MenuAsync(bool recipesOnly = false)
     {
         var factory = new LocalDatabaseFactory();
         await factory.EnsureCreatedAsync();
@@ -345,7 +347,9 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Currency", nameof(MenuRow.Currency), 90));
         grid.Columns.Add(Column("Available", nameof(MenuRow.Available), 100));
         var panel = Stack();
-        panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
+        panel.Children.Add(recipesOnly
+            ? Card("Recipes & Food Cost", "Review ingredient quantities, create recipe versions and preview food cost in AFN. Recipes are stored per restaurant branch.")
+            : Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
         // Menus are cloud-owned reference records. Editing only the SQLite
         // snapshot would silently disappear after the next cloud refresh.
         var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
@@ -417,7 +421,7 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 6, 0, 12),
             Orientation = Orientation.Horizontal,
         };
-        foreach (var action in new[] { editCatalog, create, recipes })
+        foreach (var action in recipesOnly ? new[] { recipes } : new[] { editCatalog, create, recipes })
         {
             action.HorizontalAlignment = HorizontalAlignment.Left;
             action.MinWidth = 0;
@@ -518,6 +522,7 @@ internal static class RestaurantOperationalPages
         };
         recipeCreate.HorizontalAlignment = HorizontalAlignment.Left;
         recipeCreate.Margin = new Thickness(0, 0, 10, 10);
+        recipeCreate.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
         menuActions.Children.Add(recipeCreate);
         var costPreview = new Button { Content = "Recipe Food-Cost Preview", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         costPreview.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
@@ -580,8 +585,10 @@ internal static class RestaurantOperationalPages
         };
         costPreview.HorizontalAlignment = HorizontalAlignment.Left;
         costPreview.Margin = new Thickness(0, 0, 10, 10);
+        costPreview.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
         menuActions.Children.Add(costPreview);
-        panel.Children.Add(grid);
+        if (!recipesOnly)
+            panel.Children.Add(grid);
         return Scroll(panel);
     }
 
