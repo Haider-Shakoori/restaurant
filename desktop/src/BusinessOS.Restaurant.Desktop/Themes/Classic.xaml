@@ -13,6 +13,10 @@
     <Thickness x:Key="WorkspaceFrostedPadding">0</Thickness>
     <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="CardBorderBrush" Color="#E2E8F0" />
+    <!-- Floor board keeps its own legible cards in Classic mode. -->
+    <SolidColorBrush x:Key="FloorAreaBackgroundBrush" Color="#FFFFFFFF" />
+    <SolidColorBrush x:Key="FloorTileBackgroundBrush" Color="#F8FAFC" />
+    <SolidColorBrush x:Key="FloorTileBorderBrush" Color="#CBD5E1" />
     <!-- Opaque nested data surfaces in Classic mode. -->
     <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#F2F6FB" />
