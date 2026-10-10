@@ -413,6 +413,7 @@
                     <ContentControl x:Name="WorkspaceContent"
                                     Content="{Binding CurrentPage}"
                                     HorizontalAlignment="Stretch"
+                                    MaxWidth="1900"
                                     SnapsToDevicePixels="True" />
                 </Border>
 
