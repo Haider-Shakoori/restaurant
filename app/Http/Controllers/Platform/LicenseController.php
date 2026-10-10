@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\DeviceActivation;
 use App\Models\LicenseKey;
+use App\Models\LicenseEvent;
 use App\Services\Platform\LicenseService;
 use App\Services\Platform\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
@@ -88,7 +89,7 @@ class LicenseController extends Controller
 
         $business->update(['desktop_mode' => $mode]);
 
-        \App\Models\LicenseEvent::create([
+        LicenseEvent::create([
             'business_id' => $business->id,
             'admin_user_id' => request()->user()->id,
             'event' => 'desktop.mode.updated',
