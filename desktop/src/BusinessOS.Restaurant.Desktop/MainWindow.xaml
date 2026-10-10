@@ -422,7 +422,7 @@
                         Panel.ZIndex="35"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
                         Margin="0,6,24,0" Padding="16,9"
-                        Background="{DynamicResource BrandPrimaryBrush}"
+                        Background="#0F172A"
                         Foreground="White" FontWeight="Bold"
                         Content="Exit POS  (Esc)" Visibility="Collapsed"
                         Click="OnExitPosClick" />
