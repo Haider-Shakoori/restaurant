@@ -959,7 +959,9 @@ internal static class OperationalActionViews
             .OrderBy(x => x.Name).ToListAsync();
 
         var workflow = new DesktopRestaurantWorkflowService();
-        var root = new StackPanel();
+        // The translucent surface belongs to the whole floor workspace, not
+        // only the table tiles. Its dynamic resources follow Classic/Glass.
+        var root = new StackPanel { Margin = new Thickness(4) };
         root.Children.Add(Header(
             "Dining floor",
             "Live table state shared over LAN. Transfer, merge and split preserve KOT history; split only moves lines not yet sent to production."));
@@ -1254,7 +1256,12 @@ internal static class OperationalActionViews
         };
         root.Children.Add(toggleAdvanced);
         root.Children.Add(advancedOperations);
-        return new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return new ScrollViewer
+        {
+            Content = WorkspaceFrostedSurface.Wrap(root),
+            Margin = new Thickness(12, 8, 12, 16),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
     }
 
     public static async Task<FrameworkElement> KitchenAsync()
@@ -2102,8 +2109,10 @@ internal static class OperationalActionViews
                     BorderThickness = new Thickness(1),
                     Child = body,
                 };
-                surface.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
-                surface.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+                // Frosted glass panels keep readable text over the restaurant
+                // artwork while respecting the current light/glass theme.
+                surface.SetResourceReference(Border.BackgroundProperty, "FloorTileBackgroundBrush");
+                surface.SetResourceReference(Border.BorderBrushProperty, "FloorTileBorderBrush");
 
                 var tile = new Button
                 {
@@ -2137,7 +2146,17 @@ internal static class OperationalActionViews
                 };
                 tiles.Children.Add(tile);
             }
-            floor.Children.Add(tiles);
+            var areaSurface = new Border
+            {
+                CornerRadius = new CornerRadius(16),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(12),
+                Margin = new Thickness(0, 0, 0, 12),
+                Child = tiles,
+            };
+            areaSurface.SetResourceReference(Border.BackgroundProperty, "FloorAreaBackgroundBrush");
+            areaSurface.SetResourceReference(Border.BorderBrushProperty, "FloorTileBorderBrush");
+            floor.Children.Add(areaSurface);
         }
 
         return floor;
