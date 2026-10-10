@@ -275,6 +275,13 @@ class TenantWebPortalTest extends TestCase
             ->assertSee('Exit full-screen POS')
             ->assertSee('Kiosk screen')
             ->assertSee('pos-cashier')
+            ->assertSee('pos-cashier-dialog')
+            ->assertSee('pos-menu-items')
+            ->assertSee('pos-cart-panel')
+            ->assertSee('pos-details-panel')
+            ->assertSee('submitOrder($event)', false)
+            ->assertSee('Scrollable POS menu items')
+            ->assertSee('Close cashier & return to POS', false)
             ->assertSee('h-[100dvh]', false)
             ->assertSee('Kabuli Pulao')
             ->assertSee('Table 1');

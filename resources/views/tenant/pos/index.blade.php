@@ -17,13 +17,14 @@
         </div>
     @endif
     @include('tenant.pos.partials.photo-order')
-    <section id="pos-cashier" class="px-4 pb-4 pt-6 sm:px-6">
+    <dialog id="pos-cashier-dialog" aria-label="Cashier, service and payments" class="w-[min(96vw,1380px)] max-h-[92dvh] overflow-y-auto rounded-2xl border border-slate-300 bg-slate-50 p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/70">
+    <section id="pos-cashier" class="px-4 pb-6 pt-5 sm:px-6">
         <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-xl font-black text-slate-950">Payments, service & cashier</h2>
                 <p class="text-sm text-slate-500">Use the same authoritative billing and payment flows; partial payment never frees an occupied table.</p>
             </div>
-            <a href="#pos-order-entry" class="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700">↑ Back to POS</a>
+            <button type="button" onclick="document.getElementById('pos-cashier-dialog').close()" class="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700">Close cashier & return to POS</button>
         </div>
     <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -152,4 +153,5 @@
         </div>
     </div>
     </section>
+    </dialog>
 @endsection

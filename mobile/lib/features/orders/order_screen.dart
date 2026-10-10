@@ -35,6 +35,8 @@ class _OrderScreenState extends State<OrderScreen> {
   String _query = '';
   bool _working = false;
   bool _hasUnsent = false;
+  int _rightTab = 0;
+  int _phoneTab = 0;
 
   @override
   void initState() {
@@ -780,6 +782,47 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _header(Map<String, Object?> order) {
+    // The full desktop-style status row does not fit narrow waiter phones.
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Container(
+        height: 60,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        color: const Color(0xFF171B20),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Back to tables',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            ),
+            const SizedBox(width: 4),
+            const Expanded(
+              child: Text(
+                'Restaurant POS',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              ),
+            ),
+            Text(
+              '${_kotRounds.length} KOT',
+              style: const TextStyle(
+                color: Color(0xFFFFD96B),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Order operations',
+              onPressed: _working ? null : _showOrderOperations,
+              color: Colors.white,
+              icon: const Icon(Icons.more_vert_rounded),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       height: 68,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -928,18 +971,54 @@ class _OrderScreenState extends State<OrderScreen> {
   Widget _phoneBody(BuildContext context, Map<String, Object?> order) {
     return Column(
       children: [
-        _categoryBar(),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(12),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Row(
             children: [
-              _searchBar(),
-              const SizedBox(height: 12),
-              _menuGrid(phone: true),
-              const SizedBox(height: 16),
-              _orderPanel(order),
+              Expanded(
+                child: ChoiceChip(
+                  key: const Key('mobile-pos-menu-tab'),
+                  label: const SizedBox(
+                    width: double.infinity,
+                    child: Center(child: Text('Menu')),
+                  ),
+                  selected: _phoneTab == 0,
+                  onSelected: (_) => setState(() => _phoneTab = 0),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ChoiceChip(
+                  key: const Key('mobile-pos-order-tab'),
+                  label: SizedBox(
+                    width: double.infinity,
+                    child: Center(child: Text('Order (${_items.length})')),
+                  ),
+                  selected: _phoneTab == 1,
+                  onSelected: (_) => setState(() => _phoneTab = 1),
+                ),
+              ),
             ],
           ),
+        ),
+        Expanded(
+          child: _phoneTab == 0
+              ? Column(
+                  children: [
+                    _categoryBar(),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                      child: _searchBar(),
+                    ),
+                    Expanded(
+                      child: _menuGrid(phone: true),
+                    ),
+                  ],
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _orderPanel(order),
+                ),
         ),
       ],
     );
@@ -983,8 +1062,8 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     return GridView.builder(
-      shrinkWrap: phone,
-      physics: phone ? const NeverScrollableScrollPhysics() : null,
+      // Both panes own their own viewport; the photo grid must scroll itself.
+      shrinkWrap: false,
       itemCount: items.length,
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: phone ? 220 : 250,
@@ -1076,7 +1155,6 @@ class _OrderScreenState extends State<OrderScreen> {
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: const EdgeInsets.all(16),
@@ -1116,136 +1194,33 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ),
           ),
-          if (_kotRounds.isNotEmpty) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-              color: const Color(0xFFF8F9FA),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _kotRounds.map((round) {
-                  final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
-                  final number = round['kot_number']?.toString() ?? 'KOT';
-                  final priority = round['priority']?.toString() ?? 'normal';
-
-                  return ActionChip(
-                    avatar: priority == 'rush'
-                        ? const Icon(
-                            Icons.bolt_rounded,
-                            size: 16,
-                            color: Colors.red,
-                          )
-                        : const Icon(Icons.receipt_long_rounded, size: 16),
-                    label: Text('R$sequence · $number'),
-                    onPressed: () => _showKotRound(round),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-          Flexible(
-            child: _items.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.all(30),
-                    child: Text(
-                      'Add menu items to start the order.',
-                      textAlign: TextAlign.center,
-                    ),
-                  )
-                : ListView.separated(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.all(14),
-                    itemCount: _items.length,
-                    separatorBuilder: (_, _) => const Divider(height: 18),
-                    itemBuilder: (context, index) {
-                      final item = _items[index];
-                      final allergy = item['allergy_instructions']?.toString();
-
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F2F4),
-                              borderRadius: BorderRadius.circular(11),
-                            ),
-                            child: const Icon(
-                              Icons.restaurant_menu_rounded,
-                              size: 19,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  item['item_name']!.toString(),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                Text(
-                                  'x' +
-                                      item['quantity'].toString() +
-                                      ' · ' +
-                                      item['line_total'].toString() +
-                                      ' AFN',
-                                  style: const TextStyle(
-                                    color: Colors.black54,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                if (allergy != null && allergy.isNotEmpty)
-                                  Text(
-                                    'ALLERGY: $allergy',
-                                    style: const TextStyle(
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 10,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-          ),
-          if (_restaurantSettings['courses_enabled'] == true &&
-              _heldCourses.isNotEmpty) ...[
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  'Held courses',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: SegmentedButton<int>(
+              key: const Key('mobile-pos-right-tabs'),
+              segments: [
+                ButtonSegment<int>(
+                  value: 0,
+                  label: Text('Items (${_items.length})'),
+                  icon: const Icon(Icons.shopping_cart_outlined, size: 18),
                 ),
-              ),
+                ButtonSegment<int>(
+                  value: 1,
+                  label: Text('KOT (${_kotRounds.length})'),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                ),
+              ],
+              selected: {_rightTab},
+              onSelectionChanged: (values) =>
+                  setState(() => _rightTab = values.first),
+              showSelectedIcon: false,
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 4, 14, 12),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _heldCourses.map((course) {
-                  return FilledButton.tonalIcon(
-                    onPressed: _working ? null : () => _fireCourse(course),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                    label: Text('Fire course $course'),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
+          ),
+          Expanded(
+            child: _rightTab == 0
+                ? _orderItemsScroll()
+                : _kitchenRoundsScroll(),
+          ),
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.all(16),
@@ -1292,6 +1267,93 @@ class _OrderScreenState extends State<OrderScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _orderItemsScroll() {
+    if (_items.isEmpty) {
+      return const Center(child: Text('Add menu items to start the order.'));
+    }
+    return ListView.separated(
+      key: const Key('mobile-pos-order-items-scroll'),
+      padding: const EdgeInsets.all(12),
+      itemCount: _items.length,
+      separatorBuilder: (context, index) => const Divider(height: 18),
+      itemBuilder: (context, index) {
+        final item = _items[index];
+        final allergy = item['allergy_instructions']?.toString();
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.restaurant_menu_rounded, size: 25),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item['item_name']!.toString(),
+                      style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text('x${item['quantity']} · ${item['line_total']} AFN',
+                      style: const TextStyle(color: Colors.black54)),
+                  if (allergy != null && allergy.isNotEmpty)
+                    Text('ALLERGY: $allergy',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                        )),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _kitchenRoundsScroll() {
+    return ListView(
+      key: const Key('mobile-pos-kot-scroll'),
+      padding: const EdgeInsets.all(12),
+      children: [
+        if (_kotRounds.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('No KOT rounds have been sent yet.'),
+          ),
+        ..._kotRounds.map((round) {
+          final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
+          final number = round['kot_number']?.toString() ?? 'KOT';
+          final priority = round['priority']?.toString() ?? 'normal';
+          return ListTile(
+            leading: Icon(
+              priority == 'rush'
+                  ? Icons.bolt_rounded
+                  : Icons.receipt_long_rounded,
+              color: priority == 'rush' ? Colors.red : null,
+            ),
+            title: Text('Round $sequence · $number'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _showKotRound(round),
+          );
+        }),
+        if (_restaurantSettings['courses_enabled'] == true &&
+            _heldCourses.isNotEmpty) ...[
+          const Divider(),
+          const Text('Held courses',
+              style: TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _heldCourses.map((course) => FilledButton.tonalIcon(
+              onPressed: _working ? null : () => _fireCourse(course),
+              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              label: Text('Fire course $course'),
+            )).toList(),
+          ),
+        ],
+      ],
     );
   }
 

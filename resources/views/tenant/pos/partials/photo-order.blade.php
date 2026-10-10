@@ -17,7 +17,7 @@
     ])->values();
 @endphp
 
-<section id="pos-order-entry" class="flex min-h-[100dvh] flex-col overflow-hidden bg-white"
+<section id="pos-order-entry" class="flex h-[100dvh] min-h-0 flex-col overflow-hidden bg-white"
     x-data="{
         menu: @js($posMenu),
         currentCategory: 'All items',
@@ -27,6 +27,17 @@
         existingOrderId: @js(old('existing_order_id', '')),
         existingOrders: @js($posExisting),
         submitting: false,
+        panelTab: 'details',
+        submitOrder(event) {
+            if (this.submitting || !this.cart.length) { event.preventDefault(); return; }
+            if (!event.target.checkValidity()) {
+                event.preventDefault();
+                this.panelTab = 'details';
+                this.$nextTick(() => event.target.reportValidity());
+                return;
+            }
+            this.submitting = true;
+        },
         money(value) { return Number(value || 0).toLocaleString(undefined, {maximumFractionDigits: 2}); },
         visibleMenu() {
             return this.menu.filter(item => (this.currentCategory === 'All items' || item.category === this.currentCategory) &&
@@ -37,6 +48,7 @@
             const line = this.cart.find(row => row.id === item.id);
             if (line) { if (line.quantity < 999) line.quantity++; return; }
             if (this.cart.length >= 100) return;
+            this.panelTab = 'cart';
             this.cart.push({
                 ...item, quantity: 1, client_line_id: window.crypto?.randomUUID?.() ||
                     (Date.now().toString(36) + Math.random().toString(36).slice(2))
@@ -58,24 +70,24 @@
         <div>
             <p class="text-xs font-black uppercase tracking-widest text-emerald-300">BusinessOS · POS order entry</p>
             <h2 class="mt-1 text-xl font-black">Photo menu & current order</h2>
-            <p class="mt-1 text-xs text-slate-300">Tap a product to build a KOT. Checkout and payment remain in the cashier panel below.</p>
+            <p class="mt-1 text-xs text-slate-300">Tap menu items to build a KOT. Open Bills & payments for cashier operations.</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-            <a href="#pos-cashier" class="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-black text-white hover:bg-emerald-400">Bills & payments ↓</a>
+            <button type="button" onclick="document.getElementById('pos-cashier-dialog').showModal()" class="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-black text-white hover:bg-emerald-400">Bills & payments</button>
             <a href="/orders" class="rounded-xl border border-white/25 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Advanced modifiers</a>
             <a href="/dashboard" class="rounded-xl border border-rose-300/60 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Exit full-screen POS</a>
             <button type="button" onclick="if(document.fullscreenElement){document.exitFullscreen?.()}else{document.documentElement.requestFullscreen?.()}"
                 class="rounded-xl border border-white/25 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">⛶ Kiosk screen</button>
         </div>
     </header>
-    <form method="POST" action="/orders/take" class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.85fr)]"
-        @submit="if (submitting || !cart.length) { $event.preventDefault(); return; } submitting = true;">
+    <form method="POST" action="/orders/take" class="grid min-h-0 flex-1 gap-0 overflow-hidden max-lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)] lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.85fr)]"
+        novalidate @submit="submitOrder($event)">
         @csrf
         <input type="hidden" name="client_order_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
         <input type="hidden" name="client_mutation_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
         <input type="hidden" name="from_pos" value="1">
-        <div class="min-w-0 border-b border-slate-200 p-4 sm:p-5 lg:border-b-0 lg:border-r">
-            <div class="flex flex-wrap gap-2">
+        <div class="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-200 p-3 sm:p-4 lg:border-b-0 lg:border-r">
+            <div class="flex shrink-0 gap-2 overflow-x-auto pb-2">
                 <button type="button" @click="currentCategory='All items'" :class="currentCategory==='All items' ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-700'" class="rounded-lg px-3 py-2 text-xs font-black">All items</button>
                 @foreach ($menuCategories as $category)
                     @if ($category->items->isNotEmpty())
@@ -84,8 +96,8 @@
                 @endforeach
             </div>
             <input x-model.debounce.150ms="query" type="search" placeholder="Search dishes or categories..." aria-label="Search POS menu"
-                class="mt-4 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm focus:border-violet-500 focus:ring-violet-500">
-            <div class="mt-4 grid max-h-[calc(100dvh-13.5rem)] grid-cols-2 gap-3 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                class="mt-2 w-full shrink-0 rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:border-violet-500 focus:ring-violet-500">
+            <div id="pos-menu-items" class="mt-3 grid min-h-0 flex-1 auto-rows-max grid-cols-2 content-start gap-3 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" role="region" aria-label="Scrollable POS menu items" tabindex="0">
                 @foreach ($menuCategories as $category)
                     @foreach ($category->items as $item)
                         @php($needsOptions = $item->modifierGroups->contains(fn ($group) => $group->min_selections > 0))
@@ -116,8 +128,14 @@
             </div>
             <p x-show="visibleMenu().length === 0" class="mt-4 text-sm text-slate-500">No matching menu items. Update the filter or manage your menu.</p>
         </div>
-        <aside class="min-w-0 bg-slate-50/75 p-4 sm:p-5 lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto">
+        <aside class="flex min-h-0 min-w-0 flex-col overflow-hidden bg-slate-50/75 p-3 sm:p-4" aria-label="POS order workspace">
             <h3 class="text-lg font-black text-slate-950">Current Order</h3>
+            <div class="mt-3 flex shrink-0 gap-2 border-b border-slate-200 pb-2" role="tablist" aria-label="Order tabs">
+                <button type="button" role="tab" id="pos-details-tab" aria-controls="pos-details-panel" :aria-selected="panelTab === 'details'" @click="panelTab='details'" :class="panelTab === 'details' ? 'bg-slate-950 text-white' : 'bg-white text-slate-700'" class="flex-1 rounded-lg px-3 py-2 text-sm font-bold">Order details</button>
+                <button type="button" role="tab" id="pos-cart-tab" aria-controls="pos-cart-panel" :aria-selected="panelTab === 'cart'" @click="panelTab='cart'" :class="panelTab === 'cart' ? 'bg-slate-950 text-white' : 'bg-white text-slate-700'" class="flex-1 rounded-lg px-3 py-2 text-sm font-bold">Cart (<span x-text="cart.length"></span>)</button>
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2" role="region" aria-label="Scrollable order controls" tabindex="0">
+            <div id="pos-details-panel" role="tabpanel" aria-labelledby="pos-details-tab" x-show="panelTab === 'details'">
             <label class="mt-3 block text-xs font-bold text-slate-600">Start or continue
                 <select name="existing_order_id" x-model="existingOrderId" @change="selectExisting()" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm">
                     <option value="">New order</option>
@@ -159,7 +177,8 @@
             </div>
             <input type="hidden" name="service_type" x-bind:value="serviceType" x-bind:disabled="!existingOrderId">
             <input type="hidden" name="guest_count" x-bind:value="existingOrders.find(row => row.id === existingOrderId)?.guests || 1" x-bind:disabled="!existingOrderId">
-            <div class="mt-4 max-h-[24rem] space-y-2 overflow-auto">
+            </div>
+            <div id="pos-cart-panel" role="tabpanel" aria-labelledby="pos-cart-tab" x-show="panelTab === 'cart'" class="space-y-2">
                 <p x-show="!cart.length" class="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">Choose dishes on the left to begin.</p>
                 <template x-for="(line, index) in cart" :key="line.id">
                     <div class="rounded-xl border border-slate-200 bg-white p-3">
@@ -178,7 +197,9 @@
                     </div>
                 </template>
             </div>
-            <div class="mt-4 border-t border-slate-200 pt-4">
+            </div>
+            </div>
+            <div class="shrink-0 border-t border-slate-200 bg-slate-50 pt-3">
                 <div class="flex justify-between text-base font-black"><span>Order subtotal</span><span x-text="money(sum())+' AFN'"></span></div>
                 <p class="mt-2 text-xs text-slate-500">Final charges are calculated by the server. This is not a payment receipt.</p>
                 <div class="mt-4 grid grid-cols-2 gap-2">
