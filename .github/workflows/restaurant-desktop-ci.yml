@@ -253,6 +253,11 @@ jobs:
               Stop-Process -Force -ErrorAction SilentlyContinue
           }
 
+      - name: Actually install and uninstall Restaurant on GitHub Windows
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./installer/Test-CI-Install.ps1
+
       - name: Verify installer license gate configuration
         shell: pwsh
         run: |
