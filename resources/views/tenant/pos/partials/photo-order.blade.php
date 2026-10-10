@@ -17,7 +17,7 @@
     ])->values();
 @endphp
 
-<section id="pos-order-entry" class="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+<section id="pos-order-entry" class="flex min-h-[100dvh] flex-col overflow-hidden bg-white"
     x-data="{
         menu: @js($posMenu),
         currentCategory: 'All items',
@@ -60,15 +60,21 @@
             <h2 class="mt-1 text-xl font-black">Photo menu & current order</h2>
             <p class="mt-1 text-xs text-slate-300">Tap a product to build a KOT. Checkout and payment remain in the cashier panel below.</p>
         </div>
-        <a href="/orders" class="rounded-xl border border-white/25 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Advanced order / modifiers</a>
+        <div class="flex flex-wrap items-center gap-2">
+            <a href="#pos-cashier" class="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-black text-white hover:bg-emerald-400">Bills & payments ↓</a>
+            <a href="/orders" class="rounded-xl border border-white/25 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Advanced modifiers</a>
+            <a href="/dashboard" class="rounded-xl border border-rose-300/60 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">Exit full-screen POS</a>
+            <button type="button" onclick="if(document.fullscreenElement){document.exitFullscreen?.()}else{document.documentElement.requestFullscreen?.()}"
+                class="rounded-xl border border-white/25 px-4 py-2 text-xs font-bold text-white hover:bg-white/10">⛶ Kiosk screen</button>
+        </div>
     </header>
-    <form method="POST" action="/orders/take" class="grid gap-0 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)]"
+    <form method="POST" action="/orders/take" class="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.7fr)_minmax(340px,0.85fr)]"
         @submit="if (submitting || !cart.length) { $event.preventDefault(); return; } submitting = true;">
         @csrf
         <input type="hidden" name="client_order_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
         <input type="hidden" name="client_mutation_id" value="{{ (string) \Illuminate\Support\Str::uuid() }}">
         <input type="hidden" name="from_pos" value="1">
-        <div class="min-w-0 border-b border-slate-200 p-4 sm:p-5 xl:border-b-0 xl:border-r">
+        <div class="min-w-0 border-b border-slate-200 p-4 sm:p-5 lg:border-b-0 lg:border-r">
             <div class="flex flex-wrap gap-2">
                 <button type="button" @click="currentCategory='All items'" :class="currentCategory==='All items' ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-700'" class="rounded-lg px-3 py-2 text-xs font-black">All items</button>
                 @foreach ($menuCategories as $category)
@@ -79,7 +85,7 @@
             </div>
             <input x-model.debounce.150ms="query" type="search" placeholder="Search dishes or categories..." aria-label="Search POS menu"
                 class="mt-4 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm focus:border-violet-500 focus:ring-violet-500">
-            <div class="mt-4 grid max-h-[42rem] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4">
+            <div class="mt-4 grid max-h-[calc(100dvh-13.5rem)] grid-cols-2 gap-3 overflow-y-auto overscroll-contain pr-1 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 @foreach ($menuCategories as $category)
                     @foreach ($category->items as $item)
                         @php($needsOptions = $item->modifierGroups->contains(fn ($group) => $group->min_selections > 0))
@@ -110,7 +116,7 @@
             </div>
             <p x-show="visibleMenu().length === 0" class="mt-4 text-sm text-slate-500">No matching menu items. Update the filter or manage your menu.</p>
         </div>
-        <aside class="min-w-0 bg-slate-50/75 p-4 sm:p-5">
+        <aside class="min-w-0 bg-slate-50/75 p-4 sm:p-5 lg:max-h-[calc(100dvh-6.5rem)] lg:overflow-y-auto">
             <h3 class="text-lg font-black text-slate-950">Current Order</h3>
             <label class="mt-3 block text-xs font-bold text-slate-600">Start or continue
                 <select name="existing_order_id" x-model="existingOrderId" @change="selectExisting()" class="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm">
