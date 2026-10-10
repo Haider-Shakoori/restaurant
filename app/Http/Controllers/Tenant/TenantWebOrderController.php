@@ -42,7 +42,7 @@ class TenantWebOrderController extends Controller
                 return $order->fresh()->load(['items', 'kotRounds.tickets']);
             });
 
-            return redirect('/orders')
+            return redirect($request->boolean('from_pos') ? '/pos' : '/orders')
                 ->with(
                     'status',
                     ($data['submit_action'] ?? 'kitchen') === 'kitchen'
@@ -58,7 +58,7 @@ class TenantWebOrderController extends Controller
             ? 'Order saved as draft.'
             : 'Order submitted to Kitchen successfully.';
 
-        return redirect('/orders')
+        return redirect($request->boolean('from_pos') ? '/pos' : '/orders')
             ->with('status', $message)
             ->with('created_order_id', $order->id);
     }
