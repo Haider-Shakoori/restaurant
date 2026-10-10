@@ -65,6 +65,9 @@ public sealed class CloudReconciliationClient
         IReadOnlyList<CloudMutationEnvelope> mutations,
         CancellationToken cancellationToken)
     {
+        if (DesktopOperatingMode.IsStandalone(activation))
+            throw new InvalidOperationException("Cloud reconciliation is disabled by the signed standalone license.");
+
         using var request = CreateRequest(
             activation,
             session,
@@ -90,6 +93,9 @@ public sealed class CloudReconciliationClient
         int limit,
         CancellationToken cancellationToken)
     {
+        if (DesktopOperatingMode.IsStandalone(activation))
+            throw new InvalidOperationException("Cloud reconciliation is disabled by the signed standalone license.");
+
         using var request = CreateRequest(
             activation,
             session,
