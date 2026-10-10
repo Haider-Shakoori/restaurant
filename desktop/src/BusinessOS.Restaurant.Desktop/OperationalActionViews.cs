@@ -1006,8 +1006,10 @@ internal static class OperationalActionViews
             rows, allFloorOrders, activeOrders, availableTables,
             sourceOrderBox, targetTableBox, operationStatus, groupByArea: true);
         visualGrid.Visibility = Visibility.Collapsed;
-        root.Children.Insert(1, visualFloor);
-        root.Children.Insert(2, visualGrid);
+        // View controls precede the floor board for touch interaction.
+        var modeIndex = root.Children.IndexOf(modeChooser);
+        root.Children.Insert(modeIndex + 1, visualFloor);
+        root.Children.Insert(modeIndex + 2, visualGrid);
         void SelectFloorMode(string mode)
         {
             visualFloor.Visibility = mode == "floor" ? Visibility.Visible : Visibility.Collapsed;
