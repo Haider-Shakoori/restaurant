@@ -1528,7 +1528,11 @@ internal static class RestaurantOperationalPages
             }
             catch (Exception ex)
             {
-                workflowStatus.Text = ex.Message;
+                App.LogRecoverableException("restaurant-workflow-settings-save", ex);
+                // EF Core's outer message conceals the actionable SQLite
+                // problem (locked database, missing column, constraint).
+                workflowStatus.Text = "Not saved: " + ex.GetBaseException().Message +
+                    " · Your previous settings are unchanged. See local diagnostic log.";
             }
             finally
             {
