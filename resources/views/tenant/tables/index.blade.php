@@ -5,7 +5,7 @@
 @section('subheading', 'Dining areas, table capacity and live availability.')
 
 @section('content')
-    <div x-data="{ view: 'grid' }">
+    <div x-data="{ view: 'grid', status: 'all', query: '' }">
         <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div><h2 class="font-black">Dining floor</h2><p class="mt-1 text-xs text-slate-500">Tables remain occupied until the complete bill is settled.</p></div>
             <div class="flex items-center gap-1 rounded-xl bg-slate-100 p-1">
@@ -20,6 +20,23 @@
                 <span class="text-slate-500">● Disabled</span>
             </div>
         </div>
+        @php
+            $floorTables = $branches->flatMap(fn ($branch) => $branch->diningAreas->flatMap(fn ($area) => $area->tables));
+        @endphp
+        <div class="mb-5 grid gap-3 sm:grid-cols-3">
+            @foreach (['available' => 'Available', 'occupied' => 'Occupied', 'reserved' => 'Reserved'] as $state => $title)
+                <button type="button" @click="status = status === @js($state) ? 'all' : @js($state)"
+                    class="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-4 text-left shadow-sm hover:border-violet-400">
+                    <span class="font-black text-slate-700">{{ $title }}</span>
+                    <span class="text-2xl font-black text-slate-950">{{ $floorTables->where('status', $state)->count() }}</span>
+                </button>
+            @endforeach
+        </div>
+        <label class="mb-5 block">
+            <span class="sr-only">Search tables and areas</span>
+            <input type="search" x-model.debounce.120ms="query" placeholder="Find table number, name or area..."
+                class="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm shadow-sm">
+        </label>
         <div class="grid gap-6 lg:grid-cols-[1fr_22rem]">
         <div class="space-y-5">
             @forelse ($branches as $branch)
@@ -28,15 +45,16 @@
                         <div><h2 class="text-lg font-black">{{ $branch->name }}</h2><p class="text-xs text-slate-500">{{ $branch->code }}</p></div>
                         <span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{{ $branch->is_active ? 'Active' : 'Inactive' }}</span>
                     </div>
-                    <div class="mt-5 grid gap-4 md:grid-cols-2">
+                    <div class="mt-5 grid gap-4" :class="view === 'floor' ? 'grid-cols-1' : 'md:grid-cols-2'">
                         @forelse ($branch->diningAreas as $area)
-                            <div class="rounded-xl border border-slate-200 p-4">
+                            <div class="rounded-xl border border-slate-200 p-4" x-show="@js(strtolower($area->name)).includes(query.toLowerCase()) || query === '' || {{ $area->tables->count() }} > 0">
                                 <h3 class="font-bold">{{ $area->name }}</h3>
-                                <div class="mt-3 grid gap-2" :class="view === 'list' ? 'grid-cols-1' : (view === 'floor' ? 'sm:grid-cols-3' : 'sm:grid-cols-2')">
+                                <div class="mt-3 grid gap-2" :class="view === 'list' ? 'grid-cols-1' : (view === 'floor' ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4' : 'sm:grid-cols-2')">
                                     @forelse ($area->tables as $table)
-                                        <div class="rounded-xl border p-3 transition-shadow hover:shadow-md {{ $table->status === 'occupied' ? 'border-blue-200 bg-blue-50' : ($table->status === 'reserved' ? 'border-rose-200 bg-rose-50' : ($table->status === 'available' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-100')) }}">
+                                        <div x-show="(status === 'all' || status === @js($table->status)) && (@js(strtolower($table->name.' '.$table->code.' '.$area->name)).includes(query.toLowerCase()))" 
+                                            class="rounded-xl border p-3 transition-shadow hover:shadow-md {{ $table->status === 'occupied' ? 'border-blue-200 bg-blue-50' : ($table->status === 'reserved' ? 'border-rose-200 bg-rose-50' : ($table->status === 'available' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-100')) }}">
                                             <div class="flex items-center justify-between gap-2">
-                                                <span class="font-bold">{{ $table->name }}</span>
+                                                <span class="flex items-center gap-2 font-bold"><span class="text-xl" aria-hidden="true">◉</span> {{ $table->name }}</span>
                                                 <span class="rounded-full bg-white/80 px-2 py-1 text-xs font-black capitalize {{ $table->status === 'occupied' ? 'text-blue-800' : ($table->status === 'reserved' ? 'text-rose-800' : 'text-emerald-800') }}">{{ $table->status }}</span>
                                             </div>
                                             <p class="mt-1 text-xs text-slate-600">{{ $table->code }} · {{ $table->capacity }} seats</p>
