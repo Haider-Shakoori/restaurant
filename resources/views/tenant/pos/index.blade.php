@@ -9,6 +9,13 @@
         $openSessions = $sessions->where('status', 'open');
         $openBills = $bills->where('status', 'open');
     @endphp
+    @if ($errors->any())
+        <div role="alert" class="mb-5 rounded-xl border border-rose-300 bg-rose-50 p-4 text-sm text-rose-900">
+            <strong>Please review the order or payment:</strong>
+            <ul class="mt-2 list-inside list-disc">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
+        </div>
+    @endif
+    @include('tenant.pos.partials.photo-order')
     <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p class="text-xs font-black uppercase tracking-widest text-slate-500">Ready to serve</p>

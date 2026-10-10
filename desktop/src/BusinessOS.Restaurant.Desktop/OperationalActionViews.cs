@@ -32,8 +32,14 @@ internal static class OperationalActionViews
                                   table.Status == "available"
                             orderby area.SortOrder, table.Name
                             select new Choice(table.Id, $"{branch.Name} · {area.Name} · {table.Name} ({table.Code})")).ToListAsync();
-        var menu = await db.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
-            .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
+        var menu = await (
+            from item in db.MenuItems.AsNoTracking()
+            join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into groups
+            from category in groups.DefaultIfEmpty()
+            where item.IsAvailable
+            orderby item.SortOrder, item.Name
+            select new MenuChoice(item.Id, item.Name, item.Price,
+                category == null ? "Uncategorized" : category.Name, item.ImageUrl)).ToListAsync();
         var modifierChoices = await (
             from link in db.MenuItemModifierGroups.AsNoTracking()
             join modifierGroup in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals modifierGroup.Id
@@ -227,6 +233,18 @@ internal static class OperationalActionViews
         kitchenActions.Children.Add(add);
         kitchenActions.Children.Add(submit);
         form.Children.Add(kitchenActions);
+        // Every tile uses the same local order-entry action and item IDs as
+        // the original combo box, preserving modifiers, KOT rules and pricing.
+        var photoCatalog = RestaurantPhotoPosCatalog.Build(
+            menu.Select(x => new PhotoPosItem(x.Id, x.Name, x.Category, x.Price, x.ImageUrl)).ToArray(),
+            menuSearchBox,
+            item =>
+            {
+                menuBox.SelectedItem = menu.FirstOrDefault(x => x.Id == item.Id);
+                if (menuBox.SelectedItem is MenuChoice)
+                    add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            });
+        form.Children.Insert(form.Children.IndexOf(menuBox), photoCatalog);
         form.Children.Add(Label("4 · KITCHEN & ORDER ADJUSTMENTS"));
         var advancedOrderActions = new StackPanel
         {
@@ -284,6 +302,19 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
         var formCard = Card(form);
         var orderListPanel = new StackPanel();
+        orderListPanel.Children.Add(Header("CURRENT ORDER & PAYMENT",
+            "Live local cart with all KOT rounds. Confirm service before billing; the table releases only on full settlement."));
+        var currentOrderLines = new ListBox
+        {
+            Name = "PosCurrentOrderLines", MinHeight = 74, MaxHeight = 160,
+            DisplayMemberPath = "Display", Margin = new Thickness(0, 4, 0, 8),
+        };
+        var currentOrderTotal = new TextBlock { Text = "Choose a table and open an order to begin.",
+            FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 1, 0, 14),
+            TextWrapping = TextWrapping.Wrap };
+        currentOrderTotal.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        orderListPanel.Children.Add(currentOrderLines);
+        orderListPanel.Children.Add(currentOrderTotal);
         orderListPanel.Children.Add(Header("ACTIVE ORDERS",
             "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
         var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
@@ -627,6 +658,8 @@ internal static class OperationalActionViews
             {
                 selectionSummary.Text = "No order selected · Open an order or choose one from Active orders.";
                 lineBox.ItemsSource = Array.Empty<OrderLineChoice>();
+                currentOrderLines.ItemsSource = Array.Empty<OrderLineChoice>();
+                currentOrderTotal.Text = "Choose a table and open an order to begin.";
                 return;
             }
 
@@ -638,6 +671,11 @@ internal static class OperationalActionViews
                 : $"{order.ServiceType.Replace('_', ' ')} · {order.Status} · AFN {order.Total:N2} · " +
                   $"{lines.Length} line(s), {awaiting} awaiting KOT";
             lineBox.ItemsSource = lines;
+            currentOrderLines.ItemsSource = lines;
+            currentOrderTotal.Text = order is null
+                ? $"{lines.Length} line(s) on order {orderIdBox.Text}."
+                : $"{lines.Sum(x => x.Quantity)} items · AFN {order.Total:N2} · {order.Status} · " +
+                  (order.Status == "billed" ? "Collect payment to release table." : "Send KOT when ready.");
         }
 
         void UpdateOrderList()
@@ -775,8 +813,10 @@ internal static class OperationalActionViews
                 cashierCard.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
                 toggleCashier.Content = showing ? "Hide cashier & billing" : "Show cashier & billing";
             };
-            page.Children.Add(toggleCashier);
-            page.Children.Add(cashierCard);
+            // Cashier actions stay alongside the order/cart summary instead
+            // of being hidden after the entire left-column POS form.
+            orderListPanel.Children.Add(toggleCashier);
+            orderListPanel.Children.Add(cashierCard);
         }
         return new ScrollViewer
         {
@@ -836,6 +876,21 @@ internal static class OperationalActionViews
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => x.Row)
             .ToList();
+
+        // Include billed orders on table cards: paid-in-part tables must
+        // never appear ownerless or available before final settlement.
+        var allFloorOrders = (await (
+            from order in db.Orders.AsNoTracking()
+            where order.ServiceType == "dine_in" &&
+                  order.Status != "closed" && order.Status != "cancelled"
+            select new
+            {
+                Row = new TableOrderChoice(order.Id, order.ClientOrderId,
+                    order.DiningTableId, "", order.Status, order.Total),
+                order.UpdatedAtUtc,
+            }).ToListAsync())
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => x.Row).ToArray();
 
         var availableTables = rows
             .Where(x => x.Status == "available")
@@ -914,19 +969,20 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
-        // The visual floor map is the primary touch view; the detailed grid
-        // remains available without duplicating the underlying table records.
+        // List, Grid and Floor all consume the same current SQLite table rows.
+        // The Floor mode preserves dining-area grouping; Grid shows all tiles.
         grid.Visibility = Visibility.Collapsed;
-        var showTableList = Button("Show table list");
-        showTableList.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-        showTableList.Click += (_, _) =>
+        var modeChooser = new WrapPanel { Name = "DiningFloorViewModes", Margin = new Thickness(0, 4, 0, 8) };
+        var listMode = Button("List");
+        var gridMode = Button("Grid");
+        var floorMode = Button("Floor");
+        foreach (var mode in new[] { listMode, gridMode, floorMode })
         {
-            grid.Visibility = grid.Visibility == Visibility.Visible
-                ? Visibility.Collapsed : Visibility.Visible;
-            showTableList.Content = grid.Visibility == Visibility.Visible
-                ? "Hide table list" : "Show table list";
-        };
-        root.Children.Add(showTableList);
+            mode.MinWidth = 84;
+            mode.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            modeChooser.Children.Add(mode);
+        }
+        root.Children.Add(modeChooser);
         root.Children.Add(grid);
 
         var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
@@ -943,9 +999,26 @@ internal static class OperationalActionViews
             Margin = new Thickness(0, 10, 0, 0),
         };
 
-        root.Children.Insert(1, BuildVisualFloorBoard(
-            rows, activeOrders, availableTables,
-            sourceOrderBox, targetTableBox, operationStatus));
+        var visualGrid = BuildVisualFloorBoard(
+            rows, allFloorOrders, activeOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus, groupByArea: false);
+        var visualFloor = BuildVisualFloorBoard(
+            rows, allFloorOrders, activeOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus, groupByArea: true);
+        visualGrid.Visibility = Visibility.Collapsed;
+        // View controls precede the floor board for touch interaction.
+        var modeIndex = root.Children.IndexOf(modeChooser);
+        root.Children.Insert(modeIndex + 1, visualFloor);
+        root.Children.Insert(modeIndex + 2, visualGrid);
+        void SelectFloorMode(string mode)
+        {
+            visualFloor.Visibility = mode == "floor" ? Visibility.Visible : Visibility.Collapsed;
+            visualGrid.Visibility = mode == "grid" ? Visibility.Visible : Visibility.Collapsed;
+            grid.Visibility = mode == "list" ? Visibility.Visible : Visibility.Collapsed;
+        }
+        listMode.Click += (_, _) => SelectFloorMode("list");
+        gridMode.Click += (_, _) => SelectFloorMode("grid");
+        floorMode.Click += (_, _) => SelectFloorMode("floor");
 
         operations.Children.Add(Label("Transfer order"));
         var transferRow = new WrapPanel();
@@ -1876,10 +1949,12 @@ internal static class OperationalActionViews
     private static FrameworkElement BuildVisualFloorBoard(
         IReadOnlyList<TableChoice> tables,
         IReadOnlyList<TableOrderChoice> activeOrders,
+        IReadOnlyList<TableOrderChoice> transferableOrders,
         IReadOnlyList<Choice> availableTables,
         ComboBox sourceOrderBox,
         ComboBox targetTableBox,
-        TextBlock statusText)
+        TextBlock statusText,
+        bool groupByArea = true)
     {
         var floor = new StackPanel { Margin = new Thickness(0, 10, 0, 12) };
         var summary = new TextBlock
@@ -1904,7 +1979,9 @@ internal static class OperationalActionViews
             return floor;
         }
 
-        foreach (var area in tables.GroupBy(x => x.Area))
+        foreach (var area in groupByArea
+            ? tables.GroupBy(x => x.Area)
+            : tables.GroupBy(_ => "All tables"))
         {
             var areaTitle = new TextBlock
             {
@@ -1990,8 +2067,10 @@ internal static class OperationalActionViews
                 {
                     if (order is not null)
                     {
-                        sourceOrderBox.SelectedItem = order;
-                        statusText.Text = $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
+                        sourceOrderBox.SelectedItem = transferableOrders.FirstOrDefault(x => x.Id == order.Id);
+                        statusText.Text = order.Status == "billed"
+                            ? $"{table.Name} has an unpaid bill · AFN {order.Total:N2}. Open POS & Cashier and settle the balance before freeing the table."
+                            : $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
                     }
                     else if (table.Status == "available")
                     {
@@ -2289,7 +2368,10 @@ internal static class OperationalActionViews
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new System.Windows.Data.Binding(property), Width = width };
 
     private sealed record Choice(string Id, string Label);
-    private sealed record MenuChoice(string Id, string Name, decimal Price) { public string Display => $"{Name} — AFN {Price:N2}"; }
+    private sealed record MenuChoice(string Id, string Name, decimal Price, string Category, string? ImageUrl)
+    {
+        public string Display => $"{Name} — AFN {Price:N2}";
+    }
     private sealed record ModifierChoice(string MenuItemId, string OptionId, string Name, decimal PriceDelta)
     {
         public string Display => PriceDelta == 0m ? Name : $"{Name} ({PriceDelta:+0.##;-0.##} AFN)";
