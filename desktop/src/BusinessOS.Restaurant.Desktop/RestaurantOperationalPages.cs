@@ -928,8 +928,10 @@ internal static class RestaurantOperationalPages
             var dialog = new Window
             {
                 Title = "Add Ingredient",
-                Width = 450,
-                Height = 490,
+                Width = 550,
+                Height = 610,
+                MinWidth = 460,
+                MinHeight = 510,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 ResizeMode = ResizeMode.CanResize,
             };
@@ -937,8 +939,8 @@ internal static class RestaurantOperationalPages
             if (owner is not null) dialog.Owner = owner;
             var content = Stack();
             content.Margin = new Thickness(20);
-            var name = new TextBox { Height = 36 };
-            var sku = new TextBox { Height = 36 };
+            var name = new TextBox { Name = "IngredientNameInput", Height = 36 };
+            var sku = new TextBox { Name = "IngredientSkuInput", Height = 36 };
             var units = new[] { "kg", "g", "l", "ml", "pcs" };
             var unit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
             var purchaseUnit = new ComboBox { ItemsSource = units, SelectedIndex = 0, Height = 36 };
@@ -959,36 +961,102 @@ internal static class RestaurantOperationalPages
                 content.Children.Add(new TextBlock { Text = entry.Label, Margin = new Thickness(0, 8, 0, 3) });
                 content.Children.Add(entry.Input);
             }
-            var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6) };
+            var feedback = new TextBlock
+            {
+                Name = "IngredientSaveFeedback",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 10),
+            };
             content.Children.Add(feedback);
-            var save = new Button { Content = "Save Ingredient", Height = 38 };
+            var save = new Button { Content = "Save Ingredient", Height = 42 };
             save.Click += async (_, _) =>
             {
+                // Capture WPF control values on the UI thread. SQLite's
+                // "async" operations can still block on file locks; don't
+                // run initialization or SQL on the WPF dispatcher.
+                if (!save.IsEnabled) return;
+                if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(sku.Text))
+                {
+                    feedback.Text = "Enter ingredient name and SKU.";
+                    return;
+                }
+                if (!decimal.TryParse(reorder.Text, out var level) || level < 0)
+                {
+                    feedback.Text = "Enter a non-negative reorder level.";
+                    return;
+                }
+                if (!decimal.TryParse(factor.Text, out var conversion) || conversion <= 0)
+                {
+                    feedback.Text = "Enter a positive purchase-to-base unit conversion factor.";
+                    return;
+                }
+                var baseUnit = unit.SelectedItem?.ToString() ?? "kg";
+                var purchase = purchaseUnit.SelectedItem?.ToString() ?? "kg";
+                if (baseUnit == purchase && conversion != 1m)
+                {
+                    feedback.Text = "The conversion factor must be 1 when purchase and stock units match.";
+                    return;
+                }
+
+                var ingredientSku = sku.Text.Trim();
+                var ingredientName = name.Text.Trim();
+                save.IsEnabled = false;
+                save.Content = "Saving ingredient…";
+                feedback.Text = "Saving ingredient locally. Please wait…";
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 try
                 {
-                    if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(sku.Text))
-                        throw new InvalidOperationException("Enter ingredient name and SKU.");
-                    if (!decimal.TryParse(reorder.Text, out var level) || level < 0)
-                        throw new InvalidOperationException("Enter a non-negative reorder level.");
-                    if (!decimal.TryParse(factor.Text, out var conversion) || conversion <= 0)
-                        throw new InvalidOperationException("Enter a positive purchase-to-base unit conversion factor.");
-                    if (unit.SelectedItem?.ToString() == purchaseUnit.SelectedItem?.ToString() && conversion != 1m)
-                        throw new InvalidOperationException("The conversion factor must be 1 when purchase and stock units match.");
-                    save.IsEnabled = false;
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    await new LocalInventoryService(factory).CreateItemAsync(
-                        sku.Text.Trim(), name.Text.Trim(),
-                        unit.SelectedItem?.ToString() ?? "kg",
-                        purchaseUnit.SelectedItem?.ToString() ?? "kg",
-                        conversion, level, actor, CancellationToken.None);
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).CreateItemAsync(
+                            ingredientSku, ingredientName, baseUnit, purchase,
+                            conversion, level, actor, timeout.Token)
+                            .ConfigureAwait(false);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (LocalSyncConflictException ex) when (ex.Code == "inventory_item_conflict")
+                {
+                    // Duplicates are recoverable validation errors, not a
+                    // hung save. Let the operator correct the SKU in-place.
+                    feedback.Text = "SKU '" + ingredientSku.ToUpperInvariant() +
+                        "' already exists. Enter a different SKU and try again.";
+                    save.Content = "Save Ingredient";
+                    save.IsEnabled = true;
+                    sku.Focus();
+                    sku.SelectAll();
+                }
+                catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                {
+                    App.LogRecoverableException("ingredient-create-timeout", ex);
+                    feedback.Text = "The save exceeded 20 seconds. Close this form and refresh " +
+                        "Inventory to check whether the item was created before trying again.";
+                    // SQLite may have committed before the timeout signal.
+                    // Never let a blind retry create a second item/outbox row.
+                    save.Content = "Check inventory before retrying";
+                }
+                catch (Exception ex)
+                {
+                    App.LogRecoverableException("ingredient-create-save", ex);
+                    feedback.Text = "Ingredient could not be saved: " + ex.Message;
+                    save.Content = "Save Ingredient";
+                    save.IsEnabled = true;
+                }
             };
             content.Children.Add(save);
-            dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            dialog.Content = new ScrollViewer
+            {
+                Content = content,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            };
             if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created. Refresh Inventory to see it.");
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created successfully.");
+                if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
+            }
         };
         var editInventory = new Button { Content = "Edit Ingredients & Units (Online)", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
         editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
