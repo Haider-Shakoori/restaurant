@@ -156,6 +156,12 @@ internal static class RestaurantPhotoPosCatalog
             File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
             return new Uri(file);
 
+        // Standalone mode must not fetch menu photos from a remote URL.
+        // Previously downloaded pictures remain available from the private cache.
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        if (BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+            return File.Exists(file) ? new Uri(file) : null;
+
         await DownloadSlots.WaitAsync();
         try
         {
