@@ -22,6 +22,9 @@ public sealed class CloudOperationalDataClient
         AuthSession session,
         CancellationToken cancellationToken = default)
     {
+        if (DesktopOperatingMode.IsStandalone(activation))
+            throw new InvalidOperationException("Cloud bootstrap is disabled by the signed standalone license.");
+
         var baseUri = new Uri(activation.TenantBaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
