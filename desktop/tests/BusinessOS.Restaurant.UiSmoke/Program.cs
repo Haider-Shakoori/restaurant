@@ -10,6 +10,7 @@ using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop;
 using BusinessOS.Restaurant.Desktop.Appearance;
 using BusinessOS.Restaurant.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace BusinessOS.Restaurant.UiSmoke;
 
@@ -33,7 +34,7 @@ internal static class Program
 
     private static readonly string[] GalleryRoutes =
     [
-        "dashboard", "pos", "tables", "kitchen", "menu", "inventory",
+        "dashboard", "pos", "tables", "kitchen", "menu", "recipes", "inventory",
         "purchases", "expenses", "closing", "reports", "users", "settings",
     ];
 
@@ -184,6 +185,11 @@ internal static class Program
         await CheckFormAsync(app, owner, "+ Add Menu Item (Tenant)",
             "Restaurant · Catalog, Floors & Inventory", "Create", null);
 
+        // Seed only after the POS photo-card contrast smoke; that existing
+        // visual assertion intentionally tests a menu without photo tiles.
+        await SeedRecipeFixtureAsync();
+        await NavigateAsync(owner, "recipes");
+        await CheckRecipeEditorSaveAsync(app, owner);
         await NavigateAsync(owner, "inventory");
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
             "Enter ingredient name and SKU.");
@@ -243,7 +249,7 @@ internal static class Program
             "Screens use a synthetic operator and a fresh empty SQLite test database.\n" +
             "No production license or restaurant data was used.\n" +
             "The runner is not a physical 4K workstation, thermal printer, or LAN tablet.\n" +
-            "Classic and Glass contain all 12 operational navigation pages.\n" +
+            "Classic and Glass contain all 13 operational navigation pages.\n" +
             "Dialog screenshots are also captured during existing WPF smoke interactions.\n");
 
         // A reproducible in-app size avoids dependence on the hosted runner's
@@ -277,7 +283,7 @@ internal static class Program
         window.Width = 1280;
         window.Height = 800;
         await NavigateAsync(window, "dashboard");
-        Console.WriteLine("Gallery captured: 24 operational pages across Classic and Glass themes.");
+        Console.WriteLine("Gallery captured: 26 operational pages across Classic and Glass themes.");
     }
 
     private static async Task CaptureSettingsTabsAsync(MainWindow window, string themeLabel)
@@ -658,6 +664,94 @@ internal static class Program
                     $"'{dialogTitle}' reports invalid input without saving");
                 Assert(opened.IsVisible, $"'{dialogTitle}' stays open on invalid input");
             }
+        }
+        finally
+        {
+            timer.Stop();
+            if (modal?.IsVisible == true) modal.Close();
+        }
+    }
+
+    private static async Task SeedRecipeFixtureAsync()
+    {
+        // Temporary CI-only SQLite data, never copied to real tenant stores.
+        var factory = new LocalDatabaseFactory();
+        await using var db = factory.Create();
+        db.MenuItems.Add(new LocalMenuItem
+        {
+            Id = "ci-recipe-menu", Sku = "CI-RECIPE-1", Name = "CI Kabuli Pulao",
+            Price = 240m, Currency = "AFN", IsAvailable = true,
+        });
+        db.InventoryItems.Add(new LocalInventoryItem
+        {
+            Id = "ci-recipe-rice", Sku = "CI-RICE", Name = "CI Rice",
+            BaseUnit = "kg", PurchaseToBaseFactor = 1m, IsActive = true,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CheckRecipeEditorSaveAsync(
+        System.Windows.Application app, MainWindow main)
+    {
+        var create = FindButton(main, "+ Create Recipe Version")
+            ?? throw new InvalidOperationException("Recipes workspace must expose Create Recipe Version.");
+        var present = app.Windows.Cast<Window>().ToHashSet();
+        Window? modal = null;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(70) };
+        timer.Tick += (_, _) =>
+        {
+            modal = app.Windows.Cast<Window>().FirstOrDefault(window =>
+                !present.Contains(window) && window.IsVisible &&
+                window.Title == "New Recipe Version");
+            if (modal is not null) timer.Stop();
+        };
+        timer.Start();
+        _ = main.Dispatcher.BeginInvoke(new Action(() => Click(create)), DispatcherPriority.Normal);
+        try
+        {
+            await WaitUntilAsync(() => modal is not null, "recipe editor opened");
+            var opened = modal!;
+            Assert(opened.Width >= 760, "Recipe editor uses a two-column dialog");
+            Assert(FindButton(opened, "Save Recipe") is { IsEnabled: true },
+                "Recipe save button starts enabled");
+            Assert(Descendants<ListBox>(opened).Any(x => x.Name == "RecipeSelectedIngredients"),
+                "Recipe editor has a dedicated ingredients list");
+
+            await CaptureWindowAsync(opened, Path.Combine(GalleryDirectory, "dialogs", "recipe-editor-glass.png"));
+            Click(FindButton(opened, "Save Recipe")!);
+            Assert(Descendants<TextBlock>(opened).Any(text =>
+                text.Text.Contains("Select branch, menu item", StringComparison.Ordinal)),
+                "Invalid recipe does not save or close the dialog");
+
+            var branch = Descendants<ComboBox>(opened).Single(x => x.Name == "RecipeBranchInput");
+            var menu = Descendants<ComboBox>(opened).Single(x => x.Name == "RecipeMenuItemInput");
+            var ingredient = Descendants<ComboBox>(opened).Single(x => x.Name == "RecipeIngredientInput");
+            var unit = Descendants<ComboBox>(opened).Single(x => x.Name == "RecipeUnitInput");
+            branch.SelectedIndex = 0;
+            menu.SelectedIndex = 0;
+            ingredient.SelectedIndex = 0;
+            unit.SelectedItem = "g";
+            var quantity = Descendants<TextBox>(opened).Single(x => x.Name == "RecipeQuantityInput");
+            quantity.Text = "100";
+            Click(FindButton(opened, "+ Add Recipe Ingredient")!);
+
+            var selected = Descendants<ListBox>(opened).Single(x => x.Name == "RecipeSelectedIngredients");
+            Assert(selected.Items.Count == 1, "Recipe summary updates when an ingredient is added");
+            Click(FindButton(opened, "Save Recipe")!);
+            // The WPF dispatcher must remain live while the SQLite transaction
+            // executes on a background thread and completes the modal.
+            await opened.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            await WaitUntilAsync(() => !opened.IsVisible,
+                "real recipe Save finishes without freezing the desktop");
+
+            await using var database = new LocalDatabaseFactory().Create();
+            var recipes = await database.Recipes.AsNoTracking().ToArrayAsync();
+            var components = await database.RecipeItems.AsNoTracking().ToArrayAsync();
+            Assert(recipes.Length == 1, "Saving once creates exactly one recipe version");
+            Assert(components.Length == 1 && components[0].QuantityBase == 0.1m,
+                "Recipe ingredient 100 g is stored as 0.1 kg");
+            Assert(recipes[0].IsActive && recipes[0].Version == 1,
+                "New version is active and numbered correctly");
         }
         finally
         {

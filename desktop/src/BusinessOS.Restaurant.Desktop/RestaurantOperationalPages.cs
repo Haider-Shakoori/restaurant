@@ -347,6 +347,15 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Currency", nameof(MenuRow.Currency), 90));
         grid.Columns.Add(Column("Available", nameof(MenuRow.Available), 100));
         var panel = Stack();
+        panel.Margin = new Thickness(4);
+        if (!recipesOnly)
+        {
+            var overview = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+            overview.Children.Add(Card("MENU ITEMS", rows.Count.ToString()));
+            overview.Children.Add(Card("AVAILABLE", rows.Count(item => item.Available).ToString()));
+            overview.Children.Add(Card("CATEGORIES", rows.Select(item => item.Category).Distinct().Count().ToString()));
+            panel.Children.Add(overview);
+        }
         panel.Children.Add(recipesOnly
             ? Card("Recipes & Food Cost", "Review ingredient quantities, create recipe versions and preview food cost in AFN. Recipes are stored per restaurant branch.")
             : Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
@@ -436,16 +445,22 @@ internal static class RestaurantOperationalPages
             var branches = await lookup.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
             var menuItems = await lookup.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.Name).ToListAsync();
             var ingredients = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
-            var dialog = new Window { Title = "New Recipe Version", Width = 480, Height = 520, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var dialog = new Window
+            {
+                Title = "New Recipe Version", Width = 900, Height = 730,
+                MinWidth = 760, MinHeight = 660,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            dialog.SetResourceReference(Window.BackgroundProperty, "SurfaceBrush");
             var owner = System.Windows.Application.Current?.MainWindow;
             if (owner is not null) dialog.Owner = owner;
             var form = Stack();
             form.Margin = new Thickness(18);
-            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
-            var menu = new ComboBox { ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
-            var ingredient = new ComboBox { ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
-            var quantity = new TextBox { Text = "1", Height = 34 };
-            var recipeUnit = new ComboBox { Height = 34, MinWidth = 110 };
+            var branch = new ComboBox { Name = "RecipeBranchInput", ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
+            var menu = new ComboBox { Name = "RecipeMenuItemInput", ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
+            var ingredient = new ComboBox { Name = "RecipeIngredientInput", ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Name = "RecipeQuantityInput", Text = "1", Height = 34 };
+            var recipeUnit = new ComboBox { Name = "RecipeUnitInput", Height = 34, MinWidth = 110 };
             var unitHelp = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 5) };
             unitHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
             ingredient.SelectionChanged += (_, _) =>
@@ -496,29 +511,110 @@ internal static class RestaurantOperationalPages
                     ingredients.First(y => y.Id == x.InventoryItemId).BaseUnit));
             };
             form.Children.Add(add);
-            form.Children.Add(summary);
+            // The selected ingredients have their own scrollable summary column.
             var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
-            form.Children.Add(feedback);
+            var cancel = new Button { Content = "Cancel", Height = 40, MinWidth = 120 };
+            cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            var remove = new Button { Content = "Remove selected ingredient", Height = 36 };
+            remove.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             var save = new Button { Content = "Save Recipe", Height = 38 };
             save.Click += async (_, _) =>
             {
+                if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                    menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
+                {
+                    feedback.Text = "Select branch, menu item and at least one ingredient.";
+                    return;
+                }
+
+                // Microsoft.Data.Sqlite runs most async commands synchronously.
+                // Never execute its lock waits or transaction commit on the WPF
+                // dispatcher, particularly while ShowDialog runs a modal loop.
+                // Snapshot inputs and guard against repeated clicks/versions.
+                save.IsEnabled = false;
+                save.Content = "Saving recipe…";
+                cancel.IsEnabled = false;
+                add.IsEnabled = false;
+                remove.IsEnabled = false;
+                feedback.Text = "Saving recipe to local inventory. Please wait…";
+                var snapshot = components.ToArray();
+                var branchId = selectedBranch.Id;
+                var menuId = selectedMenu.Id;
+                var recipeName = selectedMenu.Name;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 try
                 {
-                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
-                        menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
-                        throw new InvalidOperationException("Select branch, menu item and at least one ingredient.");
-                    save.IsEnabled = false;
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    await new LocalInventoryService(factory).CreateRecipeVersionAsync(
-                        selectedBranch.Id, selectedMenu.Id, selectedMenu.Name, components, actor, CancellationToken.None);
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).CreateRecipeVersionAsync(
+                            branchId, menuId, recipeName, snapshot, actor, timeout.Token)
+                            .ConfigureAwait(false);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                {
+                    cancel.IsEnabled = true;
+                    App.LogRecoverableException("recipe-create-timeout", ex);
+                    feedback.Text = "Recipe save took too long. Close this window and refresh Recipes " +
+                        "to check if it was saved before trying again.";
+                    // A cancelled request may already have committed; do not let a
+                    // second click silently create an additional recipe version.
+                    save.Content = "Check saved recipes before retrying";
+                }
+                catch (Exception ex)
+                {
+                    cancel.IsEnabled = true;
+                    App.LogRecoverableException("recipe-create-save", ex);
+                    feedback.Text = "Recipe could not be confirmed: " + ex.Message +
+                        " Check existing versions before retrying.";
+                    save.Content = "Close and verify recipe versions";
+                }
             };
-            form.Children.Add(save);
-            dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            var ingredientRows = new ListBox
+            {
+                Name = "RecipeSelectedIngredients",
+                DisplayMemberPath = "Value",
+                MinHeight = 100,
+                BorderThickness = new Thickness(0),
+            };
+            ingredientRows.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
+            remove.Click += (_, _) =>
+            {
+                if (ingredientRows.SelectedItem is KeyValuePair<string, string> selected)
+                {
+                    components.RemoveAll(component => component.InventoryItemId == selected.Key);
+                    RefreshIngredients();
+                }
+            };
+            void RefreshIngredients()
+            {
+                ingredientRows.ItemsSource = components.Select(component =>
+                {
+                    var item = ingredients.First(x => x.Id == component.InventoryItemId);
+                    return new KeyValuePair<string, string>(item.Id,
+                        item.Name + "   ·   " + component.QuantityBase.ToString("0.####") + " " + item.BaseUnit);
+                }).ToList();
+                summary.Text = components.Count == 0
+                    ? "No ingredients selected yet."
+                    : components.Count + " ingredient(s) selected";
+            }
+            add.Click += (_, _) => RefreshIngredients();
+            RefreshIngredients();
+
+            cancel.Click += (_, _) => dialog.Close();
+
+            dialog.Content = BuildRecipeVersionEditor(
+                form, ingredientRows, remove, summary, feedback, save, cancel);
             if (dialog.ShowDialog() == true)
-                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Recipe version saved. Refresh Menu to view it.");
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
+                    "Recipe version saved. Refresh Recipes to view it.");
+                if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
+            }
         };
         recipeCreate.HorizontalAlignment = HorizontalAlignment.Left;
         recipeCreate.Margin = new Thickness(0, 0, 10, 10);
@@ -610,11 +706,158 @@ internal static class RestaurantOperationalPages
                     : $"{recipeRows.Count} saved version(s). Use View Recipes for ingredient quantities and units."));
             var recipeGrid = GridFor(recipeRows);
             recipeGrid.AutoGenerateColumns = true;
+            var recipeSearch = new TextBox
+            {
+                Name = "RecipesSearchBox",
+                Height = 40,
+                Margin = new Thickness(0, 6, 0, 14),
+                ToolTip = "Search by menu item, recipe or branch",
+            };
+            recipeSearch.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
+            recipeSearch.TextChanged += (_, _) =>
+            {
+                var term = recipeSearch.Text.Trim();
+                recipeGrid.ItemsSource = recipeRows.Where(row =>
+                    row.MenuItem.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                    row.Recipe.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                    row.Branch.Contains(term, StringComparison.OrdinalIgnoreCase)).ToList();
+            };
+            panel.Children.Add(new TextBlock { Text = "Search recipe versions", FontWeight = FontWeights.SemiBold });
+            panel.Children.Add(recipeSearch);
             panel.Children.Add(recipeGrid);
         }
         else
+        {
+            var menuSearch = new TextBox
+            {
+                Name = "RestaurantMenuSearchBox",
+                Height = 40,
+                Margin = new Thickness(0, 6, 0, 14),
+                ToolTip = "Search menu by item name, SKU or category",
+            };
+            menuSearch.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
+            menuSearch.TextChanged += (_, _) =>
+            {
+                var term = menuSearch.Text.Trim();
+                grid.ItemsSource = rows.Where(row =>
+                    row.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                    row.Sku.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                    row.Category.Contains(term, StringComparison.OrdinalIgnoreCase)).ToList();
+            };
+            panel.Children.Add(new TextBlock { Text = "Search items, SKUs and categories", FontWeight = FontWeights.SemiBold });
+            panel.Children.Add(menuSearch);
             panel.Children.Add(grid);
-        return Scroll(panel);
+        }
+        return Scroll(WorkspaceFrostedSurface.Wrap(panel));
+    }
+
+    /// <summary>
+    /// Two-pane recipe editor with a pinned save footer and a visible ingredient
+    /// summary. Only the editor controls scroll; saving never blocks the WPF UI.
+    /// </summary>
+    private static FrameworkElement BuildRecipeVersionEditor(
+        StackPanel form, ListBox ingredientRows, Button remove,
+        TextBlock summary, TextBlock feedback, Button save, Button cancel)
+    {
+        var layout = new Grid { Margin = new Thickness(0) };
+        layout.SetResourceReference(Panel.BackgroundProperty, "SurfaceBrush");
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var header = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        header.Children.Add(new TextBlock
+        {
+            Text = "Build a recipe", FontSize = 24,
+            FontWeight = FontWeights.Bold,
+        });
+        var subtitle = new TextBlock
+        {
+            Text = "Choose the branch and dish, then add measured ingredients. All quantities use stock base units.",
+            Margin = new Thickness(0, 5, 0, 0), TextWrapping = TextWrapping.Wrap,
+        };
+        subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        header.Children.Add(subtitle);
+        Grid.SetRow(header, 0);
+        layout.Children.Add(header);
+
+        var columns = new Grid { Margin = new Thickness(22, 0, 22, 0) };
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(11, GridUnitType.Star) });
+        columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10, GridUnitType.Star) });
+
+        var editor = new Border
+        {
+            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1),
+            Padding = new Thickness(14), Margin = new Thickness(0, 0, 8, 0),
+            Child = new ScrollViewer
+            {
+                Content = form,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+        };
+        editor.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        editor.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        columns.Children.Add(editor);
+
+        var selected = new StackPanel { Margin = new Thickness(10) };
+        selected.Children.Add(new TextBlock
+        {
+            Text = "Selected ingredients", FontSize = 17,
+            FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 8),
+        });
+        selected.Children.Add(summary);
+        selected.Children.Add(new TextBlock
+        {
+            Text = "Select a row and remove it if the amount or ingredient is incorrect.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 8),
+        });
+        var itemsPanel = new DockPanel();
+        DockPanel.SetDock(remove, Dock.Bottom);
+        remove.Margin = new Thickness(0, 10, 0, 0);
+        itemsPanel.Children.Add(remove);
+        itemsPanel.Children.Add(ingredientRows);
+
+        var selectedGrid = new Grid();
+        selectedGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        selectedGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        // Use a fixed header and a separately scrollable ingredient list.
+        Grid.SetRow(selected, 0);
+        selectedGrid.Children.Add(selected);
+        Grid.SetRow(itemsPanel, 1);
+        selectedGrid.Children.Add(itemsPanel);
+        var summaryPanel = new Border
+        {
+            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1),
+            Padding = new Thickness(16), Margin = new Thickness(8, 0, 0, 0),
+            Child = selectedGrid,
+        };
+        summaryPanel.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        summaryPanel.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        Grid.SetColumn(summaryPanel, 1);
+        columns.Children.Add(summaryPanel);
+        Grid.SetRow(columns, 1);
+        layout.Children.Add(columns);
+
+        var footer = new Grid { Margin = new Thickness(22, 14, 22, 18) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        feedback.TextWrapping = TextWrapping.Wrap;
+        feedback.VerticalAlignment = VerticalAlignment.Center;
+        feedback.Margin = new Thickness(0, 0, 16, 0);
+        Grid.SetColumn(feedback, 0);
+        footer.Children.Add(feedback);
+        cancel.Margin = new Thickness(0, 0, 10, 0);
+        Grid.SetColumn(cancel, 1);
+        footer.Children.Add(cancel);
+        save.MinWidth = 180;
+        save.Height = 40;
+        Grid.SetColumn(save, 2);
+        footer.Children.Add(save);
+        Grid.SetRow(footer, 2);
+        layout.Children.Add(footer);
+        return layout;
     }
 
     private static async Task<FrameworkElement> InventoryAsync()
