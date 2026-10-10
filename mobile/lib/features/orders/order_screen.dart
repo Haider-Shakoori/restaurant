@@ -926,16 +926,21 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _phoneBody(BuildContext context, Map<String, Object?> order) {
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return Column(
       children: [
         _categoryBar(),
-        const SizedBox(height: 10),
-        _searchBar(),
-        const SizedBox(height: 12),
-        _menuGrid(phone: true),
-        const SizedBox(height: 16),
-        _orderPanel(order),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(12),
+            children: [
+              _searchBar(),
+              const SizedBox(height: 12),
+              _menuGrid(phone: true),
+              const SizedBox(height: 16),
+              _orderPanel(order),
+            ],
+          ),
+        ),
       ],
     );
   }
