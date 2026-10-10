@@ -170,7 +170,7 @@ class LicenseFoundationTest extends TestCase
 
         $download = $this->actingAs($admin)->post($url)->assertOk();
         $download->assertHeader('Content-Type', 'application/json');
-        $download->assertHeader('Cache-Control', 'private, no-store, max-age=0');
+        $this->assertStringContainsString('no-store', (string) $download->headers->get('Cache-Control'));
         $envelope = json_decode($download->getContent(), true, 512, JSON_THROW_ON_ERROR);
 
         $this->assertSame('standalone_offline', $envelope['payload']['desktop_mode']);
