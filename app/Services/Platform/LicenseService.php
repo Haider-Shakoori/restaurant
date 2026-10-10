@@ -523,7 +523,14 @@ class LicenseService
         }
 
         $issuedAt = now();
-        $offlineLimit = $issuedAt->copy()->addDays(max(1, (int) config('license.offline_grace_days', 7)));
+        $desktopMode = $device->platform === 'windows' && $business->desktop_mode === 'standalone_offline'
+            ? 'standalone_offline'
+            : 'cloud_sync';
+        // Standalone devices never poll for renewals; sign through the paid term.
+        // Short grace stays unchanged for cloud-sync desktop and waiter phones.
+        $offlineLimit = $desktopMode === 'standalone_offline'
+            ? $access->endsAt->copy()
+            : $issuedAt->copy()->addDays(max(1, (int) config('license.offline_grace_days', 7)));
         $expiresAt = $offlineLimit->lessThan($access->endsAt)
             ? $offlineLimit
             : $access->endsAt->copy();
@@ -552,6 +559,7 @@ class LicenseService
                 'name' => $access->subscription->plan_name_snapshot,
             ],
             'features' => $access->features,
+            'desktop_mode' => $desktopMode,
             'device_limit' => $device->licenseKey->max_devices_snapshot,
             'mobile_device_limit' => $this->resolveMobileDeviceLimit($access->features),
             'issued_at' => $issuedAt->copy()->utc()->toIso8601String(),
