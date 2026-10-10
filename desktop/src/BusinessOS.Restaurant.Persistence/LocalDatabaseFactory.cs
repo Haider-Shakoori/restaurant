@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,6 +7,13 @@ namespace BusinessOS.Restaurant.Persistence;
 public sealed class LocalDatabaseFactory
 {
     private readonly string _databasePath;
+    // A page, background cloud pull and LAN waiter connection can all request
+    // schema validation at once. Never DROP/CREATE SQLite indexes concurrently
+    // with restaurant order and payment writes.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SchemaLocks =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> ReadyDatabases =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public LocalDatabaseFactory(string? rootDirectory = null)
     {
@@ -24,6 +32,7 @@ public sealed class LocalDatabaseFactory
         DataSource = _databasePath,
         ForeignKeys = true,
         Pooling = false,
+        DefaultTimeout = 30,
     }.ToString());
 
     public RestaurantDbContext Create()
@@ -35,6 +44,7 @@ public sealed class LocalDatabaseFactory
             DataSource = _databasePath,
             ForeignKeys = true,
             Pooling = false,
+        DefaultTimeout = 30,
         }.ToString();
 
         var options = new DbContextOptionsBuilder<RestaurantDbContext>()
@@ -46,13 +56,34 @@ public sealed class LocalDatabaseFactory
 
     public async Task EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
-        await using var db = Create();
-        await db.Database.EnsureCreatedAsync(cancellationToken);
-        await EnsureOrderingSchemaAsync(db, cancellationToken);
-        await EnsureMenuImageColumnAsync(cancellationToken);
-        await EnsureKotRealignmentSchemaAsync(cancellationToken);
-        await BackfillOrderServiceContextAsync(cancellationToken);
-        await BackfillLegacyKotRoundsAsync(cancellationToken);
+        if (ReadyDatabases.ContainsKey(_databasePath))
+            return;
+
+        var gate = SchemaLocks.GetOrAdd(_databasePath, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (ReadyDatabases.ContainsKey(_databasePath))
+                return;
+
+            await using var db = Create();
+            await db.Database.EnsureCreatedAsync(cancellationToken);
+            // WAL allows kitchen/phone writes and desktop read-only workspaces to
+            // coexist. Busy timeout avoids transient "database is locked" errors.
+            await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
+            await EnsureOrderingSchemaAsync(db, cancellationToken);
+            await EnsureMenuImageColumnAsync(cancellationToken);
+            await EnsureKotRealignmentSchemaAsync(cancellationToken);
+            await BackfillOrderServiceContextAsync(cancellationToken);
+            await BackfillLegacyKotRoundsAsync(cancellationToken);
+            // Mark ready only after EVERY migration and backfill succeeds.
+            // A failed upgrade must remain retryable, never silently skipped.
+            ReadyDatabases.TryAdd(_databasePath, 0);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
