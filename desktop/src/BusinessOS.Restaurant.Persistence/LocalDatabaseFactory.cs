@@ -381,116 +381,142 @@ public sealed class LocalDatabaseFactory
     {
         await using var db = Create();
 
+        // Older kitchens can still have tickets without KotRoundId, while a
+        // waiter/mobile client has already created modern round 1 for the same
+        // order. Backfilling every legacy group as round 1 would repeatedly
+        // throw UNIQUE(kot_rounds.OrderId, kot_rounds.RoundNumber) and prevent
+        // EVERY desktop workspace from loading.
         var legacyTickets = (await db.KitchenTickets
                 .Where(value => value.KotRoundId == null)
                 .ToArrayAsync(cancellationToken))
             .OrderBy(value => value.QueuedAt)
+            .ThenBy(value => value.Id, StringComparer.Ordinal)
             .ToArray();
 
-        if (legacyTickets.Length == 0)
-        {
-            return;
-        }
-
-        foreach (var group in legacyTickets.GroupBy(value => value.OrderId, StringComparer.Ordinal))
+        foreach (var orderGroup in legacyTickets.GroupBy(value => value.OrderId, StringComparer.Ordinal))
         {
             var order = await db.Orders.SingleOrDefaultAsync(
-                value => value.Id == group.Key,
-                cancellationToken);
-            if (order is null)
-            {
+                value => value.Id == orderGroup.Key, cancellationToken);
+            if (order is null || string.IsNullOrWhiteSpace(order.DiningTableId))
                 continue;
-            }
 
             var table = await db.DiningTables.SingleOrDefaultAsync(
-                value => value.Id == order.DiningTableId,
-                cancellationToken);
+                value => value.Id == order.DiningTableId, cancellationToken);
             if (table is null)
-            {
                 continue;
-            }
 
             var area = await db.DiningAreas.SingleOrDefaultAsync(
-                value => value.Id == table.DiningAreaId,
-                cancellationToken);
+                value => value.Id == table.DiningAreaId, cancellationToken);
             if (area is null)
-            {
                 continue;
-            }
 
-            var sentAt = group.Min(value => value.QueuedAt);
-            var businessDate = DateOnly.FromDateTime(sentAt.LocalDateTime);
-            var counter = await db.KotCounters.SingleOrDefaultAsync(
-                value => value.BranchId == area.BranchId && value.BusinessDate == businessDate,
-                cancellationToken);
-
-            var existingMax = await db.KotRounds
-                .Where(value => value.BranchId == area.BranchId && value.BusinessDate == businessDate)
-                .Select(value => (int?)value.DisplayNumber)
-                .MaxAsync(cancellationToken) ?? 0;
-
-            if (counter is null)
+            // A legacy order can have multiple kitchen tickets for the SAME
+            // station. A modern round only permits one ticket per station.
+            // Partition deterministically, preserving the original tickets,
+            // instead of deleting tickets or relaxing the unique constraint.
+            var batches = new List<List<LocalKitchenTicket>>();
+            var current = new List<LocalKitchenTicket>();
+            var stations = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var ticket in orderGroup)
             {
-                counter = new LocalKotCounter
+                if (!stations.Add(ticket.KitchenStationId))
                 {
+                    batches.Add(current);
+                    current = new List<LocalKitchenTicket>();
+                    stations.Clear();
+                    stations.Add(ticket.KitchenStationId);
+                }
+                current.Add(ticket);
+            }
+            if (current.Count > 0)
+                batches.Add(current);
+
+            // Keep all tickets, per-order rounds, counters and item lineage in
+            // a single transaction. If any batch fails, the whole order's
+            // backfill is retryable and NO partial KOT is persisted.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            var nextRound = (await db.KotRounds
+                .Where(value => value.OrderId == order.Id)
+                .Select(value => (int?)value.RoundNumber)
+                .MaxAsync(cancellationToken) ?? 0) + 1;
+
+            foreach (var batch in batches)
+            {
+                var sentAt = batch.Min(value => value.QueuedAt);
+                var businessDate = DateOnly.FromDateTime(sentAt.LocalDateTime);
+                var counter = await db.KotCounters.SingleOrDefaultAsync(
+                    value => value.BranchId == area.BranchId && value.BusinessDate == businessDate,
+                    cancellationToken);
+
+                var existingMax = await db.KotRounds
+                    .Where(value => value.BranchId == area.BranchId && value.BusinessDate == businessDate)
+                    .Select(value => (int?)value.DisplayNumber)
+                    .MaxAsync(cancellationToken) ?? 0;
+
+                if (counter is null)
+                {
+                    counter = new LocalKotCounter
+                    {
+                        BranchId = area.BranchId,
+                        BusinessDate = businessDate,
+                        LastNumber = existingMax,
+                        UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    };
+                    db.KotCounters.Add(counter);
+                }
+                else if (counter.LastNumber < existingMax)
+                    counter.LastNumber = existingMax;
+
+                counter.LastNumber++;
+                counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+                var kotNumber = $"KOT-{counter.LastNumber:0000}";
+                var round = new LocalKotRound
+                {
+                    Id = Guid.CreateVersion7().ToString("N"),
+                    OrderId = order.Id,
                     BranchId = area.BranchId,
+                    RoundNumber = nextRound++,
+                    DisplayNumber = counter.LastNumber,
                     BusinessDate = businessDate,
-                    LastNumber = existingMax,
-                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                    KotNumber = kotNumber,
+                    // Use the first preserved ticket's ID so the migration
+                    // cannot collide with the old legacy:{orderId} marker.
+                    MutationId = $"legacy:{order.Id}:{batch[0].Id}",
+                    SubmittedByUserId = batch[0].SubmittedByUserId,
+                    QueueEnabled = true,
+                    PreparingEnabled = true,
+                    ExpoEnabled = false,
+                    CoursesEnabled = false,
+                    SentAt = sentAt,
                 };
-                db.KotCounters.Add(counter);
+                db.KotRounds.Add(round);
+
+                var ticketIds = batch.Select(value => value.Id).ToArray();
+                foreach (var ticket in batch)
+                {
+                    ticket.KotRoundId = round.Id;
+                    ticket.RoundNumber = round.RoundNumber;
+                    ticket.KotNumber ??= kotNumber;
+                }
+
+                var kitchenItems = await db.KitchenTicketItems
+                    .Where(value => ticketIds.Contains(value.KitchenTicketId))
+                    .ToArrayAsync(cancellationToken);
+                var itemIds = kitchenItems.Select(value => value.OrderItemId).Distinct().ToArray();
+                var orderItems = await db.OrderItems
+                    .Where(value => itemIds.Contains(value.Id))
+                    .ToArrayAsync(cancellationToken);
+                foreach (var item in orderItems)
+                {
+                    // Never overwrite a live/mobile KOT association.
+                    item.KotRoundId ??= round.Id;
+                    item.RoundNumber ??= round.RoundNumber;
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
             }
-            else if (counter.LastNumber < existingMax)
-            {
-                counter.LastNumber = existingMax;
-            }
-
-            counter.LastNumber += 1;
-            counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
-
-            var kotNumber = $"KOT-{counter.LastNumber:0000}";
-            var round = new LocalKotRound
-            {
-                Id = Guid.CreateVersion7().ToString("N"),
-                OrderId = order.Id,
-                BranchId = area.BranchId,
-                RoundNumber = 1,
-                DisplayNumber = counter.LastNumber,
-                BusinessDate = businessDate,
-                KotNumber = kotNumber,
-                MutationId = $"legacy:{order.Id}",
-                SubmittedByUserId = group.First().SubmittedByUserId,
-                QueueEnabled = true,
-                PreparingEnabled = true,
-                ExpoEnabled = false,
-                CoursesEnabled = false,
-                SentAt = sentAt,
-            };
-            db.KotRounds.Add(round);
-
-            var ticketIds = group.Select(value => value.Id).ToArray();
-            foreach (var ticket in group)
-            {
-                ticket.KotRoundId = round.Id;
-                ticket.RoundNumber = 1;
-                ticket.KotNumber ??= kotNumber;
-            }
-
-            var kitchenItems = await db.KitchenTicketItems
-                .Where(value => ticketIds.Contains(value.KitchenTicketId))
-                .ToArrayAsync(cancellationToken);
-            var orderItemIds = kitchenItems.Select(value => value.OrderItemId).Distinct().ToArray();
-            var orderItems = await db.OrderItems
-                .Where(value => orderItemIds.Contains(value.Id))
-                .ToArrayAsync(cancellationToken);
-
-            foreach (var orderItem in orderItems)
-            {
-                orderItem.KotRoundId ??= round.Id;
-                orderItem.RoundNumber ??= 1;
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
     }
 
