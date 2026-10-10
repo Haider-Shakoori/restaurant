@@ -1021,8 +1021,8 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     return GridView.builder(
-      shrinkWrap: phone,
-      physics: phone ? const NeverScrollableScrollPhysics() : null,
+      // Both panes own their own viewport; the photo grid must scroll itself.
+      shrinkWrap: false,
       itemCount: items.length,
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: phone ? 220 : 250,
