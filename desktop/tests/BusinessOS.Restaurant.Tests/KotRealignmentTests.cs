@@ -1639,6 +1639,137 @@ public sealed class KotRealignmentTests
         }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Legacy_kitchen_tickets_after_mobile_round_one_upgrade_without_duplicate_rounds(
+        int legacyTicketCount)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var now = DateTimeOffset.UtcNow;
+            var day = DateOnly.FromDateTime(now.LocalDateTime);
+
+            await using (var db = factory.Create())
+            {
+                db.Orders.Add(new LocalOrder
+                {
+                    Id = "mixed-order", ClientOrderId = "MOBILE-ORDER",
+                    DiningTableId = "table-1", BranchId = "branch-1",
+                    WaiterId = 1, WaiterPublicId = "waiter-1", WaiterName = "Waiter One",
+                    Status = "submitted", GuestCount = 3,
+                    Subtotal = 470m, Total = 470m,
+                    CreatedAtUtc = now, UpdatedAtUtc = now,
+                });
+                db.KotRounds.Add(new LocalKotRound
+                {
+                    Id = "mobile-round-1", OrderId = "mixed-order",
+                    BranchId = "branch-1", RoundNumber = 1, DisplayNumber = 1,
+                    BusinessDate = day, KotNumber = "KOT-0001",
+                    MutationId = "ANDROID-KOT-1", SubmittedByUserId = 1,
+                    QueueEnabled = true, PreparingEnabled = true, SentAt = now,
+                });
+                db.KotCounters.Add(new LocalKotCounter
+                {
+                    BranchId = "branch-1", BusinessDate = day,
+                    LastNumber = 1, UpdatedAtUtc = now,
+                });
+                db.OrderItems.Add(new LocalOrderItem
+                {
+                    Id = "modern-line", OrderId = "mixed-order",
+                    MenuItemId = "item-grill", ClientLineId = "modern-client-line",
+                    ItemName = "Grilled Chicken", UnitPrice = 350m,
+                    Quantity = 1, LineTotal = 350m, Status = "submitted",
+                    KotRoundId = "mobile-round-1", RoundNumber = 1,
+                    CreatedAtUtc = now, UpdatedAtUtc = now,
+                });
+                db.KitchenTickets.Add(new LocalKitchenTicket
+                {
+                    Id = "mobile-ticket", OrderId = "mixed-order",
+                    KitchenStationId = "station-grill", KotRoundId = "mobile-round-1",
+                    RoundNumber = 1, SubmittedByUserId = 1,
+                    TicketNumber = "MOBILE-1", KotNumber = "KOT-0001",
+                    Status = "queued", QueuedAt = now, CreatedAtUtc = now,
+                    UpdatedAtUtc = now,
+                });
+
+                for (var n = 0; n < legacyTicketCount; n++)
+                {
+                    var itemId = $"legacy-line-{n}";
+                    var ticketId = $"legacy-ticket-{n}";
+                    db.OrderItems.Add(new LocalOrderItem
+                    {
+                        Id = itemId, OrderId = "mixed-order", MenuItemId = "item-general",
+                        ClientLineId = $"legacy-client-{n}", ItemName = "Salad",
+                        UnitPrice = 60m, Quantity = 1, LineTotal = 60m,
+                        Status = "submitted", CreatedAtUtc = now, UpdatedAtUtc = now,
+                    });
+                    // Same station appears more than once in old KOT data.
+                    // A single modern round cannot contain both tickets.
+                    db.KitchenTickets.Add(new LocalKitchenTicket
+                    {
+                        Id = ticketId, OrderId = "mixed-order",
+                        KitchenStationId = "station-grill", KotRoundId = null,
+                        RoundNumber = 1, SubmittedByUserId = 1,
+                        TicketNumber = $"LEGACY-{n}", Status = "queued",
+                        QueuedAt = now.AddMinutes(n + 1),
+                        CreatedAtUtc = now, UpdatedAtUtc = now,
+                    });
+                    db.KitchenTicketItems.Add(new LocalKitchenTicketItem
+                    {
+                        Id = $"kitchen-line-{n}", KitchenTicketId = ticketId,
+                        OrderItemId = itemId, ItemName = "Salad",
+                        Quantity = 1, Status = "queued",
+                    });
+                }
+                await db.SaveChangesAsync();
+                // Simulate a database opened after an application upgrade:
+                // force SQLite schema-version revalidation without deleting data.
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE INDEX IF NOT EXISTS IX_test_legacy_repair_1 ON orders (CreatedAtUtc);");
+            }
+
+            await factory.EnsureCreatedAsync();
+            await using (var db = factory.Create())
+            {
+                var rounds = await db.KotRounds.OrderBy(x => x.RoundNumber).ToArrayAsync();
+                Assert.Equal(1 + legacyTicketCount, rounds.Length);
+                Assert.Equal(Enumerable.Range(1, 1 + legacyTicketCount),
+                    rounds.Select(x => x.RoundNumber));
+                Assert.Equal("mobile-round-1", rounds[0].Id);
+                Assert.Equal("ANDROID-KOT-1", rounds[0].MutationId);
+                Assert.Equal(1 + legacyTicketCount, (await db.KotCounters.SingleAsync()).LastNumber);
+
+                var tickets = await db.KitchenTickets.OrderBy(x => x.TicketNumber).ToArrayAsync();
+                Assert.Equal(legacyTicketCount + 1, tickets.Length);
+                Assert.All(tickets, x => Assert.NotNull(x.KotRoundId));
+                Assert.All(tickets.Where(x => x.Id.StartsWith("legacy-", StringComparison.Ordinal)),
+                    x => Assert.True(x.RoundNumber > 1));
+
+                var original = await db.OrderItems.SingleAsync(x => x.Id == "modern-line");
+                Assert.Equal("mobile-round-1", original.KotRoundId);
+                Assert.Equal(350m, original.UnitPrice);
+                Assert.Equal(350m, original.LineTotal);
+                Assert.Equal(470m, (await db.Orders.SingleAsync()).Total);
+                Assert.Equal(legacyTicketCount + 1, await db.KitchenTickets.CountAsync());
+            }
+
+            // Re-running a schema upgrade cannot duplicate or change KOT IDs.
+            await using (var db = factory.Create())
+                await db.Database.ExecuteSqlRawAsync(
+                    "CREATE INDEX IF NOT EXISTS IX_test_legacy_repair_2 ON orders (UpdatedAtUtc);");
+            await factory.EnsureCreatedAsync();
+            await using var verified = factory.Create();
+            Assert.Equal(1 + legacyTicketCount, await verified.KotRounds.CountAsync());
+            Assert.Equal(legacyTicketCount + 1, await verified.KitchenTickets.CountAsync());
+            Assert.Equal(470m, (await verified.Orders.SingleAsync()).Total);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
