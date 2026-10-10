@@ -32,7 +32,7 @@ public sealed class OperatorShellWiringTests
         var navigation = xaml.Descendants()
             .Where(x => x.Name.LocalName == "Button" && x.Attribute("CommandParameter") is not null)
             .ToArray();
-        Assert.Equal(12, navigation.Length);
+        Assert.Equal(13, navigation.Length); // Recipes is an owner/manager workspace.
         foreach (var button in navigation)
         {
             var visibility = (string?)button.Attribute("Visibility");
