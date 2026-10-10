@@ -51,7 +51,8 @@ public sealed class CloudReconciliationProcessor : IAsyncDisposable
                     var activation = await _activationStore.LoadAsync(cancellationToken);
                     var session = await _sessionStore.LoadAsync(cancellationToken);
 
-                    if (activation is not null && session is not null)
+                    if (activation is not null && session is not null &&
+                        DesktopOperatingMode.CloudAllowed(activation, settings))
                     {
                         await _service.RunOnceAsync(activation, session, cancellationToken);
 
