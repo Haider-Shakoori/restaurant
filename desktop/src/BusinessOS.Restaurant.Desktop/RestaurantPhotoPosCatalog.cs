@@ -152,13 +152,15 @@ internal static class RestaurantPhotoPosCatalog
             "BusinessOS", "Restaurant", "menu-photos");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
         var file = Path.Combine(root, hash + ".img");
-        if (File.Exists(file) && new FileInfo(file).Length > 0)
+        if (File.Exists(file) && new FileInfo(file).Length > 0 &&
+            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
             return new Uri(file);
 
         await DownloadSlots.WaitAsync();
         try
         {
-            if (File.Exists(file) && new FileInfo(file).Length > 0)
+            if (File.Exists(file) && new FileInfo(file).Length > 0 &&
+            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
                 return new Uri(file);
             using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
             { Timeout = TimeSpan.FromSeconds(8) };
