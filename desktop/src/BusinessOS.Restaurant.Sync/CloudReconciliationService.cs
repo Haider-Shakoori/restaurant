@@ -33,6 +33,11 @@ public sealed class CloudReconciliationService
         AuthSession session,
         CancellationToken cancellationToken = default)
     {
+        // Defense in depth: never mutate local outbox state or issue HTTP for
+        // a signed standalone license, even if a caller bypasses the worker.
+        if (DesktopOperatingMode.IsStandalone(activation))
+            throw new InvalidOperationException("Standalone transactions must not be synchronized to the cloud.");
+
         if (!string.Equals(
                 activation.Snapshot.TenantId,
                 session.TenantId,
