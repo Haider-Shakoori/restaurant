@@ -1390,34 +1390,51 @@ internal static class RestaurantOperationalPages
             LocalReceivePurchaseOrderLineRequest[]? pendingReceiptLines = null;
             save.Click += async (_, _) =>
             {
+                if (!save.IsEnabled) return;
                 try
                 {
                     if (branch.SelectedItem is not LocalBranch selectedBranch ||
                         supplier.SelectedItem is not LocalSupplier selectedSupplier || purchaseLines.Count == 0)
                         throw new InvalidOperationException("Select branch, supplier and at least one purchase line.");
+
+                    var branchId = selectedBranch.Id;
+                    var supplierId = selectedSupplier.Id;
+                    var frozenLines = purchaseLines
+                        .Select(x => new LocalPurchaseOrderLineRequest(x.Item.Id, x.Quantity, x.UnitCost))
+                        .ToArray();
+                    var requested = purchaseLines.Select(x => (x.Item.Id, x.Quantity)).ToArray();
                     save.IsEnabled = false;
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    var inventoryService = new LocalInventoryService(factory);
+                    save.Content = pendingPurchaseId is null ? "Creating purchase…" : "Receiving stock…";
+                    feedback.Text = "Recording purchase and receipt in the local ledger…";
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+
                     if (pendingPurchaseId is null)
                     {
-                        var created = await inventoryService.CreatePurchaseOrderAsync(
-                            selectedBranch.Id, selectedSupplier.Id,
-                            purchaseLines.Select(x => new LocalPurchaseOrderLineRequest(x.Item.Id, x.Quantity, x.UnitCost)).ToArray(),
-                            "Desktop one-step purchase", actor, CancellationToken.None);
-                        var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
-                        var savedPurchaseId = snapshot.GetProperty("id").GetString()
-                            ?? throw new InvalidOperationException("Purchase order ID was not returned.");
-                        var returnedLines = snapshot.GetProperty("lines").EnumerateArray().ToArray();
-                        var savedReceiptLines = purchaseLines.Select(line =>
+                        // Two-step transaction: never generate another PO when
+                        // receiving an already-created purchase needs a retry.
+                        var result = await Task.Run(async () =>
                         {
-                            var savedLine = returnedLines.Single(x =>
-                                x.GetProperty("inventory_item_id").GetString() == line.Item.Id);
-                            var savedId = savedLine.GetProperty("id").GetString()
-                                ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
-                            return new LocalReceivePurchaseOrderLineRequest(savedId, line.Quantity);
-                        }).ToArray();
-                        pendingPurchaseId = savedPurchaseId;
-                        pendingReceiptLines = savedReceiptLines;
+                            var actor = await new DesktopRestaurantWorkflowService()
+                                .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                            var created = await new LocalInventoryService(factory).CreatePurchaseOrderAsync(
+                                branchId, supplierId, frozenLines,
+                                "Desktop one-step purchase", actor, timeout.Token).ConfigureAwait(false);
+                            var snapshot = System.Text.Json.JsonSerializer.SerializeToElement(created);
+                            var id = snapshot.GetProperty("id").GetString()
+                                ?? throw new InvalidOperationException("Purchase order ID was not returned.");
+                            var returned = snapshot.GetProperty("lines").EnumerateArray().ToArray();
+                            var receipts = requested.Select(line =>
+                            {
+                                var savedLine = returned.Single(x =>
+                                    x.GetProperty("inventory_item_id").GetString() == line.Id);
+                                var savedId = savedLine.GetProperty("id").GetString()
+                                    ?? throw new InvalidOperationException("Purchase order line ID was not returned.");
+                                return new LocalReceivePurchaseOrderLineRequest(savedId, line.Quantity);
+                            }).ToArray();
+                            return (Id: id, Lines: receipts);
+                        }, timeout.Token).WaitAsync(timeout.Token);
+                        pendingPurchaseId = result.Id;
+                        pendingReceiptLines = result.Lines;
                         branch.IsEnabled = false;
                         supplier.IsEnabled = false;
                         item.IsEnabled = false;
@@ -1426,15 +1443,34 @@ internal static class RestaurantOperationalPages
                         addLine.IsEnabled = false;
                     }
 
-                    await inventoryService.ReceivePurchaseOrderAsync(pendingPurchaseId,
-                        pendingReceiptLines!, "desktop-receipt-" + pendingPurchaseId,
-                        "Received through desktop purchase form", actor, CancellationToken.None);
+                    var idToReceive = pendingPurchaseId!;
+                    var linesToReceive = pendingReceiptLines!;
+                    save.Content = "Receiving stock…";
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).ReceivePurchaseOrderAsync(
+                            idToReceive, linesToReceive, "desktop-receipt-" + idToReceive,
+                            "Received through desktop purchase form", actor, timeout.Token)
+                            .ConfigureAwait(false);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    App.LogRecoverableException("purchase-receive-timeout", ex);
+                    feedback.Text = "Purchase/receipt took too long. Close this form and inspect the purchase " +
+                        "and stock ledgers before retrying. An operation may already have committed.";
+                    save.Content = "Verify purchase and receipt before retrying";
+                    // Do not enable an ambiguous financial retry.
                 }
                 catch (Exception ex)
                 {
+                    App.LogRecoverableException("purchase-receive-save", ex);
                     feedback.Text = (pendingPurchaseId is null ? "" :
                         "Purchase order already saved. Retry receiving; do not create a duplicate. ") + ex.Message;
+                    save.Content = pendingPurchaseId is null ? "Create PO and Receive Stock" : "Retry receiving stock";
                     save.IsEnabled = true;
                 }
             };
@@ -1474,35 +1510,65 @@ internal static class RestaurantOperationalPages
             var receiptKey = "desktop-pending-" + Guid.NewGuid().ToString("N");
             save.Click += async (_, _) =>
             {
+                if (!save.IsEnabled) return;
                 try
                 {
                     if (selected.SelectedItem is not LocalPurchaseOrder po)
                         throw new InvalidOperationException("Select a purchase order.");
 
+                    var orderId = po.Id;
                     save.IsEnabled = false;
+                    save.Content = "Receiving outstanding stock…";
+                    feedback.Text = "Updating stock balances locally…";
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                     if (pendingId is null)
                     {
-                        await using var lineDb = factory.Create();
-                        var lines = await lineDb.PurchaseOrderLines.AsNoTracking()
-                            .Where(x => x.PurchaseOrderId == po.Id).ToListAsync();
-                        if (lines.Any(x => x.ConversionFactor <= 0))
-                            throw new InvalidOperationException("Invalid purchase unit conversion.");
-                        var outstanding = lines.Where(x => x.OrderedBaseQuantity > x.ReceivedBaseQuantity).ToList();
-                        if (outstanding.Count == 0)
-                            throw new InvalidOperationException("No outstanding quantities on this purchase.");
-                        receiptLines = outstanding.Select(x => new LocalReceivePurchaseOrderLineRequest(
-                            x.Id, (x.OrderedBaseQuantity - x.ReceivedBaseQuantity) / x.ConversionFactor)).ToArray();
-                        pendingId = po.Id;
+                        var calculated = await Task.Run(async () =>
+                        {
+                            await using var lineDb = factory.Create();
+                            var lines = await lineDb.PurchaseOrderLines.AsNoTracking()
+                                .Where(x => x.PurchaseOrderId == orderId)
+                                .ToListAsync(timeout.Token).ConfigureAwait(false);
+                            if (lines.Any(x => x.ConversionFactor <= 0))
+                                throw new InvalidOperationException("Invalid purchase unit conversion.");
+                            var outstanding = lines.Where(x => x.OrderedBaseQuantity > x.ReceivedBaseQuantity).ToList();
+                            if (outstanding.Count == 0)
+                                throw new InvalidOperationException("No outstanding quantities on this purchase.");
+                            return outstanding.Select(x => new LocalReceivePurchaseOrderLineRequest(
+                                x.Id, (x.OrderedBaseQuantity - x.ReceivedBaseQuantity) / x.ConversionFactor)).ToArray();
+                        }, timeout.Token).WaitAsync(timeout.Token);
+                        receiptLines = calculated;
+                        pendingId = orderId;
                         selected.IsEnabled = false;
                     }
 
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    await new LocalInventoryService(factory).ReceivePurchaseOrderAsync(
-                        pendingId, receiptLines!, receiptKey,
-                        "Outstanding purchase received through desktop", actor, CancellationToken.None);
+                    var idToReceive = pendingId!;
+                    var linesToReceive = receiptLines!;
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).ReceivePurchaseOrderAsync(
+                            idToReceive, linesToReceive, receiptKey,
+                            "Outstanding purchase received through desktop", actor, timeout.Token)
+                            .ConfigureAwait(false);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (OperationCanceledException ex)
+                {
+                    App.LogRecoverableException("pending-receipt-timeout", ex);
+                    feedback.Text = "Receipt timed out. Close and inspect goods receipts and stock before " +
+                        "trying again. Do not post a duplicate receipt.";
+                    save.Content = "Verify receipt before retrying";
+                }
+                catch (Exception ex)
+                {
+                    App.LogRecoverableException("pending-receipt-save", ex);
+                    feedback.Text = ex.Message;
+                    save.Content = "Receive Remaining Stock";
+                    save.IsEnabled = true;
+                }
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
