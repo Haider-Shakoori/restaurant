@@ -75,6 +75,32 @@ class LicenseController extends Controller
         ));
     }
 
+    public function desktopMode(Business $business): RedirectResponse
+    {
+        $mode = request()->validate([
+            'desktop_mode' => ['required', 'in:cloud_sync,standalone_offline'],
+        ])['desktop_mode'];
+
+        $previous = $business->desktop_mode ?? 'cloud_sync';
+        if ($previous === $mode) {
+            return back()->with('status', 'Desktop operating mode is already '.$mode.'.');
+        }
+
+        $business->update(['desktop_mode' => $mode]);
+
+        \App\Models\LicenseEvent::create([
+            'business_id' => $business->id,
+            'admin_user_id' => request()->user()->id,
+            'event' => 'desktop.mode.updated',
+            'message' => 'Desktop operating mode changed from '.$previous.' to '.$mode.'.',
+            'context' => ['previous' => $previous, 'next' => $mode],
+            'occurred_at' => now(),
+        ]);
+
+        return back()->with('status',
+            'Desktop mode updated. The Windows desktop must refresh its signed license while online to apply the change. Existing offline licenses cannot be remotely changed until refreshed or expired.');
+    }
+
     public function generate(
         Business $business,
         LicenseService $licenses,
