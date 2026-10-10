@@ -32,8 +32,14 @@ internal static class OperationalActionViews
                                   table.Status == "available"
                             orderby area.SortOrder, table.Name
                             select new Choice(table.Id, $"{branch.Name} · {area.Name} · {table.Name} ({table.Code})")).ToListAsync();
-        var menu = await db.MenuItems.AsNoTracking().Where(x => x.IsAvailable).OrderBy(x => x.SortOrder).ThenBy(x => x.Name)
-            .Select(x => new MenuChoice(x.Id, x.Name, x.Price)).ToListAsync();
+        var menu = await (
+            from item in db.MenuItems.AsNoTracking()
+            join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into groups
+            from category in groups.DefaultIfEmpty()
+            where item.IsAvailable
+            orderby item.SortOrder, item.Name
+            select new MenuChoice(item.Id, item.Name, item.Price,
+                category == null ? "Uncategorized" : category.Name, item.ImageUrl)).ToListAsync();
         var modifierChoices = await (
             from link in db.MenuItemModifierGroups.AsNoTracking()
             join modifierGroup in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals modifierGroup.Id
@@ -227,6 +233,18 @@ internal static class OperationalActionViews
         kitchenActions.Children.Add(add);
         kitchenActions.Children.Add(submit);
         form.Children.Add(kitchenActions);
+        // Every tile uses the same local order-entry action and item IDs as
+        // the original combo box, preserving modifiers, KOT rules and pricing.
+        var photoCatalog = RestaurantPhotoPosCatalog.Build(
+            menu.Select(x => new PhotoPosItem(x.Id, x.Name, x.Category, x.Price, x.ImageUrl)).ToArray(),
+            menuSearchBox,
+            item =>
+            {
+                menuBox.SelectedItem = menu.FirstOrDefault(x => x.Id == item.Id);
+                if (menuBox.SelectedItem is MenuChoice)
+                    add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            });
+        form.Children.Insert(form.Children.IndexOf(menuBox), photoCatalog);
         form.Children.Add(Label("4 · KITCHEN & ORDER ADJUSTMENTS"));
         var advancedOrderActions = new StackPanel
         {
@@ -284,6 +302,19 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Total AFN", nameof(OrderChoice.Total), 120));
         var formCard = Card(form);
         var orderListPanel = new StackPanel();
+        orderListPanel.Children.Add(Header("CURRENT ORDER & PAYMENT",
+            "Live local cart with all KOT rounds. Confirm service before billing; the table releases only on full settlement."));
+        var currentOrderLines = new ListBox
+        {
+            Name = "PosCurrentOrderLines", MinHeight = 74, MaxHeight = 160,
+            DisplayMemberPath = "Display", Margin = new Thickness(0, 4, 0, 8),
+        };
+        var currentOrderTotal = new TextBlock { Text = "Choose a table and open an order to begin.",
+            FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 1, 0, 14),
+            TextWrapping = TextWrapping.Wrap };
+        currentOrderTotal.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        orderListPanel.Children.Add(currentOrderLines);
+        orderListPanel.Children.Add(currentOrderTotal);
         orderListPanel.Children.Add(Header("ACTIVE ORDERS",
             "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
         var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
@@ -627,6 +658,8 @@ internal static class OperationalActionViews
             {
                 selectionSummary.Text = "No order selected · Open an order or choose one from Active orders.";
                 lineBox.ItemsSource = Array.Empty<OrderLineChoice>();
+                currentOrderLines.ItemsSource = Array.Empty<OrderLineChoice>();
+                currentOrderTotal.Text = "Choose a table and open an order to begin.";
                 return;
             }
 
@@ -638,6 +671,11 @@ internal static class OperationalActionViews
                 : $"{order.ServiceType.Replace('_', ' ')} · {order.Status} · AFN {order.Total:N2} · " +
                   $"{lines.Length} line(s), {awaiting} awaiting KOT";
             lineBox.ItemsSource = lines;
+            currentOrderLines.ItemsSource = lines;
+            currentOrderTotal.Text = order is null
+                ? $"{lines.Length} line(s) on order {orderIdBox.Text}."
+                : $"{lines.Sum(x => x.Quantity)} items · AFN {order.Total:N2} · {order.Status} · " +
+                  (order.Status == "billed" ? "Collect payment to release table." : "Send KOT when ready.");
         }
 
         void UpdateOrderList()
@@ -775,8 +813,10 @@ internal static class OperationalActionViews
                 cashierCard.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
                 toggleCashier.Content = showing ? "Hide cashier & billing" : "Show cashier & billing";
             };
-            page.Children.Add(toggleCashier);
-            page.Children.Add(cashierCard);
+            // Cashier actions stay alongside the order/cart summary instead
+            // of being hidden after the entire left-column POS form.
+            orderListPanel.Children.Add(toggleCashier);
+            orderListPanel.Children.Add(cashierCard);
         }
         return new ScrollViewer
         {
@@ -2289,7 +2329,10 @@ internal static class OperationalActionViews
     private static DataGridTextColumn Column(string header, string property, double width) => new() { Header = header, Binding = new System.Windows.Data.Binding(property), Width = width };
 
     private sealed record Choice(string Id, string Label);
-    private sealed record MenuChoice(string Id, string Name, decimal Price) { public string Display => $"{Name} — AFN {Price:N2}"; }
+    private sealed record MenuChoice(string Id, string Name, decimal Price, string Category, string? ImageUrl)
+    {
+        public string Display => $"{Name} — AFN {Price:N2}";
+    }
     private sealed record ModifierChoice(string MenuItemId, string OptionId, string Name, decimal PriceDelta)
     {
         public string Display => PriceDelta == 0m ? Name : $"{Name} ({PriceDelta:+0.##;-0.##} AFN)";
