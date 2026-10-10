@@ -151,18 +151,6 @@ internal static class Program
                 Name = "CI Main Branch (cached)",
                 IsActive = true,
             });
-            // A minimal, isolated menu and ingredient set proves actual
-            // recipe saving from the WPF modal without production data.
-            database.MenuItems.Add(new LocalMenuItem
-            {
-                Id = "ci-recipe-menu", Sku = "CI-RECIPE-1", Name = "CI Kabuli Pulao",
-                Price = 240m, Currency = "AFN", IsAvailable = true,
-            });
-            database.InventoryItems.Add(new LocalInventoryItem
-            {
-                Id = "ci-recipe-rice", Sku = "CI-RICE", Name = "CI Rice",
-                BaseUnit = "kg", PurchaseToBaseFactor = 1m, IsActive = true,
-            });
             await database.SaveChangesAsync();
         }
 
@@ -197,6 +185,9 @@ internal static class Program
         await CheckFormAsync(app, owner, "+ Add Menu Item (Tenant)",
             "Restaurant · Catalog, Floors & Inventory", "Create", null);
 
+        // Seed only after the POS photo-card contrast smoke; that existing
+        // visual assertion intentionally tests a menu without photo tiles.
+        await SeedRecipeFixtureAsync();
         await NavigateAsync(owner, "recipes");
         await CheckRecipeEditorSaveAsync(app, owner);
         await NavigateAsync(owner, "inventory");
@@ -679,6 +670,24 @@ internal static class Program
             timer.Stop();
             if (modal?.IsVisible == true) modal.Close();
         }
+    }
+
+    private static async Task SeedRecipeFixtureAsync()
+    {
+        // Temporary CI-only SQLite data, never copied to real tenant stores.
+        var factory = new LocalDatabaseFactory();
+        await using var db = factory.Create();
+        db.MenuItems.Add(new LocalMenuItem
+        {
+            Id = "ci-recipe-menu", Sku = "CI-RECIPE-1", Name = "CI Kabuli Pulao",
+            Price = 240m, Currency = "AFN", IsAvailable = true,
+        });
+        db.InventoryItems.Add(new LocalInventoryItem
+        {
+            Id = "ci-recipe-rice", Sku = "CI-RICE", Name = "CI Rice",
+            BaseUnit = "kg", PurchaseToBaseFactor = 1m, IsActive = true,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task CheckRecipeEditorSaveAsync(
