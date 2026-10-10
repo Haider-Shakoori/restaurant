@@ -13,7 +13,10 @@ public sealed class VisualFloorBoardTests
         Assert.Contains("BuildVisualFloorBoard(", source);
         Assert.Contains("tables.GroupBy(x => x.Area)", source);
         Assert.Contains("activeOrders.FirstOrDefault(x => x.TableId == table.Id)", source);
-        Assert.Contains("sourceOrderBox.SelectedItem = order", source);
+        Assert.Contains("sourceOrderBox.SelectedItem = activeOrders.FirstOrDefault", source);
+        Assert.Contains("order.Status == \"billed\"", source);
+        Assert.Contains("DiningFloorViewModes", source);
+        Assert.Contains("SelectFloorMode(\"list\")", source);
         Assert.Contains("targetTableBox.SelectedItem = availableTables.FirstOrDefault", source);
         Assert.Contains("grid.Visibility = Visibility.Collapsed", source);
 
