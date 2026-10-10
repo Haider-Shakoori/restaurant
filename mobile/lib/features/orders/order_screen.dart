@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_strings.dart';
 import '../../app/dependencies.dart';
 import '../../core/models/session_credentials.dart';
+import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
 
 class OrderScreen extends StatefulWidget {
@@ -899,12 +900,13 @@ class _OrderScreenState extends State<OrderScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(width: 160, child: _categoryRail()),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
             child: Column(
               children: [
+                _categoryBar(),
+                const SizedBox(height: 12),
                 _searchBar(),
                 const SizedBox(height: 12),
                 Expanded(child: _menuGrid()),
@@ -927,24 +929,7 @@ class _OrderScreenState extends State<OrderScreen> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        SizedBox(
-          height: 46,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-              _categoryChip('All', null),
-              ..._categories.map(
-                (category) => Padding(
-                  padding: const EdgeInsetsDirectional.only(start: 8),
-                  child: _categoryChip(
-                    category['name']!.toString(),
-                    category['id']!.toString(),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+        _categoryBar(),
         const SizedBox(height: 10),
         _searchBar(),
         const SizedBox(height: 12),
@@ -952,6 +937,14 @@ class _OrderScreenState extends State<OrderScreen> {
         const SizedBox(height: 16),
         _orderPanel(order),
       ],
+    );
+  }
+
+  Widget _categoryBar() {
+    return MenuCategoryTopBar(
+      categories: _categories,
+      selectedCategoryId: _selectedCategoryId,
+      onSelected: (id) => setState(() => _selectedCategoryId = id),
     );
   }
 
@@ -969,76 +962,6 @@ class _OrderScreenState extends State<OrderScreen> {
           borderSide: BorderSide.none,
         ),
       ),
-    );
-  }
-
-  Widget _categoryRail() {
-    return Container(
-      color: const Color(0xFFF8F9FA),
-      padding: const EdgeInsets.all(10),
-      child: ListView(
-        children: [
-          _railTile('All Items', null, Icons.grid_view_rounded),
-          const SizedBox(height: 8),
-          ..._categories.map(
-            (category) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _railTile(
-                category['name']!.toString(),
-                category['id']!.toString(),
-                Icons.restaurant_menu_rounded,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _railTile(String label, String? id, IconData icon) {
-    final selected = _selectedCategoryId == id;
-
-    return Material(
-      color: selected ? const Color(0xFF171B20) : Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: () => setState(() => _selectedCategoryId = id),
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 20,
-                color: selected ? const Color(0xFFFFD96B) : Colors.black54,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? Colors.white : const Color(0xFF34383D),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _categoryChip(String label, String? id) {
-    return ChoiceChip(
-      selected: _selectedCategoryId == id,
-      onSelected: (_) => setState(() => _selectedCategoryId = id),
-      label: Text(label),
-      selectedColor: const Color(0xFFFFD96B),
-      backgroundColor: Colors.white,
-      side: BorderSide.none,
     );
   }
 
