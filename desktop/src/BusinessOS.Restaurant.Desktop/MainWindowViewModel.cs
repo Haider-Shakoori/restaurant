@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool CanViewTables => CanView("tables");
     public bool CanViewKitchen => CanView("kitchen");
     public bool CanViewMenu => CanView("menu");
+    public bool CanViewRecipes => CanView("recipes");
     public bool CanViewInventory => CanView("inventory");
     public bool CanViewPurchases => CanView("purchases");
     public bool CanViewExpenses => CanView("expenses");
@@ -252,6 +253,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             "tables" => ("Tables & Floor", "Live table occupancy and dining areas"),
             "kitchen" => ("Kitchen / KOT", "Kitchen tickets and preparation status"),
             "menu" => ("Menu & Products", "Menu catalog and availability"),
+            "recipes" => ("Recipes & Food Cost", "Ingredient recipes, units and recipe margins"),
             "inventory" => ("Inventory", "Ingredients, stock and recipe consumption"),
             "purchases" => ("Purchases", "Suppliers, purchase orders and receiving"),
             "expenses" => ("Expenses", "Restaurant operating expenses"),

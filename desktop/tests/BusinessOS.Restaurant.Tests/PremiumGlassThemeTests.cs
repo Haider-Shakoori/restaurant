@@ -103,6 +103,37 @@ public sealed class PremiumGlassThemeTests
     }
 
     [Fact]
+    public void Dining_floor_has_accessible_layered_glass_and_classic_fallback()
+    {
+        var classic = Load("Themes", "Classic.xaml");
+        var glass = Load("Themes", "Glass.xaml");
+        foreach (var resource in new[]
+        {
+            "FloorAreaBackgroundBrush", "FloorTileBackgroundBrush", "FloorTileBorderBrush",
+        })
+        {
+            var opaque = BrushColor(classic, resource);
+            var frosted = BrushColor(glass, resource);
+            Assert.True(opaque.Length == 7 ||
+                opaque.Length == 9 && opaque.StartsWith("#FF", StringComparison.OrdinalIgnoreCase),
+                $"Classic floor resource {resource} must be opaque: {opaque}");
+            Assert.Equal(9, frosted.Length);
+            Assert.False(frosted.StartsWith("#FF", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
+        var floor = source.Split("public static async Task<FrameworkElement> TablesAsync()", StringSplitOptions.None)[1]
+            .Split("public static async Task<FrameworkElement> KitchenAsync()", StringSplitOptions.None)[0];
+        Assert.Contains("WorkspaceFrostedSurface.Wrap(root)", floor);
+        Assert.Contains("VerticalScrollBarVisibility = ScrollBarVisibility.Auto", floor);
+        Assert.Contains("BuildVisualFloorBoard(", floor);
+        Assert.Contains("FloorAreaBackgroundBrush", source);
+        Assert.Contains("FloorTileBackgroundBrush", source);
+        Assert.Contains("FloorTileBorderBrush", source);
+    }
+
+    [Fact]
     public void Classic_and_Glass_buttons_have_distinct_accessible_palettes_and_real_text_inheritance()
     {
         var classic = Load("Themes", "Classic.xaml");

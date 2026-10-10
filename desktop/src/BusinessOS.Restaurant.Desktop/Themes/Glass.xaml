@@ -21,6 +21,10 @@
     </LinearGradientBrush>
 
     <SolidColorBrush x:Key="CardBorderBrush" Color="#D8FFFFFF" />
+    <!-- Layered readable frosted white surfaces, without a second blur on text. -->
+    <SolidColorBrush x:Key="FloorAreaBackgroundBrush" Color="#94F8FBFF" />
+    <SolidColorBrush x:Key="FloorTileBackgroundBrush" Color="#DBFFFFFF" />
+    <SolidColorBrush x:Key="FloorTileBorderBrush" Color="#F2FFFFFF" />
     <!-- Nested rows and toolbar controls remain translucent over the blurred artwork. -->
     <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#B6F8FBFF" />
     <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#98EDF6FF" />

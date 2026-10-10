@@ -233,6 +233,9 @@
                             <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
                                     Command="{Binding NavigateCommand}" CommandParameter="menu"
                                     Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Button Style="{StaticResource NavButton}" Content="▤   Recipes &amp; Food Cost"
+                                    Command="{Binding NavigateCommand}" CommandParameter="recipes"
+                                    Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}" />
 
                             <TextBlock Text="MANAGEMENT"
                                        Foreground="{DynamicResource TextMutedBrush}"

@@ -16,7 +16,7 @@ public static class RestaurantWorkspaceRoutes
         if (normalizedRole is RestaurantRoles.Owner or RestaurantRoles.Manager)
         {
             return normalizedRoute is "dashboard" or "pos" or "tables" or
-                "kitchen" or "menu" or "inventory" or "purchases" or "expenses" or
+                "kitchen" or "menu" or "recipes" or "inventory" or "purchases" or "expenses" or
                 "closing" or "reports" or "users" or "settings";
         }
 

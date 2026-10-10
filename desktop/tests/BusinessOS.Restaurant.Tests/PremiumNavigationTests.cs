@@ -33,7 +33,7 @@ public sealed class PremiumNavigationTests
             .Select(e => (string?)e.Attribute("CommandParameter"))
             .Where(value => value is not null)
             .ToArray();
-        var expected = new[] { "dashboard", "pos", "tables", "kitchen", "menu",
+        var expected = new[] { "dashboard", "pos", "tables", "kitchen", "menu", "recipes",
             "inventory", "purchases", "expenses", "closing", "reports", "users", "settings" };
         Assert.Equal(expected.OrderBy(x => x), routes.OrderBy(x => x));
     }
