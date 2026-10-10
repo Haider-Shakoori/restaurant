@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/dependencies.dart';
 import '../../core/models/session_credentials.dart';
+import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
 
 /// Browse the *real* synced restaurant catalog before opening an order.
@@ -147,86 +148,33 @@ class _MenuBrowserScreenState extends State<MenuBrowserScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Row(
+          : Column(
               children: [
-                if (wide)
-                  SizedBox(
-                    width: 184,
-                    child: _categoriesView(),
+                MenuCategoryTopBar(
+                  categories: _categories,
+                  selectedCategoryId: _categoryId,
+                  onSelected: (id) => setState(() => _categoryId = id),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: TextField(
+                    onChanged: (value) => setState(() => _search = value),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'Search menu items',
+                    ),
                   ),
+                ),
                 Expanded(
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: TextField(
-                          onChanged: (value) =>
-                              setState(() => _search = value),
-                          decoration: const InputDecoration(
-                            prefixIcon: Icon(Icons.search_rounded),
-                            hintText: 'Search menu items',
-                          ),
-                        ),
-                      ),
-                      if (!wide)
-                        SizedBox(
-                          height: 52,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            children: [
-                              _categoryChip('All', null),
-                              for (final category in _categories)
-                                Padding(
-                                  padding: const EdgeInsetsDirectional.only(start: 8),
-                                  child: _categoryChip(category['name']!.toString(),
-                                      category['id']!.toString()),
-                                ),
-                            ],
-                          ),
-                        ),
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: _sync,
-                          child: _buildGrid(wide),
-                        ),
-                      ),
-                    ],
+                  child: RefreshIndicator(
+                    onRefresh: _sync,
+                    child: _buildGrid(wide),
                   ),
                 ),
               ],
             ),
     );
   }
-
-  Widget _categoriesView() => Container(
-        color: const Color(0xFFF7F8F9),
-        child: ListView(
-          padding: const EdgeInsets.all(12),
-          children: [
-            _categoryChip('All items', null),
-            const SizedBox(height: 10),
-            for (final category in _categories)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _categoryChip(category['name']!.toString(),
-                    category['id']!.toString()),
-              ),
-          ],
-        ),
-      );
-
-  Widget _categoryChip(String name, String? id) => ChoiceChip(
-        selected: _categoryId == id,
-        onSelected: (_) => setState(() => _categoryId = id),
-        label: Text(name),
-        backgroundColor: Colors.white,
-        selectedColor: const Color(0xFF171B20),
-        labelStyle: TextStyle(
-          color: _categoryId == id ? const Color(0xFFF3C96B) : const Color(0xFF303947),
-        ),
-        side: BorderSide.none,
-      );
 
   Widget _buildGrid(bool wide) {
     final items = _visibleItems;
