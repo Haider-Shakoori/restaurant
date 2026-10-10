@@ -45,6 +45,27 @@ internal static class RestaurantOperationalPages
         };
     }
 
+    private static async Task OpenStandaloneCatalogAsync()
+    {
+        try
+        {
+            var signedIn = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                ?? throw new InvalidOperationException("Sign in before managing the local catalog.");
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+            if (!BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+                throw new InvalidOperationException("Local catalog editing is only for signed standalone installations.");
+
+            var dialog = new StandaloneCatalogWindow(signedIn.User.Role)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+            dialog.ShowDialog();
+            if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                await vm.RefreshCommand.ExecuteAsync(null);
+        }
+        catch (Exception e) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, e.Message); }
+    }
+
     internal static async Task OpenCloudManagementAsync(string section)
     {
         try
@@ -327,8 +348,15 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
         // Menus are cloud-owned reference records. Editing only the SQLite
         // snapshot would silently disappear after the next cloud refresh.
-        var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
-        create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
+        var create = new Button { Content = standalone ? "+ Add Local Menu Item" : "+ Add Menu Item (Tenant)",
+            MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += async (_, _) =>
+        {
+            if (standalone) await OpenStandaloneCatalogAsync();
+            else await OpenCloudManagementAsync("menu_items");
+        };
         var moduleFlags = await new LocalRestaurantSettingsService(factory).GetModulesAsync();
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         recipes.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
@@ -374,8 +402,15 @@ internal static class RestaurantOperationalPages
             dialog.ShowDialog();
         };
         // Cloud-owned catalog edits never disappear on the next snapshot refresh.
-        var editCatalog = new Button { Content = "+ Create / Edit Menu, Categories & Images", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
-        editCatalog.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var editCatalog = new Button { Content = standalone
+            ? "+ Manage Local Branches, Tables, Menu & Images"
+            : "+ Create / Edit Menu, Categories & Images",
+            Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editCatalog.Click += async (_, _) =>
+        {
+            if (standalone) await OpenStandaloneCatalogAsync();
+            else await OpenCloudManagementAsync("menu_items");
+        };
         // Group menu actions in a responsive toolbar, not full-width bars.
         var menuActions = new WrapPanel
         {
