@@ -114,7 +114,9 @@ public sealed class PremiumGlassThemeTests
         {
             var opaque = BrushColor(classic, resource);
             var frosted = BrushColor(glass, resource);
-            Assert.StartsWith("#FF", opaque, StringComparison.OrdinalIgnoreCase);
+            Assert.True(opaque.Length == 7 ||
+                opaque.Length == 9 && opaque.StartsWith("#FF", StringComparison.OrdinalIgnoreCase),
+                $"Classic floor resource {resource} must be opaque: {opaque}");
             Assert.Equal(9, frosted.Length);
             Assert.False(frosted.StartsWith("#FF", StringComparison.OrdinalIgnoreCase));
         }
