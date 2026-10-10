@@ -587,7 +587,32 @@ internal static class RestaurantOperationalPages
         costPreview.Margin = new Thickness(0, 0, 10, 10);
         costPreview.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
         menuActions.Children.Add(costPreview);
-        if (!recipesOnly)
+        if (recipesOnly)
+        {
+            // A first-class recipe workspace must list saved versions on the
+            // page itself; the View Recipes dialog drills into ingredients.
+            var recipeRows = await (from version in db.Recipes.AsNoTracking()
+                join menuItem in db.MenuItems.AsNoTracking() on version.MenuItemId equals menuItem.Id
+                join branch in db.Branches.AsNoTracking() on version.BranchId equals branch.Id
+                orderby menuItem.Name, version.Version descending
+                select new
+                {
+                    Branch = branch.Name,
+                    MenuItem = menuItem.Name,
+                    Recipe = version.Name,
+                    version.Version,
+                    Active = version.IsActive,
+                }).ToListAsync();
+
+            panel.Children.Add(Card("Recipe versions",
+                recipeRows.Count == 0
+                    ? "No recipes saved yet. Use Create Recipe Version to begin."
+                    : $"{recipeRows.Count} saved version(s). Use View Recipes for ingredient quantities and units."));
+            var recipeGrid = GridFor(recipeRows);
+            recipeGrid.AutoGenerateColumns = true;
+            panel.Children.Add(recipeGrid);
+        }
+        else
             panel.Children.Add(grid);
         return Scroll(panel);
     }
