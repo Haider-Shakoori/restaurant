@@ -12,7 +12,7 @@ public sealed class LocalDatabaseFactory
     // with restaurant order and payment writes.
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> SchemaLocks =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, byte> ReadyDatabases =
+    private static readonly ConcurrentDictionary<string, long> ReadySchemaVersions =
         new(StringComparer.OrdinalIgnoreCase);
 
     public LocalDatabaseFactory(string? rootDirectory = null)
@@ -56,34 +56,49 @@ public sealed class LocalDatabaseFactory
 
     public async Task EnsureCreatedAsync(CancellationToken cancellationToken = default)
     {
-        if (ReadyDatabases.ContainsKey(_databasePath))
+        if (await SchemaAlreadyReadyAsync(cancellationToken))
             return;
 
         var gate = SchemaLocks.GetOrAdd(_databasePath, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken);
         try
         {
-            if (ReadyDatabases.ContainsKey(_databasePath))
+            if (await SchemaAlreadyReadyAsync(cancellationToken))
                 return;
 
             await using var db = Create();
             await db.Database.EnsureCreatedAsync(cancellationToken);
-            // WAL allows kitchen/phone writes and desktop read-only workspaces to
-            // coexist. Busy timeout avoids transient "database is locked" errors.
+            // WAL permits waiter writes and dashboard reads simultaneously.
             await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
             await EnsureOrderingSchemaAsync(db, cancellationToken);
             await EnsureMenuImageColumnAsync(cancellationToken);
             await EnsureKotRealignmentSchemaAsync(cancellationToken);
             await BackfillOrderServiceContextAsync(cancellationToken);
             await BackfillLegacyKotRoundsAsync(cancellationToken);
-            // Mark ready only after EVERY migration and backfill succeeds.
-            // A failed upgrade must remain retryable, never silently skipped.
-            ReadyDatabases.TryAdd(_databasePath, 0);
+            // A failed upgrade is never marked ready. Schema_version changes
+            // when a backup/DDL migration replaces or alters the schema, but
+            // NOT when mobile orders update operational rows.
+            ReadySchemaVersions[_databasePath] = await SchemaVersionAsync(cancellationToken);
         }
-        finally
-        {
-            gate.Release();
-        }
+        finally { gate.Release(); }
+    }
+
+    private async Task<bool> SchemaAlreadyReadyAsync(CancellationToken cancellationToken)
+    {
+        if (!ReadySchemaVersions.TryGetValue(_databasePath, out var expected) ||
+            !File.Exists(_databasePath))
+            return false;
+
+        return expected == await SchemaVersionAsync(cancellationToken);
+    }
+
+    private async Task<long> SchemaVersionAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA schema_version;";
+        return Convert.ToInt64(await pragma.ExecuteScalarAsync(cancellationToken));
     }
 
     private async Task EnsureMenuImageColumnAsync(CancellationToken cancellationToken)
