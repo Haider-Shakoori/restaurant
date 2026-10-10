@@ -515,6 +515,8 @@ internal static class RestaurantOperationalPages
             var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
             var cancel = new Button { Content = "Cancel", Height = 40, MinWidth = 120 };
             cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            var remove = new Button { Content = "Remove selected ingredient", Height = 36 };
+            remove.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             var save = new Button { Content = "Save Recipe", Height = 38 };
             save.Click += async (_, _) =>
             {
@@ -579,8 +581,6 @@ internal static class RestaurantOperationalPages
                 BorderThickness = new Thickness(0),
             };
             ingredientRows.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
-            var remove = new Button { Content = "Remove selected ingredient", Height = 36 };
-            remove.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             remove.Click += (_, _) =>
             {
                 if (ingredientRows.SelectedItem is KeyValuePair<string, string> selected)
