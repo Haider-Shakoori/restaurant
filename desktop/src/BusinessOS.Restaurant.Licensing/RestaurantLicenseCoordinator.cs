@@ -73,11 +73,48 @@ public sealed class RestaurantLicenseCoordinator
             version,
             cancellationToken);
 
-        await _settingsStore.SaveAsync(
-            new ConnectionSettings(state.TenantBaseUrl),
-            cancellationToken);
+        var existing = await _settingsStore.LoadAsync(cancellationToken);
+        await _settingsStore.SaveAsync(existing is null
+            ? new ConnectionSettings(state.TenantBaseUrl,
+                SyncEnabled: !DesktopOperatingMode.IsStandalone(state))
+            : existing with
+            {
+                TenantBaseUrl = state.TenantBaseUrl,
+                SyncEnabled = !DesktopOperatingMode.IsStandalone(state) && existing.SyncEnabled,
+            }, cancellationToken);
 
         return state;
+    }
+
+    /// <summary>
+    /// Explicit online operation to adopt a changed platform desktop mode.
+    /// A standalone lease never refreshes itself in the background.
+    /// </summary>
+    public async Task<ActivationState> RefreshModeAsync(CancellationToken cancellationToken = default)
+    {
+        var current = await _store.LoadAsync(cancellationToken)
+            ?? throw new InvalidOperationException("Activate the desktop before refreshing its mode.");
+
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        var manager = new LicenseManager(new LicenseApiClient(http),
+            new SignedLeaseVerifier(), _store, _identity);
+        var version = typeof(RestaurantLicenseCoordinator).Assembly.GetName().Version?.ToString(3);
+        var refreshed = await manager.RefreshAsync(current, version, cancellationToken);
+
+        var settings = await _settingsStore.LoadAsync(cancellationToken);
+        // Never automatically turn cloud sync on when leaving standalone: those
+        // local transactions may not match cloud data. Explicit reconciliation
+        // and a backup are required before enabling it.
+        if (settings is not null)
+        {
+            await _settingsStore.SaveAsync(settings with
+            {
+                SyncEnabled = !DesktopOperatingMode.IsStandalone(refreshed) &&
+                    !DesktopOperatingMode.IsStandalone(current) && settings.SyncEnabled,
+            }, cancellationToken);
+        }
+
+        return refreshed;
     }
 
     public async Task<RestaurantLicenseStatus> GetStatusAsync(

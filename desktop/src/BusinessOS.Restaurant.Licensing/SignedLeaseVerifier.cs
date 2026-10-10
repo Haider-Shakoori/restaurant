@@ -52,7 +52,8 @@ public sealed class SignedLeaseVerifier
             ReadDate(root, "offline_valid_until"),
             ReadDate(root, "subscription_ends_at"),
             root.GetProperty("features").Clone(),
-            ReadOptionalInt(root, "mobile_device_limit"));
+            ReadOptionalInt(root, "mobile_device_limit"),
+            ReadDesktopMode(root));
 
         if (!string.Equals(snapshot.KeyId, lease.KeyId, StringComparison.Ordinal))
         {
@@ -152,6 +153,18 @@ public sealed class SignedLeaseVerifier
         return value.TryGetInt32(out var result) && result > 0
             ? result
             : throw new CryptographicException($"Offline lease claim '{name}' is invalid.");
+    }
+
+    private static string ReadDesktopMode(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("desktop_mode", out var value))
+            return DesktopOperatingMode.CloudSync; // Legacy leases remain cloud-compatible.
+
+        var mode = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        if (mode is not (DesktopOperatingMode.CloudSync or DesktopOperatingMode.StandaloneOffline))
+            throw new CryptographicException("The signed desktop operating mode is invalid.");
+
+        return mode;
     }
 
     private static DateTimeOffset ReadDate(JsonElement root, string name) =>

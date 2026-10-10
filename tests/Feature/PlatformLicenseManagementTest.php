@@ -71,6 +71,40 @@ class PlatformLicenseManagementTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_platform_admin_can_set_standalone_mode_and_support_cannot_change_it(): void
+    {
+        $business = $this->activeBusiness();
+        $admin = AdminUser::factory()->create([
+            'role' => PlatformRole::SuperAdmin, 'is_active' => true,
+        ]);
+        $support = AdminUser::factory()->create([
+            'role' => PlatformRole::Support, 'is_active' => true,
+        ]);
+        $url = "http://localhost/platform/restaurants/{$business->id}/license/desktop-mode";
+
+        $this->actingAs($admin)->get(
+            "http://localhost/platform/restaurants/{$business->id}/license"
+        )->assertOk()->assertSee('Standalone Offline');
+
+        $this->actingAs($admin)->post($url, [
+            'desktop_mode' => 'standalone_offline',
+        ])->assertRedirect();
+
+        $this->assertSame('standalone_offline', $business->fresh()->desktop_mode);
+        $this->assertDatabaseHas('license_events', [
+            'business_id' => $business->id,
+            'event' => 'desktop.mode.updated',
+        ]);
+
+        $this->actingAs($support)->post($url, ['desktop_mode' => 'cloud_sync'])
+            ->assertForbidden();
+        $this->assertSame('standalone_offline', $business->fresh()->desktop_mode);
+
+        $this->actingAs($admin)->post($url, ['desktop_mode' => 'unknown'])
+            ->assertSessionHasErrors('desktop_mode');
+        $this->assertSame('standalone_offline', $business->fresh()->desktop_mode);
+    }
+
     private function activeBusiness(): Business
     {
         $plan = Plan::create([

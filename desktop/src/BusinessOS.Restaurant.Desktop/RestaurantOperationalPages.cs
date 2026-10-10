@@ -45,10 +45,35 @@ internal static class RestaurantOperationalPages
         };
     }
 
+    private static async Task OpenStandaloneCatalogAsync()
+    {
+        try
+        {
+            var signedIn = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
+                ?? throw new InvalidOperationException("Sign in before managing the local catalog.");
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+            if (!BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+                throw new InvalidOperationException("Local catalog editing is only for signed standalone installations.");
+
+            var dialog = new StandaloneCatalogWindow(signedIn.User.Role)
+            {
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+            dialog.ShowDialog();
+            if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                await vm.RefreshCommand.ExecuteAsync(null);
+        }
+        catch (Exception e) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, e.Message); }
+    }
+
     internal static async Task OpenCloudManagementAsync(string section)
     {
         try
         {
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+            if (BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+                throw new InvalidOperationException("Standalone Offline cannot open the web catalog editor. Existing menus remain available locally; use the standalone local catalog editor when provided.");
+
             var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync()
                 ?? throw new InvalidOperationException("Sign in before editing the restaurant catalog.");
             var dialog = new DesktopCloudManagementWindow(session, section)
@@ -323,8 +348,15 @@ internal static class RestaurantOperationalPages
         panel.Children.Add(Card("Menu catalog", "Manage restaurant menu items and their tablet-visible images."));
         // Menus are cloud-owned reference records. Editing only the SQLite
         // snapshot would silently disappear after the next cloud refresh.
-        var create = new Button { Content = "+ Add Menu Item (Tenant)", MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
-        create.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
+        var create = new Button { Content = standalone ? "+ Add Local Menu Item" : "+ Add Menu Item (Tenant)",
+            MinWidth = 185, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
+        create.Click += async (_, _) =>
+        {
+            if (standalone) await OpenStandaloneCatalogAsync();
+            else await OpenCloudManagementAsync("menu_items");
+        };
         var moduleFlags = await new LocalRestaurantSettingsService(factory).GetModulesAsync();
         var recipes = new Button { Content = "View Recipes", Height = 38, Margin = new Thickness(0, 4, 0, 8) };
         recipes.Visibility = moduleFlags.RecipesEnabled ? Visibility.Visible : Visibility.Collapsed;
@@ -370,8 +402,15 @@ internal static class RestaurantOperationalPages
             dialog.ShowDialog();
         };
         // Cloud-owned catalog edits never disappear on the next snapshot refresh.
-        var editCatalog = new Button { Content = "+ Create / Edit Menu, Categories & Images", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
-        editCatalog.Click += async (_, _) => await OpenCloudManagementAsync("menu_items");
+        var editCatalog = new Button { Content = standalone
+            ? "+ Manage Local Branches, Tables, Menu & Images"
+            : "+ Create / Edit Menu, Categories & Images",
+            Height = 38, Margin = new Thickness(0, 6, 0, 8) };
+        editCatalog.Click += async (_, _) =>
+        {
+            if (standalone) await OpenStandaloneCatalogAsync();
+            else await OpenCloudManagementAsync("menu_items");
+        };
         // Group menu actions in a responsive toolbar, not full-width bars.
         var menuActions = new WrapPanel
         {
@@ -1511,6 +1550,46 @@ internal static class RestaurantOperationalPages
             "Printing & Recovery",
             "KOT and receipt queues are independent. Interrupted spool submissions are not replayed automatically because an unconfirmed replay can cause duplicate food production.",
             await PrinterQueueRecoveryPanelAsync(workflow)));
+
+        var activeLease = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activeLease);
+        var connection = await new BusinessOS.Restaurant.Licensing.ConnectionSettingsStore().LoadAsync();
+        var modePanel = new StackPanel();
+        modePanel.Children.Add(new TextBlock
+        {
+            Text = standalone ? "Standalone Offline — no web sync" :
+                connection?.SyncEnabled == true ? "Cloud Sync — enabled" : "Cloud Sync — locally paused",
+            FontSize = 18, FontWeight = FontWeights.Bold,
+        });
+        modePanel.Children.Add(new TextBlock
+        {
+            Text = standalone
+                ? "Your signed license disables all automatic cloud communication. Orders, KOT, payments and LAN operate in SQLite. Changes stay here and are NOT queued for later cloud upload. A current signed lease is required; refresh it before the paid term expires."
+                : "This desktop uses local SQLite and may exchange restaurant records with the authorized tenant. The platform administrator controls Standalone vs Cloud in License & Devices.",
+            Margin = new Thickness(0, 8, 0, 12), TextWrapping = TextWrapping.Wrap,
+        });
+        var refreshMode = new Button { Content = "Refresh signed desktop mode (requires Internet)",
+            MinHeight = 38, Margin = new Thickness(0, 0, 0, 8) };
+        var modeStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        modePanel.Children.Add(refreshMode);
+        modePanel.Children.Add(modeStatus);
+        refreshMode.Click += async (_, _) =>
+        {
+            refreshMode.IsEnabled = false;
+            try
+            {
+                var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
+                if (session?.User.Role.Trim().ToLowerInvariant() is not ("owner" or "admin"))
+                    throw new UnauthorizedAccessException("Only the owner/admin can refresh the desktop mode.");
+                var updated = await new BusinessOS.Restaurant.Licensing.RestaurantLicenseCoordinator().RefreshModeAsync();
+                modeStatus.Text = "Signed mode: " + updated.Snapshot.DesktopMode +
+                    ". Restart Windows Restaurant to apply. If leaving standalone, back up local data and reconcile before enabling cloud sync.";
+            }
+            catch (Exception error) { modeStatus.Text = error.Message; }
+            finally { refreshMode.IsEnabled = true; }
+        };
+        networkPage.Children.Add(SettingsSection("Licensed desktop operating mode",
+            "Configured centrally under Platform → Restaurant → License & Devices. Manual refresh is the only online operation required to switch modes.", modePanel));
 
         networkPage.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),

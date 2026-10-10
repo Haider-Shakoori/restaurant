@@ -84,6 +84,16 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        // Signed standalone policy overrides any stale or edited local sync
+        // settings before cloud workers or diagnostics can start.
+        if (DesktopOperatingMode.IsStandalone(activationState))
+        {
+            var connections = new ConnectionSettingsStore();
+            var existing = await connections.LoadAsync();
+            if (existing is not null && existing.SyncEnabled)
+                await connections.SaveAsync(existing with { SyncEnabled = false });
+        }
+
         var sessions = new WindowsSessionStore();
         AuthSession? session = null;
         try

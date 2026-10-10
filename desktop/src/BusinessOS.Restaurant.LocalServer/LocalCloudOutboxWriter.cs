@@ -1,3 +1,4 @@
+using BusinessOS.Restaurant.Licensing;
 using System.Text.Json;
 using BusinessOS.Restaurant.Persistence;
 
@@ -17,6 +18,23 @@ public static class LocalCloudOutboxWriter
         DateTimeOffset? occurredAt = null,
         string? mutationId = null)
     {
+        // Standalone orders must never enter a queue that could later transmit
+        // restaurant orders or financial records to the web.
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var activation = new WindowsActivationStore().LoadAsync().GetAwaiter().GetResult();
+                if (DesktopOperatingMode.IsStandalone(activation))
+                    return;
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                // Licensing failures are handled by application startup; local
+                // restaurant operations must not be interrupted by the outbox.
+            }
+        }
+
         var id = string.IsNullOrWhiteSpace(mutationId)
             ? Guid.CreateVersion7().ToString("N")
             : mutationId.Trim();

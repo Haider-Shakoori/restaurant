@@ -82,8 +82,18 @@ public sealed class LocalRestaurantSettingsService
             Bool(values, "automatic_recipe_consumption_enabled", true));
     }
 
-    public async Task ApplyCloudModulesAsync(RestaurantModuleFlags modules, CancellationToken token = default)
+    public Task ApplyCloudModulesAsync(RestaurantModuleFlags modules, CancellationToken token = default) =>
+        ApplyModulesAsync(modules, "cloud", token);
+
+    public Task ApplyStandaloneModulesAsync(RestaurantModuleFlags modules, CancellationToken token = default) =>
+        ApplyModulesAsync(modules, "local", token);
+
+    private async Task ApplyModulesAsync(RestaurantModuleFlags modules, string source, CancellationToken token)
     {
+        if (modules.PurchasingEnabled && !modules.InventoryEnabled ||
+            modules.AutomaticRecipeConsumptionEnabled && (!modules.RecipesEnabled || !modules.InventoryEnabled))
+            throw new ArgumentException("Dependent restaurant modules must be enabled first.", nameof(modules));
+
         await _databaseFactory.EnsureCreatedAsync(token);
         await using var db = _databaseFactory.Create();
         await using var transaction = await db.Database.BeginTransactionAsync(token);
@@ -103,7 +113,7 @@ public sealed class LocalRestaurantSettingsService
                 db.RestaurantSettings.Add(row);
             }
             row.Value = entry.Value ? "true" : "false";
-            row.Source = "cloud";
+            row.Source = source;
             row.UpdatedAtUtc = now;
         }
         await db.SaveChangesAsync(token);

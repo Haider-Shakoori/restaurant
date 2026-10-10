@@ -35,6 +35,27 @@
         </div>
     </section>
 
+
+    <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-6">
+        <h2 class="text-lg font-black text-slate-950">Windows desktop operating mode</h2>
+        <p class="mt-2 text-sm text-slate-600">Choose how the licensed Windows restaurant terminal operates. This choice is embedded in a signed lease and applies after the desktop refreshes its license. Other tenant web services are unaffected.</p>
+        <form method="POST" action="/platform/restaurants/{{ $business->id }}/license/desktop-mode" class="mt-4 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+            @csrf
+            <label class="text-sm font-bold text-slate-700">
+                License operating mode
+                <select name="desktop_mode" class="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3" @cannot('manage-platform') disabled @endcannot>
+                    <option value="cloud_sync" @selected(($business->desktop_mode ?? 'cloud_sync') === 'cloud_sync')>Cloud Sync — Local SQLite + web synchronization</option>
+                    <option value="standalone_offline" @selected(($business->desktop_mode ?? 'cloud_sync') === 'standalone_offline')>Standalone Offline — Local SQLite + LAN, no web sync</option>
+                </select>
+            </label>
+            @can('manage-platform')
+                <button class="rounded-xl bg-violet-600 px-5 py-3 text-sm font-black text-white">Save desktop mode</button>
+            @endcan
+        </form>
+        <p class="mt-3 text-xs text-amber-800">Standalone Offline keeps the signed license valid through the currently paid subscription end date. Initial activation, first operator sign-in, and license renewal or mode changes require an online connection. Existing cloud data is not automatically copied to the standalone database. No cloud data will reconcile while standalone mode is active.</p>
+        <p class="mt-2 text-xs text-slate-500">For fully isolated computers without even one-time Internet access, a separately signed offline activation/import and operator provisioning workflow is required.</p>
+    </section>
+
     <div class="grid gap-6 xl:grid-cols-[1fr_0.85fr]">
         <div class="space-y-6">
             <section class="rounded-2xl border border-slate-200 bg-white p-6">

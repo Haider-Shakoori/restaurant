@@ -25,18 +25,22 @@ internal static class RestaurantModulesPanel
         var initial = await cache.GetModulesAsync();
         var session = await new WindowsSessionStore().LoadAsync();
         var canEdit = session?.User.Role.Trim().ToLowerInvariant() is "owner" or "admin";
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
 
         var root = new StackPanel { Margin = new Thickness(14) };
         root.Children.Add(new TextBlock
         {
-            Text = "Modules shared with the restaurant web app",
+            Text = standalone ? "Standalone Offline · Local restaurant modules" : "Modules shared with the restaurant web app",
             FontSize = 20,
             FontWeight = FontWeights.Bold,
             Margin = new Thickness(0, 0, 0, 8),
         });
         root.Children.Add(new TextBlock
         {
-            Text = "POS, orders, KOT, payments and table closing remain active. Changes are made online and synchronized to this terminal; the last successful configuration stays visible offline.",
+            Text = standalone
+                ? "Restaurant modules are stored on this computer and remain independent of the web. POS, KOT and payments stay active."
+                : "POS, orders, KOT, payments and table closing remain active. Changes are made online and synchronized to this terminal; the last successful configuration stays visible offline.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16),
         });
@@ -80,7 +84,8 @@ internal static class RestaurantModulesPanel
 
         var controls = new WrapPanel();
         var refresh = new Button { Content = "Sync modules from Web", Height = 38, MinWidth = 195, Margin = new Thickness(0, 0, 10, 8) };
-        var save = new Button { Content = "Save modules to Web", Height = 38, MinWidth = 180, IsEnabled = canEdit, Margin = new Thickness(0, 0, 10, 8) };
+        var save = new Button { Content = standalone ? "Save local modules" : "Save modules to Web", Height = 38, MinWidth = 180, IsEnabled = canEdit, Margin = new Thickness(0, 0, 10, 8) };
+        refresh.Visibility = standalone ? Visibility.Collapsed : Visibility.Visible;
         controls.Children.Add(refresh);
         controls.Children.Add(save);
         root.Children.Add(controls);
@@ -102,6 +107,8 @@ internal static class RestaurantModulesPanel
 
         async Task<RestaurantModuleFlags> RequestAsync(HttpMethod method, RestaurantModuleFlags? update = null)
         {
+            if (standalone)
+                throw new InvalidOperationException("No web requests are allowed in standalone mode.");
             var signedIn = await new WindowsSessionStore().LoadAsync()
                 ?? throw new InvalidOperationException("Sign in to synchronize modules.");
 
@@ -170,8 +177,17 @@ internal static class RestaurantModulesPanel
                     (!requested.RecipesEnabled || !requested.InventoryEnabled))
                     throw new InvalidOperationException("Enable required dependent modules first.");
 
-                var confirmed = await RequestAsync(HttpMethod.Post, requested);
-                await cache.ApplyCloudModulesAsync(confirmed);
+                RestaurantModuleFlags confirmed;
+                if (standalone)
+                {
+                    await cache.ApplyStandaloneModulesAsync(requested);
+                    confirmed = requested;
+                }
+                else
+                {
+                    confirmed = await RequestAsync(HttpMethod.Post, requested);
+                    await cache.ApplyCloudModulesAsync(confirmed);
+                }
                 Display(confirmed);
                 status.Text = "Modules saved to Web and cached locally. Refresh the workspace to apply them.";
             }
