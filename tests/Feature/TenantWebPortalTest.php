@@ -834,6 +834,65 @@ class TenantWebPortalTest extends TestCase
     /**
      * @return array{Tenant, string}
      */
+    public function test_module_settings_are_shared_between_owner_web_and_desktop_clients(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+        tenancy()->initialize($tenant);
+        $owner = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Module Owner',
+            'email' => 'modules-owner@example.test',
+            'password' => 'OwnerPass123',
+            'role' => 'owner',
+            'is_active' => true,
+        ]);
+        $waiter = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Module Waiter',
+            'email' => 'modules-waiter@example.test',
+            'password' => 'WaiterPass123',
+            'role' => 'waiter',
+            'is_active' => true,
+        ]);
+        $ownerToken = $owner->createToken('modules-owner')->plainTextToken;
+        $waiterToken = $waiter->createToken('modules-waiter')->plainTextToken;
+        tenancy()->end();
+
+        $api = "http://{$domain}/api/v1/desktop/modules";
+        $this->withToken($ownerToken)->getJson($api)
+            ->assertOk()->assertJsonPath('data.inventory_enabled', true);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($ownerToken)->postJson($api, [
+            'recipes_enabled' => true,
+            'inventory_enabled' => true,
+            'purchasing_enabled' => false,
+            'automatic_recipe_consumption_enabled' => false,
+        ])->assertOk()->assertJsonPath('data.purchasing_enabled', false);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($ownerToken)->getJson("http://{$domain}/api/v1/bootstrap")
+            ->assertOk()
+            ->assertJsonPath('restaurant_settings.purchasing_enabled', false)
+            ->assertJsonPath('restaurant_settings.inventory_enabled', true);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($waiterToken)->getJson($api)
+            ->assertOk()->assertJsonPath('data.purchasing_enabled', false);
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($waiterToken)->postJson($api, [
+            'recipes_enabled' => true,
+            'inventory_enabled' => true,
+            'purchasing_enabled' => true,
+            'automatic_recipe_consumption_enabled' => true,
+        ])->assertForbidden();
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($ownerToken)->getJson($api)
+            ->assertOk()->assertJsonPath('data.purchasing_enabled', false);
+    }
+
     public function test_desktop_staff_api_requires_owner_and_provisions_real_logins(): void
     {
         [$tenant, $domain] = $this->createActiveTenant();
