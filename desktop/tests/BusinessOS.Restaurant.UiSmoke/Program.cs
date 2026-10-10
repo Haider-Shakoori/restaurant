@@ -194,6 +194,7 @@ internal static class Program
         CheckInventoryFilters(owner);
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
             "Enter ingredient name and SKU.");
+        await CheckDuplicateIngredientAndRetryAsync(app, owner);
 
         await NavigateAsync(owner, "purchases");
         await CheckFormAsync(app, owner, "+ Add Supplier", "Add Supplier", "Save Supplier",
@@ -687,6 +688,72 @@ internal static class Program
                     $"'{dialogTitle}' reports invalid input without saving");
                 Assert(opened.IsVisible, $"'{dialogTitle}' stays open on invalid input");
             }
+        }
+        finally
+        {
+            timer.Stop();
+            if (modal?.IsVisible == true) modal.Close();
+        }
+    }
+
+    private static async Task CheckDuplicateIngredientAndRetryAsync(
+        System.Windows.Application app, MainWindow owner)
+    {
+        // User regression: duplicate SKU showed an error and the modal became
+        // unresponsive. Verify a real error, editable SKU and one successful
+        // retry against temporary CI SQLite with no production credentials.
+        var create = FindButton(owner, "+ Add Ingredient")
+            ?? throw new InvalidOperationException("Inventory Add Ingredient action not found.");
+        var existingWindows = app.Windows.Cast<Window>().ToHashSet();
+        Window? modal = null;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(70) };
+        timer.Tick += (_, _) =>
+        {
+            modal = app.Windows.Cast<Window>().FirstOrDefault(window =>
+                !existingWindows.Contains(window) && window.IsVisible &&
+                window.Title == "Add Ingredient");
+            if (modal is not null) timer.Stop();
+        };
+        timer.Start();
+        _ = owner.Dispatcher.BeginInvoke(new Action(() => Click(create)),
+            DispatcherPriority.Normal);
+        try
+        {
+            await WaitUntilAsync(() => modal is not null, "Add Ingredient modal opened");
+            var opened = modal!;
+            var name = Descendants<TextBox>(opened).Single(x => x.Name == "IngredientNameInput");
+            var sku = Descendants<TextBox>(opened).Single(x => x.Name == "IngredientSkuInput");
+            var feedback = Descendants<TextBlock>(opened).Single(x => x.Name == "IngredientSaveFeedback");
+            var save = FindButton(opened, "Save Ingredient")!;
+            name.Text = "CI Test Meat";
+            sku.Text = "ci-rice"; // already seeded; case-normalized duplicate.
+            Click(save);
+
+            await WaitUntilAsync(() => feedback.Text.Contains("already exists", StringComparison.Ordinal),
+                "duplicate ingredient SKU is rejected without blocking the UI");
+            Assert(opened.IsVisible && save.IsEnabled && save.Content?.ToString() == "Save Ingredient",
+                "Duplicate SKU keeps Add Ingredient modal open with retry enabled");
+            await opened.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            Assert(sku.IsFocused && sku.Text.Equals("ci-rice", StringComparison.OrdinalIgnoreCase),
+                "Duplicate SKU focuses the editable SKU input instead of freezing");
+
+            await CaptureWindowAsync(opened,
+                Path.Combine(GalleryDirectory, "dialogs", "add-ingredient-duplicate-recovery.png"));
+
+            sku.Text = "ci-meat-new";
+            Click(save);
+            await WaitUntilAsync(() => !opened.IsVisible,
+                "corrected ingredient SKU saves and closes the dialog");
+            await using var db = new LocalDatabaseFactory().Create();
+            var inserted = await db.InventoryItems.AsNoTracking()
+                .Where(item => item.Sku == "CI-MEAT-NEW").ToArrayAsync();
+            Assert(inserted.Length == 1 && inserted[0].Name == "CI Test Meat",
+                "Exactly one corrected ingredient is persisted to SQLite");
+            Assert(await db.InventoryItems.CountAsync(item => item.Sku == "CI-RICE") == 1,
+                "Duplicate attempt did not alter the existing SKU");
+            Assert(!await db.InventoryBalances.AnyAsync(balance =>
+                balance.InventoryItemId == inserted[0].Id),
+                "Creating a new ingredient never fabricates a stock balance");
         }
         finally
         {
