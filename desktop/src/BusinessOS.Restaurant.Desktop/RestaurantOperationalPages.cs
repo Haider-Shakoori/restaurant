@@ -885,10 +885,43 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Avg cost AFN", nameof(InventoryRow.AverageCost), 120));
         grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
         var panel = Stack();
-        panel.Children.Add(Card("Inventory", "Local ingredients, stock balances and recipe consumption."));
+        panel.Margin = new Thickness(4);
+        panel.Children.Add(Card("Inventory overview",
+            "Search ingredients, review local quantities and costs, and record audited changes. All quantities are stored in each ingredient's base unit."));
+
         var lowStockCount = rows.Count(x => x.ReorderLevel > 0 && x.Quantity <= x.ReorderLevel);
+        var summaryCards = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
+        summaryCards.Children.Add(Card("ACTIVE INGREDIENTS", rows.Count.ToString(), 205));
+        summaryCards.Children.Add(Card("LOW STOCK ALERTS", lowStockCount.ToString(), 205));
+        summaryCards.Children.Add(Card("OUT OF STOCK", rows.Count(x => x.Quantity <= 0).ToString(), 205));
+        summaryCards.Children.Add(Card("STOCK UNITS", rows.Select(x => x.BaseUnit).Distinct().Count().ToString(), 205));
+        panel.Children.Add(summaryCards);
+
         if (lowStockCount > 0)
-            panel.Children.Add(Card("Reorder alert", lowStockCount + " ingredients are at or below their reorder levels. Check their stock balances before the next service."));
+        {
+            var warning = new Border
+            {
+                CornerRadius = new CornerRadius(12),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(14, 10, 14, 10),
+                Margin = new Thickness(0, 0, 0, 10),
+                Child = new TextBlock
+                {
+                    Text = $"● {lowStockCount} ingredient(s) need replenishment. Use the Low stock filter to review them.",
+                    FontWeight = FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+            };
+            warning.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+            warning.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+            panel.Children.Add(warning);
+        }
+
+        var actions = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
         var create = new Button { Content = "+ Add Ingredient", MinWidth = 160, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
         create.Click += (_, _) =>
         {
@@ -959,8 +992,14 @@ internal static class RestaurantOperationalPages
         };
         var editInventory = new Button { Content = "Edit Ingredients & Units (Online)", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
         editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
-        panel.Children.Add(editInventory);
-        panel.Children.Add(create);
+        create.HorizontalAlignment = HorizontalAlignment.Left;
+        editInventory.HorizontalAlignment = HorizontalAlignment.Left;
+        create.MinWidth = 0;
+        editInventory.MinWidth = 0;
+        create.Margin = new Thickness(0, 0, 10, 8);
+        editInventory.Margin = new Thickness(0, 0, 10, 8);
+        actions.Children.Add(create);
+        actions.Children.Add(editInventory);
 
         var adjustStock = new Button { Content = "+ Adjust Stock Quantity", Height = 38, MinWidth = 190, Margin = new Thickness(0, 6, 0, 12) };
         adjustStock.Click += async (_, _) =>
@@ -1029,9 +1068,71 @@ internal static class RestaurantOperationalPages
             }
             catch (Exception ex) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
         };
-        panel.Children.Add(adjustStock);
-        panel.Children.Add(grid);
-        return Scroll(panel);
+        adjustStock.HorizontalAlignment = HorizontalAlignment.Left;
+        adjustStock.MinWidth = 0;
+        adjustStock.Margin = new Thickness(0, 0, 10, 8);
+        actions.Children.Add(adjustStock);
+        panel.Children.Add(actions);
+
+        var filters = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        var searchBox = new TextBox
+        {
+            Name = "InventorySearchBox",
+            Width = 360,
+            Height = 38,
+            Margin = new Thickness(0, 0, 12, 8),
+            ToolTip = "Filter by ingredient name, SKU, stock unit or purchase unit",
+        };
+        searchBox.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
+        var lowStockOnly = new CheckBox
+        {
+            Name = "InventoryLowStockOnlyToggle",
+            Content = "Low stock only",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 0, 8),
+            FontWeight = FontWeights.SemiBold,
+        };
+        void ApplyInventoryFilter()
+        {
+            var search = searchBox.Text.Trim();
+            grid.ItemsSource = rows.Where(row =>
+                (!lowStockOnly.IsChecked.GetValueOrDefault() ||
+                 row.ReorderLevel > 0 && row.Quantity <= row.ReorderLevel) &&
+                (row.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 row.Sku.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 row.BaseUnit.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                 row.PurchaseUnit.Contains(search, StringComparison.OrdinalIgnoreCase))).ToList();
+        }
+        searchBox.TextChanged += (_, _) => ApplyInventoryFilter();
+        lowStockOnly.Checked += (_, _) => ApplyInventoryFilter();
+        lowStockOnly.Unchecked += (_, _) => ApplyInventoryFilter();
+        filters.Children.Add(searchBox);
+        filters.Children.Add(lowStockOnly);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Search inventory", FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 7),
+        });
+        panel.Children.Add(filters);
+
+        grid.Name = "InventoryStockGrid";
+        grid.MinHeight = 240;
+        grid.MaxHeight = 520;
+        var table = new Border
+        {
+            CornerRadius = new CornerRadius(16),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(12),
+            Child = grid,
+        };
+        table.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        table.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        panel.Children.Add(table);
+        return Scroll(WorkspaceFrostedSurface.Wrap(panel));
     }
 
     private static async Task<FrameworkElement> PurchasesAsync()
