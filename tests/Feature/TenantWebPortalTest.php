@@ -209,6 +209,133 @@ class TenantWebPortalTest extends TestCase
         }
     }
 
+    public function test_cashier_photo_pos_submits_to_same_kitchen_and_returns_to_cashier(): void
+    {
+        [$tenant, $domain] = $this->createActiveTenant();
+
+        tenancy()->initialize($tenant);
+
+        TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Restaurant Owner',
+            'email' => 'photo-pos-owner@example.test',
+            'password' => 'OwnerPass123',
+            'is_active' => true,
+            'role' => 'owner',
+        ]);
+
+        $branch = RestaurantBranch::query()->create([
+            'code' => 'MAIN',
+            'name' => 'Main Branch',
+            'is_active' => true,
+        ]);
+
+        $area = DiningArea::query()->create([
+            'branch_id' => $branch->id,
+            'name' => 'Main Hall',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $table = DiningTable::query()->create([
+            'dining_area_id' => $area->id,
+            'code' => 'T-01',
+            'name' => 'Table 1',
+            'capacity' => 4,
+            'status' => DiningTable::STATUS_AVAILABLE,
+            'is_active' => true,
+        ]);
+
+        $category = MenuCategory::query()->create([
+            'name' => 'Main Course',
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        $item = MenuItem::query()->create([
+            'menu_category_id' => $category->id,
+            'sku' => 'FOOD-001',
+            'name' => 'Kabuli Pulao',
+            'price' => '250.00',
+            'is_available' => true,
+            'sort_order' => 1,
+        ]);
+
+        tenancy()->end();
+
+        $this->post("http://{$domain}/login", [
+            'email' => 'orders-owner@example.test',
+            'password' => 'OwnerPass123',
+        ])->assertRedirect('/dashboard');
+
+        $this->get("http://{$domain}/pos")
+            ->assertOk()
+            ->assertSee('Photo menu & current order')
+            ->assertSee('Pos order entry', false)
+            ->assertSee('Kabuli Pulao')
+            ->assertSee('Table 1');
+
+        $this->get("http://{$domain}/orders")
+            ->assertOk()
+            ->assertSee('New Order / Take Order')
+            ->assertSee('Kabuli Pulao')
+            ->assertSee('Table 1')
+            ->assertSee('@click="addItem(items.find(item => item.id ===', false);
+
+        $this->post("http://{$domain}/orders/take", [
+            'service_type' => Order::SERVICE_DINE_IN,
+            'dining_table_id' => $table->id,
+            'guest_count' => 3,
+            'notes' => 'Family table',
+            'submit_action' => 'kitchen',
+            'from_pos' => 1,
+            'lines' => [[
+                'menu_item_id' => $item->id,
+                'quantity' => 2,
+                'notes' => 'No chili',
+            ]],
+        ])
+            ->assertRedirect('/pos')
+            ->assertSessionHas('status', 'Order submitted to Kitchen successfully.');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $order = Order::query()->with(['items', 'kitchenTickets.items'])->sole();
+
+            $this->assertSame(Order::STATUS_SUBMITTED, $order->status);
+            $this->assertSame('500.00', $order->total);
+            $this->assertSame(3, $order->guest_count);
+            $this->assertSame('No chili', $order->items->first()->notes);
+            $this->assertSame(DiningTable::STATUS_OCCUPIED, $table->fresh()->status);
+            $this->assertSame(1, KitchenTicket::query()->count());
+            $this->assertSame('Kabuli Pulao', $order->kitchenTickets->first()->items->first()->item_name);
+            $productionItemId = $order->kitchenTickets->first()->items->first()->id;
+        } finally {
+            tenancy()->end();
+        }
+
+        $this->post("http://{$domain}/kitchen/items/{$productionItemId}/start")
+            ->assertRedirect('/kitchen')
+            ->assertSessionHas('status', 'Kitchen item started.');
+
+        $this->post("http://{$domain}/kitchen/items/{$productionItemId}/ready")
+            ->assertRedirect('/kitchen')
+            ->assertSessionHas('status', 'Kitchen item marked ready.');
+
+        tenancy()->initialize($tenant);
+
+        try {
+            $this->assertSame(
+                KitchenTicket::STATUS_READY,
+                KitchenTicket::query()->sole()->status,
+            );
+            $this->assertSame(Order::STATUS_READY, Order::query()->sole()->status);
+        } finally {
+            tenancy()->end();
+        }
+    }
+
     public function test_new_web_order_retry_does_not_duplicate_order_lines_or_kot_round(): void
     {
         [$tenant, $domain] = $this->createActiveTenant();
