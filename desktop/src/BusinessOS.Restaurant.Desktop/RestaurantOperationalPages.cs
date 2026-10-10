@@ -923,7 +923,7 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 0, 0, 12),
         };
         var create = new Button { Content = "+ Add Ingredient", MinWidth = 160, Height = 38, Margin = new Thickness(0, 8, 0, 12) };
-        create.Click += (_, _) =>
+        create.Click += async (_, _) =>
         {
             var dialog = new Window
             {
