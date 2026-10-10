@@ -195,15 +195,18 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 new LocalServerOptions(activation.Snapshot.TenantId, port));
             var localAddress = descriptor.BaseUrls.FirstOrDefault();
             var cloudAddress = connection?.TenantBaseUrl ?? activation.TenantBaseUrl;
-            var pairingToken = await TryCreateCloudPairingTokenAsync(
-                activation,
-                cloudAddress);
+            var standalone = DesktopOperatingMode.IsStandalone(activation);
+            var pairingToken = standalone
+                ? (Token: (string?)null, ExpiresAt: (DateTimeOffset?)null)
+                : await TryCreateCloudPairingTokenAsync(activation, cloudAddress);
 
             var pairingExpiry = pairingToken.ExpiresAt is null
                 ? "Cloud pairing token unavailable; QR configures connection addresses only."
                 : $"One-time mobile activation token expires {pairingToken.ExpiresAt:HH:mm:ss} UTC.";
 
-            PairingDetails = localAddress is null
+            PairingDetails = standalone
+                ? $"Local: {localAddress ?? "unavailable"}\\nMode: Standalone Offline (LAN only, web disabled)"
+                : localAddress is null
                 ? $"Local: unavailable\nCloud: {cloudAddress}\nMode: Automatic (cloud until LAN returns)\n{pairingExpiry}"
                 : $"Local: {localAddress}\nCloud: {cloudAddress}\nMode: Automatic (LAN preferred)\n{pairingExpiry}";
 
@@ -212,8 +215,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 type = "businessos.restaurant.pairing.v1",
                 tenant_id = activation.Snapshot.TenantId,
                 local_url = localAddress,
-                cloud_url = cloudAddress,
-                connection_mode = "automatic",
+                cloud_url = standalone ? null : cloudAddress,
+                connection_mode = standalone ? "local" : "automatic",
                 pairing_token = pairingToken.Token,
                 pairing_expires_at = pairingToken.ExpiresAt,
             });
@@ -231,7 +234,8 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 ? $"Valid until {diagnostics.OfflineValidUntil:yyyy-MM-dd HH:mm} UTC"
                 : "Expired / invalid";
 
-            CloudStatus = diagnostics.LastCloudSuccessAtUtc is null
+            CloudStatus = standalone ? "Disabled by signed standalone license" :
+                diagnostics.LastCloudSuccessAtUtc is null
                 ? diagnostics.SyncEnabled ? "No successful cloud sync yet" : "Cloud sync disabled"
                 : $"Last sync {diagnostics.LastCloudSuccessAtUtc:yyyy-MM-dd HH:mm:ss} UTC";
 
@@ -254,7 +258,9 @@ public sealed class LanDiagnosticsViewModel : ObservableObject
                 ? $"{mobileCount} / {mobileLimit} paired"
                 : $"{mobileCount} paired · unlimited";
 
-            StatusMessage = diagnostics.NetworkMode == LocalNetworkMode.IsolatedLocal
+            StatusMessage = standalone
+                ? "Standalone Offline is active. No tenant web sync or cloud pairing requests are sent. Local SQLite, POS, kitchen, cashier and enabled LAN devices remain available."
+                : diagnostics.NetworkMode == LocalNetworkMode.IsolatedLocal
                 ? "Cloud is unavailable or intentionally disabled. Local ordering, KOT and cashier operations remain authoritative while the signed offline lease is valid."
                 : diagnostics.NetworkMode == LocalNetworkMode.Degraded
                     ? "Cloud connectivity is degraded. Local restaurant operations remain available and queued changes will reconcile automatically."
