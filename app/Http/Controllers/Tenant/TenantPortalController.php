@@ -176,6 +176,22 @@ class TenantPortalController extends Controller
             'readyOrders' => Order::query()->with(['table', 'waiter'])
                 ->whereIn('status', [Order::STATUS_READY, Order::STATUS_SERVED])
                 ->latest('opened_at')->limit(60)->get(),
+            'menuCategories' => MenuCategory::query()->where('is_active', true)
+                ->with(['items' => fn ($items) => $items->where('is_available', true)
+                    ->with(['modifierGroups' => fn ($groups) => $groups
+                        ->where('menu_modifier_groups.is_active', true)])
+                    ->orderBy('sort_order')->orderBy('name')])
+                ->orderBy('sort_order')->orderBy('name')->get(),
+            'availableTables' => DiningTable::query()->with('diningArea.branch')
+                ->where('is_active', true)->where('status', DiningTable::STATUS_AVAILABLE)
+                ->whereHas('diningArea', fn ($areas) => $areas->where('is_active', true)
+                    ->whereHas('branch', fn ($branches) => $branches->where('is_active', true)))
+                ->orderBy('name')->get(),
+            'activeOrders' => Order::query()->with('table')
+                ->whereIn('status', [
+                    Order::STATUS_DRAFT, Order::STATUS_SUBMITTED,
+                    Order::STATUS_PREPARING, Order::STATUS_READY, Order::STATUS_SERVED,
+                ])->latest('opened_at')->limit(100)->get(),
         ]);
     }
 
