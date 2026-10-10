@@ -782,6 +782,47 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _header(Map<String, Object?> order) {
+    // The full desktop-style status row does not fit narrow waiter phones.
+    if (MediaQuery.sizeOf(context).width < 700) {
+      return Container(
+        height: 60,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        color: const Color(0xFF171B20),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Back to tables',
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+            ),
+            const SizedBox(width: 4),
+            const Expanded(
+              child: Text(
+                'Restaurant POS',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              ),
+            ),
+            Text(
+              '${_kotRounds.length} KOT',
+              style: const TextStyle(
+                color: Color(0xFFFFD96B),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Order operations',
+              onPressed: _working ? null : _showOrderOperations,
+              color: Colors.white,
+              icon: const Icon(Icons.more_vert_rounded),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       height: 68,
       padding: const EdgeInsets.symmetric(horizontal: 16),
