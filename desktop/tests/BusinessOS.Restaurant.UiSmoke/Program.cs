@@ -792,7 +792,7 @@ internal static class Program
             }
             finally { timer.Stop(); }
         }
-        async Task SubmitAsync(Window dialog, string supplierCode)
+        Button Submit(Window dialog, string supplierCode)
         {
             // Supplier form currently uses ordered fields (code/name/phone/email).
             var fields = Descendants<TextBox>(dialog).ToArray();
@@ -801,12 +801,13 @@ internal static class Program
             fields[1].Text = "CI Supply Partner";
             var save = FindButton(dialog, "Save Supplier")!;
             Click(save);
+            return save;
         }
 
         var first = await OpenAsync();
         try
         {
-            await SubmitAsync(first, "CI-SUP-1");
+            Submit(first, "CI-SUP-1");
             await WaitUntilAsync(() => !first.IsVisible, "supplier create completes without UI freeze");
         }
         finally { if (first.IsVisible) first.Close(); }
@@ -814,8 +815,7 @@ internal static class Program
         var second = await OpenAsync();
         try
         {
-            await SubmitAsync(second, "CI-SUP-1");
-            var save = FindButton(second, "Save Supplier")!;
+            var save = Submit(second, "CI-SUP-1");
             await WaitUntilAsync(() => save.IsEnabled &&
                 Descendants<TextBlock>(second).Any(t => t.Text.Contains("already", StringComparison.OrdinalIgnoreCase)),
                 "duplicate supplier stays editable and reports existing code");
