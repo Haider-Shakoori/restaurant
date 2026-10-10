@@ -502,18 +502,53 @@ internal static class RestaurantOperationalPages
             var save = new Button { Content = "Save Recipe", Height = 38 };
             save.Click += async (_, _) =>
             {
+                if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                    menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
+                {
+                    feedback.Text = "Select branch, menu item and at least one ingredient.";
+                    return;
+                }
+
+                // Microsoft.Data.Sqlite runs most async commands synchronously.
+                // Never execute its lock waits or transaction commit on the WPF
+                // dispatcher, particularly while ShowDialog runs a modal loop.
+                // Snapshot inputs and guard against repeated clicks/versions.
+                save.IsEnabled = false;
+                save.Content = "Saving recipe…";
+                feedback.Text = "Saving recipe to local inventory. Please wait…";
+                var snapshot = components.ToArray();
+                var branchId = selectedBranch.Id;
+                var menuId = selectedMenu.Id;
+                var recipeName = selectedMenu.Name;
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 try
                 {
-                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
-                        menu.SelectedItem is not LocalMenuItem selectedMenu || components.Count == 0)
-                        throw new InvalidOperationException("Select branch, menu item and at least one ingredient.");
-                    save.IsEnabled = false;
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    await new LocalInventoryService(factory).CreateRecipeVersionAsync(
-                        selectedBranch.Id, selectedMenu.Id, selectedMenu.Name, components, actor, CancellationToken.None);
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).CreateRecipeVersionAsync(
+                            branchId, menuId, recipeName, snapshot, actor, timeout.Token)
+                            .ConfigureAwait(false);
+                    }, timeout.Token);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                {
+                    App.LogRecoverableException("recipe-create-timeout", ex);
+                    feedback.Text = "Recipe save took too long. Close this window and refresh Recipes " +
+                        "to check if it was saved before trying again.";
+                    // A cancelled request may already have committed; do not let a
+                    // second click silently create an additional recipe version.
+                    save.Content = "Check saved recipes before retrying";
+                }
+                catch (Exception ex)
+                {
+                    App.LogRecoverableException("recipe-create-save", ex);
+                    feedback.Text = "Recipe could not be confirmed: " + ex.Message +
+                        " Check existing versions before retrying.";
+                    save.Content = "Close and verify recipe versions";
+                }
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
