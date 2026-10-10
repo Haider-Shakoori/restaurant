@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Windows.Input;
 using System.Windows;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop.Appearance;
@@ -9,12 +11,18 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
     private bool _initialized;
+    private bool _posFullScreen;
+    private WindowState _originalWindowState;
+    private WindowStyle _originalWindowStyle;
+    private ResizeMode _originalResizeMode;
 
     public MainWindow(AuthSession session)
     {
         InitializeComponent();
         _viewModel = new MainWindowViewModel(session);
         DataContext = _viewModel;
+        _viewModel.PropertyChanged += OnWorkspaceChanged;
+        PreviewKeyDown += OnWorkspaceKeyDown;
         Loaded += OnLoadedAsync;
         Closed += OnClosed;
         ThemeManager.ThemeChanged += OnThemeChanged;
@@ -59,8 +67,75 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _viewModel.PropertyChanged -= OnWorkspaceChanged;
+        PreviewKeyDown -= OnWorkspaceKeyDown;
         ThemeManager.ThemeChanged -= OnThemeChanged;
         _viewModel.ReleaseNotifications();
+    }
+
+    private void OnWorkspaceChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.CurrentRoute))
+            SetPosFullScreen(_viewModel.CurrentRoute == "pos");
+    }
+
+    private void SetPosFullScreen(bool enabled)
+    {
+        if (_posFullScreen == enabled)
+            return;
+
+        if (enabled)
+        {
+            _originalWindowState = WindowState;
+            _originalWindowStyle = WindowStyle;
+            _originalResizeMode = ResizeMode;
+            SidebarContainer.Visibility = Visibility.Collapsed;
+            SidebarColumn.Width = new GridLength(0);
+            ShellHeader.Visibility = Visibility.Collapsed;
+            TopBarRow.Height = new GridLength(0);
+            ExitPosButton.Visibility = Visibility.Visible;
+            WorkspaceContent.MaxWidth = double.PositiveInfinity;
+            WindowState = WindowState.Normal;
+            WindowStyle = WindowStyle.None;
+            ResizeMode = ResizeMode.NoResize;
+            WindowState = WindowState.Maximized;
+            _posFullScreen = true;
+        }
+        else
+        {
+            SidebarContainer.Visibility = Visibility.Visible;
+            SidebarColumn.Width = new GridLength(252);
+            ShellHeader.Visibility = Visibility.Visible;
+            TopBarRow.Height = new GridLength(76);
+            ExitPosButton.Visibility = Visibility.Collapsed;
+            WorkspaceContent.MaxWidth = 1900;
+            WindowState = WindowState.Normal;
+            WindowStyle = _originalWindowStyle;
+            ResizeMode = _originalResizeMode;
+            WindowState = _originalWindowState;
+            _posFullScreen = false;
+        }
+    }
+
+    private async void OnExitPosClick(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.NavigateCommand.ExecuteAsync("dashboard");
+    }
+
+    private async void OnWorkspaceKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_viewModel.CurrentRoute != "pos")
+            return;
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            await _viewModel.NavigateCommand.ExecuteAsync("dashboard");
+        }
+        else if (e.Key == Key.F11)
+        {
+            e.Handled = true;
+            SetPosFullScreen(!_posFullScreen);
+        }
     }
 
     private async void OnSwitchOperatorClick(object sender, RoutedEventArgs e)
