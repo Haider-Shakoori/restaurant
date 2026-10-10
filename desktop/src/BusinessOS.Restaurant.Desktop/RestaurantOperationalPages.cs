@@ -447,8 +447,8 @@ internal static class RestaurantOperationalPages
             var ingredients = await lookup.InventoryItems.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).ToListAsync();
             var dialog = new Window
             {
-                Title = "New Recipe Version", Width = 900, Height = 660,
-                MinWidth = 760, MinHeight = 555,
+                Title = "New Recipe Version", Width = 900, Height = 730,
+                MinWidth = 760, MinHeight = 660,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
             dialog.SetResourceReference(Window.BackgroundProperty, "SurfaceBrush");
@@ -551,7 +551,7 @@ internal static class RestaurantOperationalPages
                         await new LocalInventoryService(factory).CreateRecipeVersionAsync(
                             branchId, menuId, recipeName, snapshot, actor, timeout.Token)
                             .ConfigureAwait(false);
-                    }, timeout.Token);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
                 }
                 catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
@@ -759,12 +759,13 @@ internal static class RestaurantOperationalPages
         StackPanel form, ListBox ingredientRows, Button remove,
         TextBlock summary, TextBlock feedback, Button save, Button cancel)
     {
-        var layout = new Grid { Margin = new Thickness(22, 16, 22, 16) };
+        var layout = new Grid { Margin = new Thickness(0) };
+        layout.SetResourceReference(Panel.BackgroundProperty, "SurfaceBrush");
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var header = new StackPanel { Margin = new Thickness(0, 0, 0, 16) };
+        var header = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
         header.Children.Add(new TextBlock
         {
             Text = "Build a recipe", FontSize = 24,
@@ -780,7 +781,7 @@ internal static class RestaurantOperationalPages
         Grid.SetRow(header, 0);
         layout.Children.Add(header);
 
-        var columns = new Grid();
+        var columns = new Grid { Margin = new Thickness(22, 0, 22, 0) };
         columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(11, GridUnitType.Star) });
         columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(10, GridUnitType.Star) });
 
@@ -838,7 +839,7 @@ internal static class RestaurantOperationalPages
         Grid.SetRow(columns, 1);
         layout.Children.Add(columns);
 
-        var footer = new Grid { Margin = new Thickness(0, 16, 0, 0) };
+        var footer = new Grid { Margin = new Thickness(22, 14, 22, 18) };
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
