@@ -2,6 +2,7 @@
 
 @section('title', 'POS & Cashier')
 @section('heading', 'POS & Cashier')
+@section('pos_fullscreen', 'true')
 @section('subheading', 'Serve ready food, issue bills, record payments and release tables securely.')
 
 @section('content')
@@ -16,6 +17,14 @@
         </div>
     @endif
     @include('tenant.pos.partials.photo-order')
+    <section id="pos-cashier" class="px-4 pb-4 pt-6 sm:px-6">
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h2 class="text-xl font-black text-slate-950">Payments, service & cashier</h2>
+                <p class="text-sm text-slate-500">Use the same authoritative billing and payment flows; partial payment never frees an occupied table.</p>
+            </div>
+            <a href="#pos-order-entry" class="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700">↑ Back to POS</a>
+        </div>
     <div class="mb-6 grid gap-4 sm:grid-cols-3">
         <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p class="text-xs font-black uppercase tracking-widest text-slate-500">Ready to serve</p>
@@ -142,4 +151,5 @@
             </section>
         </div>
     </div>
+    </section>
 @endsection
