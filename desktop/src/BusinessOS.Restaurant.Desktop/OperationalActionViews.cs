@@ -877,6 +877,21 @@ internal static class OperationalActionViews
             .Select(x => x.Row)
             .ToList();
 
+        // Include billed orders on table cards: paid-in-part tables must
+        // never appear ownerless or available before final settlement.
+        var allFloorOrders = (await (
+            from order in db.Orders.AsNoTracking()
+            where order.ServiceType == "dine_in" &&
+                  order.Status != "closed" && order.Status != "cancelled"
+            select new
+            {
+                Row = new TableOrderChoice(order.Id, order.ClientOrderId,
+                    order.DiningTableId, "", order.Status, order.Total),
+                order.UpdatedAtUtc,
+            }).ToListAsync())
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .Select(x => x.Row).ToArray();
+
         var availableTables = rows
             .Where(x => x.Status == "available")
             .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
@@ -954,19 +969,20 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
-        // The visual floor map is the primary touch view; the detailed grid
-        // remains available without duplicating the underlying table records.
+        // List, Grid and Floor all consume the same current SQLite table rows.
+        // The Floor mode preserves dining-area grouping; Grid shows all tiles.
         grid.Visibility = Visibility.Collapsed;
-        var showTableList = Button("Show table list");
-        showTableList.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-        showTableList.Click += (_, _) =>
+        var modeChooser = new WrapPanel { Name = "DiningFloorViewModes", Margin = new Thickness(0, 4, 0, 8) };
+        var listMode = Button("List");
+        var gridMode = Button("Grid");
+        var floorMode = Button("Floor");
+        foreach (var mode in new[] { listMode, gridMode, floorMode })
         {
-            grid.Visibility = grid.Visibility == Visibility.Visible
-                ? Visibility.Collapsed : Visibility.Visible;
-            showTableList.Content = grid.Visibility == Visibility.Visible
-                ? "Hide table list" : "Show table list";
-        };
-        root.Children.Add(showTableList);
+            mode.MinWidth = 84;
+            mode.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            modeChooser.Children.Add(mode);
+        }
+        root.Children.Add(modeChooser);
         root.Children.Add(grid);
 
         var operations = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
@@ -983,9 +999,24 @@ internal static class OperationalActionViews
             Margin = new Thickness(0, 10, 0, 0),
         };
 
-        root.Children.Insert(1, BuildVisualFloorBoard(
-            rows, activeOrders, availableTables,
-            sourceOrderBox, targetTableBox, operationStatus));
+        var visualGrid = BuildVisualFloorBoard(
+            rows, allFloorOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus, groupByArea: false);
+        var visualFloor = BuildVisualFloorBoard(
+            rows, allFloorOrders, availableTables,
+            sourceOrderBox, targetTableBox, operationStatus, groupByArea: true);
+        visualGrid.Visibility = Visibility.Collapsed;
+        root.Children.Insert(1, visualFloor);
+        root.Children.Insert(2, visualGrid);
+        void SelectFloorMode(string mode)
+        {
+            visualFloor.Visibility = mode == "floor" ? Visibility.Visible : Visibility.Collapsed;
+            visualGrid.Visibility = mode == "grid" ? Visibility.Visible : Visibility.Collapsed;
+            grid.Visibility = mode == "list" ? Visibility.Visible : Visibility.Collapsed;
+        }
+        listMode.Click += (_, _) => SelectFloorMode("list");
+        gridMode.Click += (_, _) => SelectFloorMode("grid");
+        floorMode.Click += (_, _) => SelectFloorMode("floor");
 
         operations.Children.Add(Label("Transfer order"));
         var transferRow = new WrapPanel();
@@ -1919,7 +1950,8 @@ internal static class OperationalActionViews
         IReadOnlyList<Choice> availableTables,
         ComboBox sourceOrderBox,
         ComboBox targetTableBox,
-        TextBlock statusText)
+        TextBlock statusText,
+        bool groupByArea = true)
     {
         var floor = new StackPanel { Margin = new Thickness(0, 10, 0, 12) };
         var summary = new TextBlock
@@ -1945,6 +1977,12 @@ internal static class OperationalActionViews
         }
 
         foreach (var area in tables.GroupBy(x => x.Area))
+        {
+            if (!groupByArea) break;
+        }
+        foreach (var area in groupByArea
+            ? tables.GroupBy(x => x.Area)
+            : tables.GroupBy(_ => "All tables"))
         {
             var areaTitle = new TextBlock
             {
@@ -2031,7 +2069,9 @@ internal static class OperationalActionViews
                     if (order is not null)
                     {
                         sourceOrderBox.SelectedItem = order;
-                        statusText.Text = $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
+                        statusText.Text = order.Status == "billed"
+                            ? $"{table.Name} has an unpaid bill · AFN {order.Total:N2}. Open POS & Cashier and settle the balance before freeing the table."
+                            : $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
                     }
                     else if (table.Status == "available")
                     {
