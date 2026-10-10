@@ -2064,7 +2064,7 @@ internal static class OperationalActionViews
                 {
                     if (order is not null)
                     {
-                        sourceOrderBox.SelectedItem = order;
+                        sourceOrderBox.SelectedItem = activeOrders.FirstOrDefault(x => x.Id == order.Id);
                         statusText.Text = order.Status == "billed"
                             ? $"{table.Name} has an unpaid bill · AFN {order.Total:N2}. Open POS & Cashier and settle the balance before freeing the table."
                             : $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
