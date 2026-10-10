@@ -38,7 +38,8 @@ public sealed class OperationalDataRefreshService
         var activation = await _activationStore.LoadAsync(cancellationToken);
         var session = await _sessionStore.LoadAsync(cancellationToken);
 
-        if (activation is null || session is null)
+        if (activation is null || session is null ||
+            !DesktopOperatingMode.CloudAllowed(activation, settings))
         {
             return false;
         }
