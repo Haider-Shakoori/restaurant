@@ -11,6 +11,7 @@ use App\Models\LicenseKey;
 use App\Services\Platform\LicenseService;
 use App\Services\Platform\SubscriptionService;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
 
 class LicenseController extends Controller
@@ -100,6 +101,47 @@ class LicenseController extends Controller
 
         return back()->with('status',
             'Desktop mode updated. The Windows desktop must refresh its signed license while online to apply the change. Existing offline licenses cannot be remotely changed until refreshed or expired.');
+    }
+
+    /**
+     * Issue a signed offline renewal file for an already activated device.
+     * This download contains only signed public lease claims, never device
+     * credentials, signing keys or server secrets.
+     */
+    public function downloadOfflineLease(
+        Business $business,
+        DeviceActivation $deviceActivation,
+        LicenseService $licenses,
+    ): Response {
+        abort_unless($deviceActivation->business_id === $business->id, 404);
+        abort_unless($business->desktop_mode === 'standalone_offline', 422);
+        abort_unless($deviceActivation->platform === 'windows', 422);
+
+        $lease = $licenses->issueLease($deviceActivation->load(['licenseKey', 'business']));
+
+        LicenseEvent::create([
+            'business_id' => $business->id,
+            'admin_user_id' => request()->user()->id,
+            'event' => 'desktop.offline_lease.exported',
+            'message' => 'A device-bound signed offline lease renewal was exported.',
+            'context' => ['device_id' => $deviceActivation->id],
+            'occurred_at' => now(),
+        ]);
+
+        $filename = 'restaurant-offline-lease-'.preg_replace(
+            '/[^a-zA-Z0-9_-]/', '', (string) $deviceActivation->id,
+        ).'.json';
+
+        return response(
+            json_encode($lease, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            200,
+            [
+                'Content-Type' => 'application/json',
+                'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+                'Cache-Control' => 'private, no-store, max-age=0',
+                'X-Content-Type-Options' => 'nosniff',
+            ],
+        );
     }
 
     public function generate(
