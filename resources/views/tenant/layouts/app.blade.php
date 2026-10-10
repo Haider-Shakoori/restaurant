@@ -9,7 +9,7 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     @endif
 </head>
-<body class="min-h-screen bg-slate-100 text-slate-900 antialiased">
+<body class="min-h-screen bg-slate-100 text-slate-900 antialiased @hasSection('pos_fullscreen') overflow-hidden @endif">
 @php
     $role = $currentUser?->role;
     $managerRoles = ['owner', 'admin', 'manager'];
@@ -17,8 +17,8 @@
     $inventoryRoles = ['owner', 'admin', 'manager', 'inventory'];
 @endphp
 
-<div class="min-h-screen lg:grid lg:grid-cols-[270px_1fr]">
-    <aside class="border-b border-slate-800 bg-slate-950 text-slate-200 lg:min-h-screen lg:border-b-0 lg:border-r">
+<div class="min-h-screen lg:grid @hasSection('pos_fullscreen') lg:grid-cols-1 @else lg:grid-cols-[270px_1fr] @endif">
+    <aside class="border-b border-slate-800 bg-slate-950 text-slate-200 lg:min-h-screen lg:border-b-0 lg:border-r @hasSection('pos_fullscreen') hidden @endif">
         <div class="px-5 py-5">
             <a href="/dashboard" class="flex items-center gap-3">
                 <span class="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-400 font-black text-slate-950">B</span>
@@ -50,8 +50,8 @@
         </div>
     </aside>
 
-    <main class="min-w-0">
-        <header class="border-b border-slate-200 bg-white px-5 py-5 sm:px-6">
+    <main class="min-w-0 @hasSection('pos_fullscreen') h-[100dvh] overflow-y-auto @endif">
+        <header class="border-b border-slate-200 bg-white px-5 py-5 sm:px-6 @hasSection('pos_fullscreen') hidden @endif">
             <div class="mx-auto flex max-w-7xl items-start justify-between gap-4">
                 <div>
                     <h1 class="text-2xl font-black tracking-tight text-slate-950">@yield('heading', 'Restaurant')</h1>
@@ -65,7 +65,7 @@
             </div>
         </header>
 
-        <div class="mx-auto max-w-7xl px-5 py-6 sm:px-6">
+        <div class="@hasSection('pos_fullscreen') w-full max-w-none p-0 @else mx-auto max-w-7xl px-5 py-6 sm:px-6 @endif">
             @if (session('status'))
                 <div class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">{{ session('status') }}</div>
             @endif

@@ -377,20 +377,8 @@ internal static class OperationalActionViews
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.Children.Add(formCard);
         root.Children.Add(ordersCard);
-        root.SizeChanged += (_, _) =>
-        {
-            // On smaller Windows displays place the POS form above the orders
-            // list. The grid retains horizontal scrolling for detailed columns.
-            var compact = root.ActualWidth < 960;
-            root.ColumnDefinitions[0].Width = compact ? new GridLength(1, GridUnitType.Star) : new GridLength(470);
-            root.ColumnDefinitions[1].Width = new GridLength(compact ? 0 : 16);
-            root.ColumnDefinitions[2].Width = compact ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(ordersCard, compact ? 0 : 2);
-            Grid.SetRow(ordersCard, 0);
-            Grid.SetRow(formCard, compact ? 1 : 0);
-            ordersCard.Margin = new Thickness(0);
-            formCard.Margin = compact ? new Thickness(0, 12, 0, 0) : new Thickness(0);
-        };
+        // Full-screen photo POS is composed after all cashier/KOT event handlers
+        // are wired, preserving the existing authoritative local workflows.
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
         cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
@@ -793,8 +781,7 @@ internal static class OperationalActionViews
             }
         }
 
-        var page = new StackPanel();
-        page.Children.Add(root);
+
         // Waiters may enter orders but never see cashier-only billing/session
         // controls. Local service authorization remains the final action gate.
         var operatorSession = await new WindowsSessionStore().LoadAsync();
@@ -818,9 +805,75 @@ internal static class OperationalActionViews
             orderListPanel.Children.Add(toggleCashier);
             orderListPanel.Children.Add(cashierCard);
         }
+        // The photo menu is the main workspace. Order setup, live cart, KOT,
+        // advanced modifiers, and cashier stay together in the right ticket rail.
+        // Reparent the existing controls; never create duplicate order actions.
+        form.Children.Remove(photoCatalog);
+        form.Children.Remove(menuSearchBox);
+        var oldSearchLabel = form.Children.OfType<TextBlock>()
+            .FirstOrDefault(label => label.Text == "Search menu");
+        if (oldSearchLabel is not null) form.Children.Remove(oldSearchLabel);
+
+        root.Children.Remove(formCard);
+        root.Children.Remove(ordersCard);
+        root.RowDefinitions.Clear();
+        root.ColumnDefinitions.Clear();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var catalogTitle = Header("PHOTO MENU", "Search or tap a dish. The order ticket remains on the right.");
+        var catalogHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        catalogHeader.Children.Add(catalogTitle);
+        catalogHeader.Children.Add(menuSearchBox);
+        var catalog = new DockPanel();
+        DockPanel.SetDock(catalogHeader, Dock.Top);
+        catalog.Children.Add(catalogHeader);
+        catalog.Children.Add(new ScrollViewer
+        {
+            Content = photoCatalog,
+            Name = "PosFullscreenPhotoGrid",
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        });
+        var leftCard = Card(catalog);
+        leftCard.Name = "PosPhotoFirstPane";
+        Grid.SetColumn(leftCard, 0);
+        root.Children.Add(leftCard);
+
+        var ticketPanel = new StackPanel { Name = "PosFullscreenOrderTicket" };
+        ticketPanel.Children.Add(ordersCard);
+        var editOrderSection = new Expander
+        {
+            Header = "Order setup, items, modifiers & KOT",
+            IsExpanded = true,
+            Margin = new Thickness(0, 12, 0, 0),
+            Content = formCard,
+        };
+        ticketPanel.Children.Add(editOrderSection);
+        var rightScroll = new ScrollViewer
+        {
+            Content = ticketPanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        Grid.SetColumn(rightScroll, 2);
+        root.Children.Add(rightScroll);
+        root.MinHeight = 680;
+        root.SizeChanged += (_, _) =>
+        {
+            var narrow = root.ActualWidth < 920;
+            root.ColumnDefinitions[0].Width = narrow
+                ? new GridLength(1, GridUnitType.Star) : new GridLength(1.7, GridUnitType.Star);
+            root.ColumnDefinitions[1].Width = new GridLength(narrow ? 8 : 14);
+            root.ColumnDefinitions[2].Width = narrow
+                ? new GridLength(1, GridUnitType.Star) : new GridLength(1, GridUnitType.Star);
+        };
+
         return new ScrollViewer
         {
-            Content = WorkspaceFrostedSurface.Wrap(page),
+            Content = WorkspaceFrostedSurface.Wrap(root),
+            Name = "FullscreenPosWorkspace",
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };

@@ -139,12 +139,12 @@
 
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="252" />
+                <ColumnDefinition x:Name="SidebarColumn" Width="252" />
                 <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0"
+            <Border x:Name="SidebarContainer" Grid.Column="0"
                     Background="{DynamicResource SidebarBrush}"
                     BorderBrush="{DynamicResource CardBorderBrush}"
                     BorderThickness="0,0,1,0"
@@ -271,14 +271,14 @@
                 </DockPanel>
             </Border>
 
-            <Grid Grid.Column="2">
+            <Grid x:Name="WorkspaceShell" Grid.Column="2">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="76" />
+                    <RowDefinition x:Name="TopBarRow" Height="76" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Grid.Row="0"
+                <Border x:Name="ShellHeader" Grid.Row="0"
                         Background="{DynamicResource TopBarBrush}"
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0,0,0,1"
@@ -410,11 +410,23 @@
                         Padding="14">
                     <!-- Constrain very wide 4K pages without scaling the visual tree.
                          Smaller resolutions retain their full available width. -->
-                    <ContentControl Content="{Binding CurrentPage}"
+                    <ContentControl x:Name="WorkspaceContent"
+                                    Content="{Binding CurrentPage}"
                                     HorizontalAlignment="Stretch"
                                     MaxWidth="1900"
                                     SnapsToDevicePixels="True" />
                 </Border>
+
+                <!-- The POS owns the entire screen. Always provide a discoverable
+                     way back to the standard navigation and desktop chrome. -->
+                <Button x:Name="ExitPosButton" Grid.Row="2"
+                        Panel.ZIndex="35"
+                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Margin="0,6,24,0" Padding="16,9"
+                        Background="#0F172A"
+                        Foreground="White" FontWeight="Bold"
+                        Content="Exit POS  (Esc)" Visibility="Collapsed"
+                        Click="OnExitPosClick" />
             </Grid>
         </Grid>
 

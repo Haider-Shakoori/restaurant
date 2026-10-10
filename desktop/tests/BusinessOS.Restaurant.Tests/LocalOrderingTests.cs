@@ -325,6 +325,79 @@ public sealed class LocalOrderingTests
         }
     }
 
+    [Fact]
+    public async Task Mobile_waiter_order_does_not_break_parallel_desktop_settings_tables_and_pos_reads()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var otherInstances = Enumerable.Range(0, 12)
+                .Select(_ => new LocalDatabaseFactory(root)).ToArray();
+
+            // Simulate desktop startup, LAN service and several workspace
+            // navigations racing through schema initialization.
+            await Task.WhenAll(otherInstances.Select(x => x.EnsureCreatedAsync()));
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+
+            var sync = new LocalSyncService(factory, catalog);
+            var waiter = new LocalTerminalPrincipal(
+                "waiter-android-1", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+            var opening = await PushOneAsync(sync, waiter, "PHONE-OPEN-1", "order.open", new
+            {
+                client_order_id = "MOBILE-ORDER-1",
+                dining_table_id = "table-1",
+                guest_count = 3,
+            });
+            Assert.Equal("accepted", opening.GetProperty("status").GetString());
+            var line = await PushOneAsync(sync, waiter, "PHONE-ITEM-1", "order.item.add", new
+            {
+                client_order_id = "MOBILE-ORDER-1",
+                client_line_id = "MOBILE-LINE-1",
+                menu_item_id = "item-1",
+                quantity = 2,
+            });
+            Assert.Equal("accepted", line.GetProperty("status").GetString());
+            var kitchen = await PushOneAsync(sync, waiter, "PHONE-KOT-1", "order.submit", new
+            {
+                client_order_id = "MOBILE-ORDER-1",
+            });
+            Assert.Equal("accepted", kitchen.GetProperty("status").GetString());
+
+            // Repeated visits to Settings, POS and Tables must not modify
+            // schema indexes or try KOT backfills while the order is live.
+            await Task.WhenAll(otherInstances.Select(async x =>
+            {
+                await x.EnsureCreatedAsync();
+                await using var read = x.Create();
+                Assert.Equal("occupied", (await read.DiningTables.SingleAsync()).Status);
+                Assert.Single(await read.Orders.ToListAsync());
+                Assert.Single(await read.OrderItems.ToListAsync());
+                var settings = await new LocalRestaurantSettingsService(x).GetAsync();
+                Assert.True(settings.KitchenQueueEnabled);
+            }));
+
+            var manager = new LocalTerminalPrincipal(
+                "desktop-manager-1", 7, "manager-1", "Manager", "manager", "tenant-1");
+            var updated = await new LocalRestaurantSettingsService(factory).UpdateAsync(
+                new RestaurantWorkflowSettingsUpdate(true, true, false, false, true,
+                    10, 20, false, "block"), manager);
+            Assert.Equal("block", updated.NegativeStockPolicy);
+
+            await using var final = factory.Create();
+            Assert.Equal("submitted", (await final.Orders.SingleAsync()).Status);
+            Assert.Equal(500m, (await final.Orders.SingleAsync()).Total);
+            Assert.Single(await final.KotRounds.ToListAsync());
+            Assert.Equal("occupied", (await final.DiningTables.SingleAsync()).Status);
+            Assert.Single(await final.OrderItems.ToListAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static async Task<JsonElement> PushOneAsync(
         LocalSyncService sync,
         LocalTerminalPrincipal principal,
