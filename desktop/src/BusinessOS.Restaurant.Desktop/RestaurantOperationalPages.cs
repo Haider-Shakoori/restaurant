@@ -456,11 +456,11 @@ internal static class RestaurantOperationalPages
             if (owner is not null) dialog.Owner = owner;
             var form = Stack();
             form.Margin = new Thickness(18);
-            var branch = new ComboBox { ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
-            var menu = new ComboBox { ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
-            var ingredient = new ComboBox { ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
-            var quantity = new TextBox { Text = "1", Height = 34 };
-            var recipeUnit = new ComboBox { Height = 34, MinWidth = 110 };
+            var branch = new ComboBox { Name = "RecipeBranchInput", ItemsSource = branches, DisplayMemberPath = "Name", Height = 34 };
+            var menu = new ComboBox { Name = "RecipeMenuItemInput", ItemsSource = menuItems, DisplayMemberPath = "Name", Height = 34 };
+            var ingredient = new ComboBox { Name = "RecipeIngredientInput", ItemsSource = ingredients, DisplayMemberPath = "Name", Height = 34 };
+            var quantity = new TextBox { Name = "RecipeQuantityInput", Text = "1", Height = 34 };
+            var recipeUnit = new ComboBox { Name = "RecipeUnitInput", Height = 34, MinWidth = 110 };
             var unitHelp = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 5) };
             unitHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
             ingredient.SelectionChanged += (_, _) =>
@@ -513,6 +513,8 @@ internal static class RestaurantOperationalPages
             form.Children.Add(add);
             // The selected ingredients have their own scrollable summary column.
             var feedback = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 8) };
+            var cancel = new Button { Content = "Cancel", Height = 40, MinWidth = 120 };
+            cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             var save = new Button { Content = "Save Recipe", Height = 38 };
             save.Click += async (_, _) =>
             {
@@ -602,8 +604,6 @@ internal static class RestaurantOperationalPages
             add.Click += (_, _) => RefreshIngredients();
             RefreshIngredients();
 
-            var cancel = new Button { Content = "Cancel", Height = 40, MinWidth = 120 };
-            cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             cancel.Click += (_, _) => dialog.Close();
 
             dialog.Content = BuildRecipeVersionEditor(
@@ -820,10 +820,6 @@ internal static class RestaurantOperationalPages
         var selectedGrid = new Grid();
         selectedGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         selectedGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        foreach (var child in selected.Children.OfType<UIElement>().ToArray())
-        {
-            selected.Children.Remove(child);
-        }
         // Use a fixed header and a separately scrollable ingredient list.
         Grid.SetRow(selected, 0);
         selectedGrid.Children.Add(selected);
