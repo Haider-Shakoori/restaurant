@@ -146,10 +146,22 @@ internal static class RestaurantPhotoPosCatalog
 
     private static async Task<Uri?> CacheMenuPhotoAsync(string url, string? tenantUrl)
     {
-        if (!IsAllowedTenantMediaUrl(url, tenantUrl)) return null;
-
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "BusinessOS", "Restaurant", "menu-photos");
+
+        // A standalone file URI may only reference pictures copied into our
+        // own per-user photo directory, never an arbitrary path or network share.
+        if (standalone && Uri.TryCreate(url, UriKind.Absolute, out var local) && local.IsFile)
+        {
+            var normalized = Path.GetFullPath(local.LocalPath);
+            var parent = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+            return normalized.StartsWith(parent, StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(normalized) ? new Uri(normalized) : null;
+        }
+
+        if (!IsAllowedTenantMediaUrl(url, tenantUrl)) return null;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
         var file = Path.Combine(root, hash + ".img");
         if (File.Exists(file) && new FileInfo(file).Length > 0 &&
@@ -158,8 +170,7 @@ internal static class RestaurantPhotoPosCatalog
 
         // Standalone mode must not fetch menu photos from a remote URL.
         // Previously downloaded pictures remain available from the private cache.
-        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
-        if (BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+        if (standalone)
             return File.Exists(file) ? new Uri(file) : null;
 
         await DownloadSlots.WaitAsync();
