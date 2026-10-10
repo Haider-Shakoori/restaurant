@@ -30,6 +30,7 @@ use Stancl\Tenancy\Database\Concerns\CentralConnection;
     'subscription_ends_at',
     'first_activated_at',
     'last_health_at',
+    'desktop_mode',
 ])]
 class Business extends Model
 {
