@@ -117,6 +117,30 @@ public sealed class CashierPosTests
                 cashierUser,
                 CancellationToken.None);
 
+            // A partial cash payment must not release the table. Network/LAN
+            // retries with the same idempotency key must never count twice.
+            await cashier.AddPaymentAsync(
+                billId,
+                new LocalPaymentRequest(
+                    sessionId, 225m, "cash", "PAY-1",
+                    BillSplitId: splits[0].GetProperty("id").GetString()),
+                cashierUser, CancellationToken.None);
+            await using (var checkpoint = factory.Create())
+            {
+                var partial = await checkpoint.Bills.SingleAsync();
+                Assert.Equal("open", partial.Status);
+                Assert.Equal(225m, partial.PaidAmount);
+                Assert.Equal(225m, partial.BalanceDue);
+                Assert.Equal("occupied", (await checkpoint.DiningTables
+                    .SingleAsync(x => x.Id == "table-1")).Status);
+                Assert.Single(await checkpoint.Payments.ToListAsync());
+            }
+
+            await Assert.ThrowsAsync<LocalSyncConflictException>(() =>
+                cashier.AddPaymentAsync(billId,
+                    new LocalPaymentRequest(sessionId, 226m, "cash", "OVERPAY-1"),
+                    cashierUser, CancellationToken.None));
+
             await cashier.AddPaymentAsync(
                 billId,
                 new LocalPaymentRequest(
@@ -136,6 +160,8 @@ public sealed class CashierPosTests
                 var table = await db.DiningTables.SingleAsync(value => value.Id == "table-1");
                 var receipt = await db.ReceiptPrintJobs.SingleAsync();
 
+                Assert.Equal(2, await db.Payments.CountAsync());
+                Assert.Equal(450m, await db.Payments.SumAsync(x => x.Amount));
                 Assert.Equal("paid", bill.Status);
                 Assert.Equal(450m, bill.PaidAmount);
                 Assert.Equal(0m, bill.BalanceDue);

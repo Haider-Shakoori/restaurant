@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using BusinessOS.Restaurant.Authentication;
+using BusinessOS.Restaurant.LocalServer;
 using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,8 @@ namespace BusinessOS.Restaurant.Desktop;
 internal sealed class StandaloneCatalogWindow : Window
 {
     private readonly LocalDatabaseFactory _factory = new();
+    private readonly string _actorRole;
+    private readonly StandaloneCatalogService _catalog = new(new LocalDatabaseFactory());
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly StackPanel _content = new() { Margin = new Thickness(15) };
 
@@ -23,6 +26,7 @@ internal sealed class StandaloneCatalogWindow : Window
         if (role.Trim().ToLowerInvariant() is not ("owner" or "admin" or "manager"))
             throw new UnauthorizedAccessException("Only restaurant managers may edit local catalog data.");
 
+        _actorRole = role;
         Title = "Standalone Restaurant · Local Setup";
         Width = 860; Height = 680; MinWidth = 620; MinHeight = 460;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -61,6 +65,9 @@ internal sealed class StandaloneCatalogWindow : Window
         var branches = await db.Branches.AsNoTracking().OrderBy(b => b.Name).ToArrayAsync();
         var areas = await db.DiningAreas.AsNoTracking().OrderBy(a => a.Name).ToArrayAsync();
         var categories = await db.MenuCategories.AsNoTracking().OrderBy(c => c.Name).ToArrayAsync();
+        var existingDishes = await db.MenuItems.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
+        var tables = await db.DiningTables.AsNoTracking().OrderBy(x => x.Code).ToArrayAsync();
+        var stations = await db.KitchenStations.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
 
         _content.Children.Clear();
         _content.Children.Add(new TextBlock
@@ -201,9 +208,164 @@ internal sealed class StandaloneCatalogWindow : Window
             });
         });
 
-        foreach (var part in new[] { branchBlock, areaBlock, tableBlock, categoryBlock, menuBlock })
+        var editDishBlock = Block("6 · Edit or hide existing dish",
+            "A dish's current name, AFN price, SKU or sale availability can change without altering the historical amounts on paid orders.");
+        var dishChoice = new ComboBox { Width = 235, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = existingDishes, Margin = new Thickness(0, 0, 10, 8) };
+        var editDishName = Field("Dish name"); var editPrice = Field("AFN price"); editPrice.Width = 120;
+        var editSku = Field("SKU"); editSku.Width = 120;
+        var dishAvailable = new CheckBox { Content = "Available for sale", IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 8) };
+        dishChoice.SelectionChanged += (_, _) =>
+        {
+            if (dishChoice.SelectedItem is not LocalMenuItem dish) return;
+            editDishName.Text = dish.Name;
+            editPrice.Text = dish.Price.ToString(CultureInfo.CurrentCulture);
+            editSku.Text = dish.Sku ?? "";
+            dishAvailable.IsChecked = dish.IsAvailable;
+        };
+        if (existingDishes.Length > 0) dishChoice.SelectedIndex = 0;
+        var editDishSave = Action("Save dish changes");
+        editDishSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        {
+            if (dishChoice.SelectedItem is not LocalMenuItem dish)
+                throw new InvalidOperationException("Select a dish first.");
+            if (!decimal.TryParse(editPrice.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value))
+                throw new ArgumentException("Enter a valid AFN price.");
+            await _catalog.UpdateDishAsync(dish.Id, editDishName.Text, value,
+                dishAvailable.IsChecked == true, editSku.Text, _actorRole);
+        });
+        var dishEditRow = new WrapPanel();
+        foreach (var control in new FrameworkElement[]
+            { dishChoice, editDishName, editPrice, editSku, dishAvailable, editDishSave })
+            dishEditRow.Children.Add(control);
+        editDishBlock.Children.Add(dishEditRow);
+
+        var editTableBlock = Block("7 · Edit or disable table",
+            "Occupied, reserved and unsettled tables cannot be deactivated, even if their order is billed.");
+        var tableChoice = new ComboBox { Width = 200, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = tables, Margin = new Thickness(0, 0, 10, 8) };
+        var editTableName = Field("Table name"); var editSeats = Field("Seats"); editSeats.Width = 70;
+        var tableActive = new CheckBox { Content = "Active", IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 8) };
+        tableChoice.SelectionChanged += (_, _) =>
+        {
+            if (tableChoice.SelectedItem is not LocalDiningTable table) return;
+            editTableName.Text = table.Name;
+            editSeats.Text = table.Capacity.ToString(CultureInfo.InvariantCulture);
+            tableActive.IsChecked = table.IsActive;
+        };
+        if (tables.Length > 0) tableChoice.SelectedIndex = 0;
+        var editTableSave = Action("Save table changes");
+        editTableSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        {
+            if (tableChoice.SelectedItem is not LocalDiningTable table)
+                throw new InvalidOperationException("Select a table first.");
+            if (!int.TryParse(editSeats.Text, out var seats))
+                throw new ArgumentException("Enter a valid seat count.");
+            await _catalog.UpdateTableAsync(table.Id, editTableName.Text, seats,
+                tableActive.IsChecked == true, _actorRole);
+        });
+        var tableEditRow = new WrapPanel();
+        foreach (var control in new FrameworkElement[]
+            { tableChoice, editTableName, editSeats, tableActive, editTableSave })
+            tableEditRow.Children.Add(control);
+        editTableBlock.Children.Add(tableEditRow);
+
+        var categoryEditBlock = Block("8 · Edit menu category",
+            "Disable categories without deleting existing dishes or order history.");
+        var categoryEditChoice = new ComboBox { Width = 195, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = categories, Margin = new Thickness(0, 0, 10, 8) };
+        var editCategoryName = Field("Category name");
+        var categoryActive = new CheckBox { Content = "Active", IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 12, 8) };
+        categoryEditChoice.SelectionChanged += (_, _) =>
+        {
+            if (categoryEditChoice.SelectedItem is not LocalMenuCategory selected) return;
+            editCategoryName.Text = selected.Name;
+            categoryActive.IsChecked = selected.IsActive;
+        };
+        if (categories.Length > 0) categoryEditChoice.SelectedIndex = 0;
+        var categoryEditSave = Action("Save category");
+        categoryEditSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        {
+            if (categoryEditChoice.SelectedItem is not LocalMenuCategory selected)
+                throw new InvalidOperationException("Select a category first.");
+            await _catalog.UpdateCategoryAsync(selected.Id, editCategoryName.Text,
+                categoryActive.IsChecked == true, _actorRole);
+        });
+        var categoryEditRow = new WrapPanel();
+        foreach (var control in new FrameworkElement[]
+            { categoryEditChoice, editCategoryName, categoryActive, categoryEditSave })
+            categoryEditRow.Children.Add(control);
+        categoryEditBlock.Children.Add(categoryEditRow);
+
+        var stationBlock = Block("9 · Kitchen station & KOT routing",
+            "Create a local kitchen station, then assign individual dishes to the appropriate kitchen in the same branch.");
+        var routeBranch = new ComboBox { Width = 175, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = branches, Margin = new Thickness(0, 0, 10, 8) };
+        if (branches.Length > 0) routeBranch.SelectedIndex = 0;
+        var stationCode = Field("Station code"); stationCode.Width = 125;
+        var stationName = Field("Station name");
+        var saveStation = Action("Add station");
+        saveStation.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        {
+            if (routeBranch.SelectedItem is not LocalBranch branch)
+                throw new InvalidOperationException("Create a branch first.");
+            await _catalog.UpsertKitchenStationAsync(null, branch.Id, stationCode.Text,
+                stationName.Text, _actorRole);
+        });
+        var stationRow = new WrapPanel();
+        foreach (var control in new FrameworkElement[]
+            { routeBranch, stationCode, stationName, saveStation })
+            stationRow.Children.Add(control);
+        stationBlock.Children.Add(stationRow);
+
+        var routeDish = new ComboBox { Width = 210, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = existingDishes, Margin = new Thickness(0, 0, 10, 8) };
+        var routeBranchChoice = new ComboBox { Width = 175, Height = 34,
+            DisplayMemberPath = "Name", ItemsSource = branches, Margin = new Thickness(0, 0, 10, 8) };
+        var routeStationChoice = new ComboBox { Width = 210, Height = 34,
+            DisplayMemberPath = "Name", Margin = new Thickness(0, 0, 10, 8) };
+        routeBranchChoice.SelectionChanged += (_, _) =>
+        {
+            var b = routeBranchChoice.SelectedItem as LocalBranch;
+            var options = stations.Where(x => x.BranchId == b?.Id && x.IsActive).ToArray();
+            routeStationChoice.ItemsSource = options;
+            routeStationChoice.SelectedIndex = options.Length > 0 ? 0 : -1;
+        };
+        if (existingDishes.Length > 0) routeDish.SelectedIndex = 0;
+        if (branches.Length > 0) routeBranchChoice.SelectedIndex = 0;
+        var routeSave = Action("Route dish to kitchen");
+        routeSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        {
+            if (routeDish.SelectedItem is not LocalMenuItem dish ||
+                routeBranchChoice.SelectedItem is not LocalBranch branch ||
+                routeStationChoice.SelectedItem is not LocalKitchenStation station)
+                throw new InvalidOperationException("Select a dish, branch and kitchen station.");
+            await _catalog.RouteDishToStationAsync(dish.Id, branch.Id, station.Id, _actorRole);
+        });
+        var routeRow = new WrapPanel();
+        foreach (var control in new FrameworkElement[]
+            { routeDish, routeBranchChoice, routeStationChoice, routeSave })
+            routeRow.Children.Add(control);
+        stationBlock.Children.Add(routeRow);
+
+        foreach (var part in new[] { branchBlock, areaBlock, tableBlock, categoryBlock, menuBlock,
+            editDishBlock, editTableBlock, categoryEditBlock, stationBlock })
             _content.Children.Add(part);
         _content.Children.Add(_status);
+    }
+
+    private async Task UpdateLocalAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            await RebuildAsync();
+            _status.Text = "Saved locally. Existing orders, KOT and accounting history are unchanged.";
+        }
+        catch (Exception error) { _status.Text = error.Message; }
     }
 
     private async Task SaveAsync(Func<RestaurantDbContext, Task> action)

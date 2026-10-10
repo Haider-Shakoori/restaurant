@@ -143,6 +143,52 @@ class LicenseFoundationTest extends TestCase
             ->lessThanOrEqualTo(now()->addDays(1)->addMinute()));
     }
 
+    public function test_platform_exports_valid_device_bound_standalone_renewal_file_without_credentials(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness();
+        $business->update(['desktop_mode' => 'standalone_offline']);
+        $license = app(LicenseService::class)->generate($business, $this->operator());
+
+        $activation = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'offline-terminal-123',
+            'device_name' => 'Cashier PC',
+            'platform' => 'windows',
+        ])->assertCreated();
+
+        $deviceId = $activation->json('device.id');
+        $secret = $activation->json('device_secret');
+        $url = "http://localhost/platform/restaurants/{$business->id}/devices/{$deviceId}/offline-lease";
+        $admin = AdminUser::factory()->create([
+            'role' => PlatformRole::SuperAdmin,
+            'is_active' => true,
+        ]);
+        $support = AdminUser::factory()->create([
+            'role' => PlatformRole::Support,
+            'is_active' => true,
+        ]);
+
+        $download = $this->actingAs($admin)->post($url)->assertOk();
+        $download->assertHeader('Content-Type', 'application/json');
+        $this->assertStringContainsString('no-store', (string) $download->headers->get('Cache-Control'));
+        $envelope = json_decode($download->getContent(), true, 512, JSON_THROW_ON_ERROR);
+
+        $this->assertSame('standalone_offline', $envelope['payload']['desktop_mode']);
+        $this->assertSame($deviceId, $envelope['payload']['device_id']);
+        $this->assertSame('offline-terminal-123', $envelope['payload']['device_uid']);
+        $this->assertTrue(app(LicenseSigningService::class)
+            ->verify($envelope['payload'], $envelope['signature']));
+        $this->assertStringNotContainsString($secret, $download->getContent());
+        $this->assertStringNotContainsString($license['raw_key'], $download->getContent());
+        $this->assertDatabaseHas('license_events', [
+            'business_id' => $business->id,
+            'event' => 'desktop.offline_lease.exported',
+        ]);
+
+        $this->actingAs($support)->post($url)->assertForbidden();
+        $this->assertDatabaseCount('offline_leases', 2); // activation + export
+    }
+
     public function test_public_key_endpoint_exposes_only_verification_material(): void
     {
         [, , $domain] = $this->createActiveBusiness();

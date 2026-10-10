@@ -61,6 +61,7 @@ foreach (config('tenancy.central_domains', []) as $domain) {
                 Route::post('/restaurants/{business}/subscription/cancel', [SubscriptionController::class, 'cancel']);
                 Route::post('/restaurants/{business}/license/generate', [LicenseController::class, 'generate']);
                 Route::post('/restaurants/{business}/license/desktop-mode', [LicenseController::class, 'desktopMode']);
+                Route::post('/restaurants/{business}/devices/{deviceActivation}/offline-lease', [LicenseController::class, 'downloadOfflineLease']);
                 Route::post('/restaurants/{business}/licenses/{licenseKey}/revoke', [LicenseController::class, 'revoke']);
                 Route::post('/restaurants/{business}/devices/{deviceActivation}/revoke', [LicenseController::class, 'revokeDevice']);
             });
