@@ -1119,14 +1119,41 @@ internal static class RestaurantOperationalPages
                             $"Remove {Math.Abs(amount)} {selectedItem.BaseUnit} of {selectedItem.Name} from stock?",
                             "Confirm negative stock adjustment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                             return;
+                        if (!save.IsEnabled) return;
+                        var branchId = selectedBranch.Id;
+                        var ingredientId = selectedItem.Id;
+                        var explanation = reason.Text.Trim();
                         save.IsEnabled = false;
-                        var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                        await new LocalInventoryService(factory).AdjustAsync(
-                            selectedBranch.Id, selectedItem.Id, amount, adjustmentId,
-                            reason.Text.Trim(), actor, CancellationToken.None);
-                        dialog.DialogResult = true;
+                        save.Content = "Posting adjustment…";
+                        error.Text = "Updating the local stock ledger. Please wait…";
+                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                        try
+                        {
+                            await Task.Run(async () =>
+                            {
+                                var actor = await new DesktopRestaurantWorkflowService()
+                                    .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                                await new LocalInventoryService(factory).AdjustAsync(
+                                    branchId, ingredientId, amount, adjustmentId,
+                                    explanation, actor, timeout.Token).ConfigureAwait(false);
+                            }, timeout.Token).WaitAsync(timeout.Token);
+                            dialog.DialogResult = true;
+                        }
+                        catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                        {
+                            App.LogRecoverableException("stock-adjust-timeout", ex);
+                            error.Text = "Stock update timed out. Close this form and check the audit/stock ledger " +
+                                "before another adjustment. Do not post twice.";
+                            save.Content = "Verify stock before retrying";
+                        }
                     }
-                    catch (Exception ex) { error.Text = ex.Message; save.IsEnabled = true; }
+                    catch (Exception ex)
+                    {
+                        App.LogRecoverableException("stock-adjust-save", ex);
+                        error.Text = ex.Message;
+                        save.Content = "Post audited adjustment";
+                        save.IsEnabled = true;
+                    }
                 };
                 form.Children.Add(save);
                 form.Children.Add(error);
@@ -1255,18 +1282,46 @@ internal static class RestaurantOperationalPages
             var save = new Button { Content = "Save Supplier", Height = 38 };
             save.Click += async (_, _) =>
             {
+                if (!save.IsEnabled) return;
+                if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text))
+                {
+                    feedback.Text = "Supplier code and name are required.";
+                    return;
+                }
+                var supplierCode = code.Text.Trim();
+                var supplierName = name.Text.Trim();
+                var supplierPhone = phone.Text.Trim();
+                var supplierEmail = email.Text.Trim();
+                save.IsEnabled = false;
+                save.Content = "Saving supplier…";
+                feedback.Text = "Saving supplier locally. Please wait…";
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                 try
                 {
-                    if (string.IsNullOrWhiteSpace(code.Text) || string.IsNullOrWhiteSpace(name.Text))
-                        throw new InvalidOperationException("Supplier code and name are required.");
-                    save.IsEnabled = false;
-                    var actor = await new DesktopRestaurantWorkflowService().CurrentPrincipalAsync();
-                    await new LocalInventoryService(factory).CreateSupplierAsync(
-                        code.Text.Trim(), name.Text.Trim(), phone.Text.Trim(), email.Text.Trim(),
-                        null, actor, CancellationToken.None);
+                    await Task.Run(async () =>
+                    {
+                        var actor = await new DesktopRestaurantWorkflowService()
+                            .CurrentPrincipalAsync(timeout.Token).ConfigureAwait(false);
+                        await new LocalInventoryService(factory).CreateSupplierAsync(
+                            supplierCode, supplierName, supplierPhone, supplierEmail,
+                            null, actor, timeout.Token).ConfigureAwait(false);
+                    }, timeout.Token).WaitAsync(timeout.Token);
                     dialog.DialogResult = true;
                 }
-                catch (Exception ex) { feedback.Text = ex.Message; save.IsEnabled = true; }
+                catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                {
+                    App.LogRecoverableException("supplier-save-timeout", ex);
+                    feedback.Text = "Save timed out. Close and refresh suppliers to check if it succeeded " +
+                        "before submitting the same supplier again.";
+                    save.Content = "Verify supplier before retrying";
+                }
+                catch (Exception ex)
+                {
+                    App.LogRecoverableException("supplier-save", ex);
+                    feedback.Text = ex.Message;
+                    save.Content = "Save Supplier";
+                    save.IsEnabled = true;
+                }
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -1679,15 +1734,37 @@ internal static class RestaurantOperationalPages
                         throw new InvalidOperationException("Enter an expense description.");
                     if (!decimal.TryParse(amount.Text, out var value) || value <= 0)
                         throw new InvalidOperationException("Enter a positive expense amount.");
+                    if (!save.IsEnabled) return;
+                    var branchId = branch.Id;
+                    var expenseCategory = category.Text;
+                    var expenseDescription = description.Text;
+                    var paymentMethod = method.SelectedItem?.ToString() ?? "cash";
+                    var businessDate = DateOnly.FromDateTime(DateTime.Today);
                     save.IsEnabled = false;
-                    await workflow.RecordExpenseAsync(branch.Id, category.Text, description.Text,
-                        value, method.SelectedItem?.ToString() ?? "cash",
-                        DateOnly.FromDateTime(DateTime.Today));
-                    dialog.DialogResult = true;
+                    save.Content = "Saving expense…";
+                    feedback.Text = "Recording the expense locally. Please wait…";
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                    try
+                    {
+                        await Task.Run(async () =>
+                            await workflow.RecordExpenseAsync(branchId, expenseCategory, expenseDescription,
+                                value, paymentMethod, businessDate, token: timeout.Token)
+                                .ConfigureAwait(false), timeout.Token).WaitAsync(timeout.Token);
+                        dialog.DialogResult = true;
+                    }
+                    catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+                    {
+                        App.LogRecoverableException("expense-save-timeout", ex);
+                        feedback.Text = "Expense save timed out. Close and inspect the expense ledger before " +
+                            "trying again, to avoid a duplicate financial entry.";
+                        save.Content = "Verify expense before retrying";
+                    }
                 }
                 catch (Exception ex)
                 {
+                    App.LogRecoverableException("expense-save", ex);
                     feedback.Text = ex.Message;
+                    save.Content = "Save Expense";
                     save.IsEnabled = true;
                 }
             };
