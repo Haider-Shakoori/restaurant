@@ -192,6 +192,8 @@ internal static class Program
         await CheckRecipeEditorSaveAsync(app, owner);
         await NavigateAsync(owner, "inventory");
         CheckInventoryFilters(owner);
+        await CheckFormAsync(app, owner, "+ Adjust Stock Quantity",
+            "Audited stock adjustment", "Post audited adjustment", "Enter a nonzero stock change.");
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
             "Enter ingredient name and SKU.");
         await CheckDuplicateIngredientAndRetryAsync(app, owner);
@@ -199,6 +201,7 @@ internal static class Program
         await NavigateAsync(owner, "purchases");
         await CheckFormAsync(app, owner, "+ Add Supplier", "Add Supplier", "Save Supplier",
             "Supplier code and name are required.");
+        await CheckSupplierDuplicateAndRetryAsync(app, owner);
         await CheckFormAsync(app, owner, "+ New Purchase & Receive", "Purchase & Receive Inventory",
             "Create PO and Receive Stock", "Select branch, supplier and at least one purchase line.");
 
@@ -760,6 +763,74 @@ internal static class Program
             timer.Stop();
             if (modal?.IsVisible == true) modal.Close();
         }
+    }
+
+    private static async Task CheckSupplierDuplicateAndRetryAsync(
+        System.Windows.Application app, MainWindow main)
+    {
+        // Source-only CI runner: test two local supplier writes and the
+        // recoverable duplicate-code path. No live restaurant data is used.
+        async Task<Window> OpenAsync()
+        {
+            var create = FindButton(main, "+ Add Supplier")
+                ?? throw new InvalidOperationException("Supplier create action not found.");
+            var before = app.Windows.Cast<Window>().ToHashSet();
+            Window? modal = null;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+            timer.Tick += (_, _) =>
+            {
+                modal = app.Windows.Cast<Window>().FirstOrDefault(w =>
+                    !before.Contains(w) && w.IsVisible && w.Title == "Add Supplier");
+                if (modal is not null) timer.Stop();
+            };
+            timer.Start();
+            _ = main.Dispatcher.BeginInvoke(new Action(() => Click(create)), DispatcherPriority.Normal);
+            try
+            {
+                await WaitUntilAsync(() => modal is not null, "supplier modal opened");
+                return modal!;
+            }
+            finally { timer.Stop(); }
+        }
+        async Task SubmitAsync(Window dialog, string supplierCode)
+        {
+            // Supplier form currently uses ordered fields (code/name/phone/email).
+            var fields = Descendants<TextBox>(dialog).ToArray();
+            Assert(fields.Length >= 4, "supplier editor includes code and name");
+            fields[0].Text = supplierCode;
+            fields[1].Text = "CI Supply Partner";
+            var save = FindButton(dialog, "Save Supplier")!;
+            Click(save);
+        }
+
+        var first = await OpenAsync();
+        try
+        {
+            await SubmitAsync(first, "CI-SUP-1");
+            await WaitUntilAsync(() => !first.IsVisible, "supplier create completes without UI freeze");
+        }
+        finally { if (first.IsVisible) first.Close(); }
+
+        var second = await OpenAsync();
+        try
+        {
+            await SubmitAsync(second, "CI-SUP-1");
+            var save = FindButton(second, "Save Supplier")!;
+            await WaitUntilAsync(() => save.IsEnabled &&
+                Descendants<TextBlock>(second).Any(t => t.Text.Contains("already", StringComparison.OrdinalIgnoreCase)),
+                "duplicate supplier stays editable and reports existing code");
+            Assert(second.IsVisible, "supplier dialog remains open after rejected duplicate");
+            var fields = Descendants<TextBox>(second).ToArray();
+            fields[0].Text = "CI-SUP-2";
+            Click(save);
+            await WaitUntilAsync(() => !second.IsVisible, "corrected supplier saves and closes");
+            await using var db = new LocalDatabaseFactory().Create();
+            Assert(await db.Suppliers.CountAsync(s => s.Code == "CI-SUP-1") == 1,
+                "duplicate supplier not persisted twice");
+            Assert(await db.Suppliers.CountAsync(s => s.Code == "CI-SUP-2") == 1,
+                "corrected supplier saved exactly once");
+        }
+        finally { if (second.IsVisible) second.Close(); }
     }
 
     private static async Task SeedRecipeFixtureAsync()
