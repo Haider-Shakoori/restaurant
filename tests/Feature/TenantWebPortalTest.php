@@ -272,6 +272,10 @@ class TenantWebPortalTest extends TestCase
             ->assertOk()
             ->assertSee('Photo menu & current order', false)
             ->assertSee('BusinessOS · POS order entry')
+            ->assertSee('Exit full-screen POS')
+            ->assertSee('Kiosk screen')
+            ->assertSee('pos-cashier')
+            ->assertSee('h-[100dvh]', false)
             ->assertSee('Kabuli Pulao')
             ->assertSee('Table 1');
 
