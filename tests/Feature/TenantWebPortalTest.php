@@ -271,7 +271,7 @@ class TenantWebPortalTest extends TestCase
         $this->get("http://{$domain}/pos")
             ->assertOk()
             ->assertSee('Photo menu & current order')
-            ->assertSee('Pos order entry', false)
+            ->assertSee('BusinessOS · POS order entry')
             ->assertSee('Kabuli Pulao')
             ->assertSee('Table 1');
 
