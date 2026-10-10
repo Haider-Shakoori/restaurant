@@ -138,6 +138,13 @@
                                     <td class="px-5 py-4 text-right">
                                         @can('manage-platform')
                                             @if ($device->status->value === 'active')
+                                                @if (($business->desktop_mode ?? 'cloud_sync') === 'standalone_offline' && $device->platform === 'windows')
+                                                    <form method="POST" class="mb-2"
+                                                          action="/platform/restaurants/{{ $business->id }}/devices/{{ $device->id }}/offline-lease">
+                                                        @csrf
+                                                        <button class="rounded-lg border border-violet-300 px-3 py-2 text-xs font-semibold text-violet-700">Export signed renewal</button>
+                                                    </form>
+                                                @endif
                                                 <form method="POST" action="/platform/restaurants/{{ $business->id }}/devices/{{ $device->id }}/revoke"
                                                       onsubmit="return confirm('Revoke this device credential?')">
                                                     @csrf
