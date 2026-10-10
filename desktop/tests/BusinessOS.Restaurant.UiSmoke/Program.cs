@@ -191,6 +191,7 @@ internal static class Program
         await NavigateAsync(owner, "recipes");
         await CheckRecipeEditorSaveAsync(app, owner);
         await NavigateAsync(owner, "inventory");
+        CheckInventoryFilters(owner);
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
             "Enter ingredient name and SKU.");
 
@@ -569,6 +570,28 @@ internal static class Program
 
         // Revert to default service type so no selection leaks into later smoke.
         service.SelectedItem = "dine_in";
+    }
+
+    private static void CheckInventoryFilters(MainWindow owner)
+    {
+        Assert(FindButton(owner, "+ Add Ingredient") is not null &&
+            FindButton(owner, "+ Adjust Stock Quantity") is not null &&
+            FindButton(owner, "Edit Ingredients & Units (Online)") is not null,
+            "Inventory compact action toolbar retains all operations");
+        var search = Descendants<TextBox>(owner).Single(x => x.Name == "InventorySearchBox");
+        var lowStock = Descendants<CheckBox>(owner)
+            .Single(x => x.Name == "InventoryLowStockOnlyToggle");
+        var grid = Descendants<DataGrid>(owner).Single(x => x.Name == "InventoryStockGrid");
+        Assert(grid.Items.Count == 1, "Inventory displays synthetic CI recipe ingredient");
+        search.Text = "no-such-ingredient";
+        Assert(grid.Items.Count == 0, "Inventory search hides nonmatching ingredients");
+        search.Text = "CI Rice";
+        Assert(grid.Items.Count == 1, "Inventory search finds ingredients by name");
+        lowStock.IsChecked = true;
+        Assert(grid.Items.Count == 0, "Low stock filter respects reorder threshold");
+        lowStock.IsChecked = false;
+        Assert(grid.Items.Count == 1, "Inventory clears low stock filter without changing records");
+        search.Clear();
     }
 
     private static void CheckNavigation(MainWindow window, string route)
