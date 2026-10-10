@@ -117,6 +117,64 @@ public sealed class RestaurantLicenseCoordinator
         return refreshed;
     }
 
+    /// <summary>
+    /// Renews an already activated standalone installation without HTTP.
+    /// Accepts only a signed Ed25519 lease bound to this tenant, business,
+    /// device, license version and previously trusted signing key.
+    /// </summary>
+    public async Task<ActivationState> ImportOfflineRenewalAsync(
+        string filePath, CancellationToken cancellationToken = default)
+    {
+        var current = await _store.LoadAsync(cancellationToken)
+            ?? throw new InvalidOperationException("This computer must first be activated online.");
+        if (!DesktopOperatingMode.IsStandalone(current))
+            throw new InvalidOperationException("Only Standalone Offline installations can import renewal files.");
+
+        var input = new FileInfo(filePath);
+        if (!input.Exists || input.Length is <= 0 or > 131_072 ||
+            !string.Equals(input.Extension, ".json", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Choose a signed .json renewal file smaller than 128 KiB.");
+
+        var bytes = await File.ReadAllBytesAsync(filePath, cancellationToken);
+        try
+        {
+            var lease = System.Text.Json.JsonSerializer.Deserialize<SignedLease>(bytes,
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+                ?? throw new System.Security.Cryptography.CryptographicException("The renewal file is empty.");
+            var snapshot = new SignedLeaseVerifier().Verify(lease, current.PublicKey);
+            var now = DateTimeOffset.UtcNow;
+            if (snapshot.DesktopMode != DesktopOperatingMode.StandaloneOffline ||
+                snapshot.TenantId != current.Snapshot.TenantId ||
+                snapshot.BusinessId != current.Snapshot.BusinessId ||
+                snapshot.DeviceId != current.DeviceId ||
+                snapshot.DeviceUid != current.DeviceUid ||
+                snapshot.KeyId != current.PublicKeyId ||
+                snapshot.LicenseVersion != current.Snapshot.LicenseVersion ||
+                snapshot.IssuedAt > now.AddMinutes(5) ||
+                snapshot.IssuedAt < current.Snapshot.IssuedAt ||
+                snapshot.SubscriptionEndsAt <= now ||
+                snapshot.OfflineValidUntil <= now ||
+                snapshot.OfflineValidUntil < current.Snapshot.OfflineValidUntil)
+                throw new System.Security.Cryptography.CryptographicException(
+                    "Renewal does not match this computer's license, or has expired.");
+
+            var updated = current with
+            {
+                Lease = lease,
+                Snapshot = snapshot,
+                LastVerifiedAt = now,
+            };
+            await _store.SaveAsync(updated, cancellationToken);
+
+            var settings = await _settingsStore.LoadAsync(cancellationToken);
+            if (settings is not null)
+                await _settingsStore.SaveAsync(settings with { SyncEnabled = false }, cancellationToken);
+
+            return updated;
+        }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(bytes); }
+    }
+
     public async Task<RestaurantLicenseStatus> GetStatusAsync(
         CancellationToken cancellationToken = default)
     {
