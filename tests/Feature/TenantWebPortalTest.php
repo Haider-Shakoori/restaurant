@@ -264,7 +264,7 @@ class TenantWebPortalTest extends TestCase
         tenancy()->end();
 
         $this->post("http://{$domain}/login", [
-            'email' => 'orders-owner@example.test',
+            'email' => 'photo-pos-owner@example.test',
             'password' => 'OwnerPass123',
         ])->assertRedirect('/dashboard');
 
