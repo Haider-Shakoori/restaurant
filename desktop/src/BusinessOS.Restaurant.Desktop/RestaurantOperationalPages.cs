@@ -1572,6 +1572,42 @@ internal static class RestaurantOperationalPages
             MinHeight = 38, Margin = new Thickness(0, 0, 0, 8) };
         var modeStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
         modePanel.Children.Add(refreshMode);
+        if (standalone)
+        {
+            var importRenewal = new Button
+            {
+                Content = "Import signed offline renewal (.json)",
+                MinHeight = 38, Margin = new Thickness(0, 0, 0, 8),
+            };
+            importRenewal.Click += async (_, _) =>
+            {
+                importRenewal.IsEnabled = false;
+                try
+                {
+                    var session = await new BusinessOS.Restaurant.Authentication.WindowsSessionStore().LoadAsync();
+                    if (session?.User.Role.Trim().ToLowerInvariant() is not ("owner" or "admin"))
+                        throw new UnauthorizedAccessException("Only Owner/Admin may import a license renewal.");
+                    var dialog = new Microsoft.Win32.OpenFileDialog
+                    {
+                        Title = "Import restaurant offline license renewal",
+                        Filter = "Signed Restaurant renewal|*.json",
+                        CheckFileExists = true,
+                        Multiselect = false,
+                    };
+                    if (dialog.ShowDialog() == true)
+                    {
+                        var updated = await new BusinessOS.Restaurant.Licensing.RestaurantLicenseCoordinator()
+                            .ImportOfflineRenewalAsync(dialog.FileName);
+                        modeStatus.Text = "Signed renewal verified locally; licensed through " +
+                            updated.Snapshot.OfflineValidUntil.ToLocalTime().ToString("yyyy-MM-dd") +
+                            ". Restart the application to update its status. No web request was made.";
+                    }
+                }
+                catch (Exception error) { modeStatus.Text = error.Message; }
+                finally { importRenewal.IsEnabled = true; }
+            };
+            modePanel.Children.Add(importRenewal);
+        }
         modePanel.Children.Add(modeStatus);
         refreshMode.Click += async (_, _) =>
         {
@@ -1589,7 +1625,7 @@ internal static class RestaurantOperationalPages
             finally { refreshMode.IsEnabled = true; }
         };
         networkPage.Children.Add(SettingsSection("Licensed desktop operating mode",
-            "Configured centrally under Platform → Restaurant → License & Devices. Manual refresh is the only online operation required to switch modes.", modePanel));
+            "Configured centrally under Platform → Restaurant → License & Devices. A signed offline renewal file can be imported on an already activated standalone terminal. Changing operating modes still requires a deliberate online refresh.", modePanel));
 
         networkPage.Children.Add(Cards(
             ("LAN STATUS", diagnostics.NetworkMode),
