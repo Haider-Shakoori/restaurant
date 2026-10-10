@@ -1976,10 +1976,6 @@ internal static class OperationalActionViews
             return floor;
         }
 
-        foreach (var area in tables.GroupBy(x => x.Area))
-        {
-            if (!groupByArea) break;
-        }
         foreach (var area in groupByArea
             ? tables.GroupBy(x => x.Area)
             : tables.GroupBy(_ => "All tables"))
