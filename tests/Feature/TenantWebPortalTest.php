@@ -281,7 +281,7 @@ class TenantWebPortalTest extends TestCase
             ->assertSee('pos-details-panel')
             ->assertSee('submitOrder($event)', false)
             ->assertSee('Scrollable POS menu items')
-            ->assertSee('Close cashier & return to POS')
+            ->assertSee('Close cashier & return to POS', false)
             ->assertSee('h-[100dvh]', false)
             ->assertSee('Kabuli Pulao')
             ->assertSee('Table 1');
