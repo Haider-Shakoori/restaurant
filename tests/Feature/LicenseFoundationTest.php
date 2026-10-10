@@ -109,6 +109,40 @@ class LicenseFoundationTest extends TestCase
         $this->assertSame(1, OfflineLease::count());
     }
 
+    public function test_signed_standalone_windows_license_covers_subscription_term_without_cloud_sync(): void
+    {
+        [$business, , $domain] = $this->createActiveBusiness();
+        $business->update(['desktop_mode' => 'standalone_offline']);
+        config(['license.offline_grace_days' => 1]);
+        $license = app(LicenseService::class)->generate($business->fresh(), $this->operator());
+
+        $activated = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'standalone-windows-001',
+            'device_name' => 'Standalone POS',
+            'platform' => 'windows',
+        ])->assertCreated();
+
+        $payload = $activated->json('lease.payload');
+        $this->assertSame('standalone_offline', $payload['desktop_mode']);
+        $this->assertTrue(app(LicenseSigningService::class)
+            ->verify($payload, $activated->json('lease.signature')));
+        $expiry = app(SubscriptionService::class)->access($business->fresh())->endsAt;
+        $this->assertTrue(Carbon::parse($payload['offline_valid_until'])->equalTo($expiry));
+
+        // A waiter/mobile license still receives the normal short offline grace.
+        $mobile = $this->postJson("http://{$domain}/api/v1/license/activate", [
+            'license_key' => $license['raw_key'],
+            'device_uid' => 'standalone-mobile-001',
+            'device_name' => 'Waiter Phone',
+            'platform' => 'android',
+        ])->assertCreated();
+
+        $this->assertSame('cloud_sync', $mobile->json('lease.payload.desktop_mode'));
+        $this->assertTrue(Carbon::parse($mobile->json('lease.payload.offline_valid_until'))
+            ->lessThanOrEqualTo(now()->addDays(1)->addMinute()));
+    }
+
     public function test_public_key_endpoint_exposes_only_verification_material(): void
     {
         [, , $domain] = $this->createActiveBusiness();
