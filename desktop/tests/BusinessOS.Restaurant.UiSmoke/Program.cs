@@ -138,6 +138,7 @@ internal static class Program
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
         await CheckPersistentMenuPhotoCacheAsync();
+        CheckPhotoCatalogIncrementalRendering();
         CheckDashboardProfitLossCalculation();
 
         // Reproduce a real offline tenant with a branch previously synchronized
@@ -548,6 +549,49 @@ internal static class Program
         var provisional = calculate.Invoke(null, [100m, unvalued, 0m, 100m, "Recipe"])!;
         Assert(type.GetProperty("IsComplete")!.GetValue(provisional) is false,
             "Historical unpriced kitchen consumption makes reported profit provisional");
+    }
+
+    private static void IgnoreSyntheticPhotoSelection<T>(T _) { }
+
+    private static void CheckPhotoCatalogIncrementalRendering()
+    {
+        // Prove a large food catalog no longer creates hundreds of WPF cards
+        // when POS opens. Search still traverses every product and Load More
+        // can reveal the remaining inventory without server round-trips.
+        var assembly = typeof(MainWindow).Assembly;
+        var itemType = assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.PhotoPosItem", throwOnError: true)!;
+        var catalogType = assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.RestaurantPhotoPosCatalog", throwOnError: true)!;
+        var listType = typeof(List<>).MakeGenericType(itemType);
+        var items = (System.Collections.IList)Activator.CreateInstance(listType)!;
+        for (var i = 1; i <= 130; i++)
+        {
+            items.Add(Activator.CreateInstance(itemType,
+                "ci-photo-" + i, "Dish " + i.ToString("000"), "Meals", 100m, null)!);
+        }
+        var actionType = typeof(Action<>).MakeGenericType(itemType);
+        var ignore = typeof(Program).GetMethod(nameof(IgnoreSyntheticPhotoSelection),
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+            .MakeGenericMethod(itemType);
+        var select = Delegate.CreateDelegate(actionType, ignore);
+        var search = new TextBox();
+        var build = catalogType.GetMethod("Build",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!;
+        var view = (FrameworkElement)build.Invoke(null, new object[] { items, search, select })!;
+        var cards = Descendants<WrapPanel>(view).Single(x => x.Name == "PosPhotoMenuTiles");
+        var more = Descendants<Button>(view).Single(x => x.Name == "PosPhotoLoadMore");
+        Assert(cards.Children.Count == 48 && more.Visibility == Visibility.Visible,
+            "Large POS menu initially builds only 48 controls");
+        search.Text = "Dish 129";
+        Assert(cards.Children.Count == 1 && more.Visibility == Visibility.Collapsed,
+            "Search immediately finds products beyond initial 48 cards");
+        search.Clear();
+        Click(more);
+        Assert(cards.Children.Count == 96, "Load More reveals the next 48 dishes");
+        Click(more);
+        Assert(cards.Children.Count == 130 && more.Visibility == Visibility.Collapsed,
+            "Every cached dish is still accessible after incremental rendering");
     }
 
     private static async Task CheckPersistentMenuPhotoCacheAsync()
