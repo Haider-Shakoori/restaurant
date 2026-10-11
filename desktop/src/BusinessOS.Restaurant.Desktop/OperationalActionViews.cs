@@ -956,10 +956,9 @@ internal static class OperationalActionViews
         orderListPanel.Children.Remove(currentOrderTotal);
         var ticketPanel = new StackPanel { Name = "PosFullscreenOrderTicket" };
         ticketPanel.Children.Add(Header("CURRENT TICKET", "Menu on the left · orders and billing one tap away."));
-        ticketPanel.Children.Add(selectionSummary);
-        // The summary already lives in the original form; remove it before
-        // reparenting the same live TextBlock.
+        // WPF cannot attach an element to two logical parents at once.
         form.Children.Remove(selectionSummary);
+        ticketPanel.Children.Add(selectionSummary);
         ticketPanel.Children.Add(currentOrderLines);
         ticketPanel.Children.Add(currentOrderTotal);
         ticketPanel.Children.Add(status);
@@ -980,6 +979,7 @@ internal static class OperationalActionViews
         billingModal.MinHeight = 46;
         foreach (var button in new[] { newOrderModal, activeOrdersModal, editItemsModal })
             quickActions.Children.Add(button);
+        kitchenActions.Children.Remove(submit);
         quickActions.Children.Add(submit);
         quickActions.Children.Add(kitchenModal);
         if (cashierCard is not null) quickActions.Children.Add(billingModal);
