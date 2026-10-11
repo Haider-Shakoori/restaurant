@@ -2178,18 +2178,6 @@ internal static class OperationalActionViews
                 panel.Children.Add(waste);
             }
 
-            var actionReason = new TextBox
-            {
-                MinWidth = 300,
-                Height = 34,
-                Margin = new Thickness(0, 8, 8, 4),
-                ToolTip = "Reason for recall, waste or re-fire",
-            };
-            if (canRecallWaste && (row.Status is "ready" or "completed" or "expo"))
-            {
-                panel.Children.Add(actionReason);
-            }
-
             var actions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
 
             Button? primary = null;
@@ -2242,133 +2230,9 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (!settings.ReadyOnlyKotEnabled && canRecallWaste && (row.Status is "ready" or "completed"))
-            {
-                var recall = Button("RECALL");
-                recall.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-                actions.Children.Add(recall);
-                recall.Click += async (_, _) =>
-                {
-                    try
-                    {
-                        if (string.IsNullOrWhiteSpace(actionReason.Text))
-                            throw new InvalidOperationException("Enter a recall reason.");
-                        if (!ConfirmOperationalChange(
-                            $"Recall {row.ItemName} for a new kitchen handling step? Previous consumption will not be reversed.",
-                            "Confirm kitchen recall"))
-                            return;
-                        recall.IsEnabled = false;
-                        var reason = actionReason.Text.Trim();
-                        kitchenWritesInProgress++;
-                        try
-                        {
-                            await DesktopUiWork.RunBoundedAsync(
-                                token => workflow.RecallKitchenItemAsync(row.ItemId, reason, token),
-                                TimeSpan.FromSeconds(25));
-                        }
-                        finally { kitchenWritesInProgress--; }
-                        statusText.Text = $"{row.ItemName} recalled to the kitchen without reversing its prior consumption.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
-                    }
-                    catch (OperationCanceledException ex)
-                    {
-                        App.LogRecoverableException("kitchen-recall-timeout", ex);
-                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
-                    }
-                    catch (Exception ex)
-                    {
-                        recall.IsEnabled = true;
-                        statusText.Text = ex.Message;
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
-                    }
-                };
-            }
-
-            if (!settings.ReadyOnlyKotEnabled && canRecallWaste && (row.Status is "preparing" or "expo" or "ready" or "completed"))
-            {
-                var waste = Button("MARK WASTE");
-                waste.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-                actions.Children.Add(waste);
-                waste.Click += async (_, _) =>
-                {
-                    try
-                    {
-                        if (string.IsNullOrWhiteSpace(actionReason.Text))
-                            throw new InvalidOperationException("Enter a waste reason.");
-                        if (!ConfirmOperationalChange(
-                            $"Record {row.ItemName} as production waste? Consumed ingredients will not be returned.",
-                            "Confirm kitchen waste"))
-                            return;
-                        waste.IsEnabled = false;
-                        var reason = actionReason.Text.Trim();
-                        kitchenWritesInProgress++;
-                        try
-                        {
-                            await DesktopUiWork.RunBoundedAsync(
-                                token => workflow.RecordKitchenWasteAsync(row.ItemId, reason, token),
-                                TimeSpan.FromSeconds(25));
-                        }
-                        finally { kitchenWritesInProgress--; }
-                        statusText.Text = $"{row.ItemName} recorded as production waste; inventory was not returned.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
-                    }
-                    catch (OperationCanceledException ex)
-                    {
-                        App.LogRecoverableException("kitchen-waste-timeout", ex);
-                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
-                    }
-                    catch (Exception ex)
-                    {
-                        waste.IsEnabled = true;
-                        statusText.Text = ex.Message;
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
-                    }
-                };
-            }
-
-            if (!settings.ReadyOnlyKotEnabled && canRefire && (row.Status is "ready" or "expo" or "completed"))
-            {
-                var refire = Button("RE-FIRE");
-                actions.Children.Add(refire);
-                refire.Click += async (_, _) =>
-                {
-                    try
-                    {
-                        if (string.IsNullOrWhiteSpace(actionReason.Text))
-                            throw new InvalidOperationException("Enter a re-fire reason.");
-                        if (!ConfirmOperationalChange(
-                            $"Re-fire {row.ItemName} as a new rush production event? This records another production.",
-                            "Confirm kitchen re-fire"))
-                            return;
-                        refire.IsEnabled = false;
-                        var reason = actionReason.Text.Trim();
-                        kitchenWritesInProgress++;
-                        try
-                        {
-                            await DesktopUiWork.RunBoundedAsync(
-                                token => workflow.RefireKitchenItemAsync(row.ItemId, reason, token),
-                                TimeSpan.FromSeconds(25));
-                        }
-                        finally { kitchenWritesInProgress--; }
-                        statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
-                    }
-                    catch (OperationCanceledException ex)
-                    {
-                        App.LogRecoverableException("kitchen-refire-timeout", ex);
-                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
-                    }
-                    catch (Exception ex)
-                    {
-                        refire.IsEnabled = true;
-                        statusText.Text = ex.Message;
-                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
-                    }
-                };
-            }
+            // Kitchen operators need one action only. Recall, waste and
+            // re-fire remain available to audited management workflows/API;
+            // no secondary production controls clutter the KOT board.
 
             if (!canProduce && !canExpo && !canRefire && !canRecallWaste)
             {
