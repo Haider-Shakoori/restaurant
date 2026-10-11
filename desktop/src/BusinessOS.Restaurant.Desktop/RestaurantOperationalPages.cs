@@ -2029,7 +2029,7 @@ internal static class RestaurantOperationalPages
 
         var workflowHelp = new TextBlock
         {
-            Text = "Queue and Preparing are independent. Turning one off never changes the other. New KOT rounds snapshot these values so historical tickets keep the workflow they were created with.",
+            Text = "Simple kitchen flow: receive KOT → tap READY → waiter pickup. Start/Preparing/Expo are no longer steps for staff. Historical KOT events remain unchanged.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 6, 0, 12),
         };
@@ -2082,8 +2082,7 @@ internal static class RestaurantOperationalPages
         };
 
         workflowPanel.Children.Add(queue);
-        workflowPanel.Children.Add(preparing);
-        workflowPanel.Children.Add(expo);
+
         workflowPanel.Children.Add(courses);
         workflowPanel.Children.Add(sound);
         workflowPanel.Children.Add(managerVoid);
@@ -2154,8 +2153,8 @@ internal static class RestaurantOperationalPages
                 saveWorkflow.IsEnabled = false;
                 var update = new RestaurantWorkflowSettingsUpdate(
                     queue.IsChecked == true,
-                    preparing.IsChecked == true,
-                    expo.IsChecked == true,
+                    false, // Ready-only KOT: no Start stage
+                    false, // no Expo approval stage
                     courses.IsChecked == true,
                     sound.IsChecked == true,
                     warningMinutes,
@@ -2168,8 +2167,7 @@ internal static class RestaurantOperationalPages
 
                 workflowStatus.Text =
                     $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
-                    $"Preparing {(updated.PreparingStageEnabled ? "ON" : "OFF")} · " +
-                    $"Expo {(updated.ExpoEnabled ? "ON" : "OFF")} · " +
+                    "Kitchen READY-only · " +
                     $"Negative stock {updated.NegativeStockPolicy.ToUpperInvariant()}.";
             }
             catch (Exception ex)
