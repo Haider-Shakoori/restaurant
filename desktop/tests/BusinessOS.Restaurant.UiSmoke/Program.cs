@@ -137,6 +137,7 @@ internal static class Program
         // on this disposable runner; production startup remains unchanged.
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
+        await CheckPersistentMenuPhotoCacheAsync();
 
         // Reproduce a real offline tenant with a branch previously synchronized
         // into the disposable CI SQLite snapshot; never seed user databases.
@@ -515,6 +516,41 @@ internal static class Program
         if (new FileInfo(destination).Length < 2048)
             throw new InvalidOperationException("Screenshot appears empty: " + destination);
         Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
+    }
+
+    private static async Task CheckPersistentMenuPhotoCacheAsync()
+    {
+        // A 90-day-old downloaded tenant photo must be returned from the same
+        // disk location without an HTTP request, even though its age greatly
+        // exceeds the prior 15-minute re-download policy.
+        var origin = "https://restaurant-ci.example.test";
+        var url = origin + "/media/menu-items/ci-offline-photo.png";
+        var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(url)));
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BusinessOS", "Restaurant", "menu-photos");
+        var file = Path.Combine(root, key + ".img");
+        Directory.CreateDirectory(root);
+        var png = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/xCkAAAAASUVORK5CYII=");
+        await File.WriteAllBytesAsync(file, png);
+        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-90));
+        try
+        {
+            var type = typeof(MainWindow).Assembly.GetType(
+                "BusinessOS.Restaurant.Desktop.RestaurantPhotoPosCatalog", throwOnError: true)!;
+            var cacheMethod = type.GetMethod("CacheMenuPhotoAsync",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("Tenant photo cache method missing.");
+            var task = (Task<Uri?>)cacheMethod.Invoke(null, new object[] { url, origin })!;
+            var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert(result?.LocalPath == file,
+                "90-day-old downloaded menu photo is reused from local disk with no server connection");
+            Assert(File.Exists(file) && new FileInfo(file).Length == png.Length,
+                "Cached menu image remains intact after repeated offline access");
+        }
+        finally { if (File.Exists(file)) File.Delete(file); }
     }
 
     private static void CheckOptionalFullScreen(MainWindow window, string route)
