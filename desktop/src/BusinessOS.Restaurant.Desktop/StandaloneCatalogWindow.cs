@@ -20,6 +20,7 @@ internal sealed class StandaloneCatalogWindow : Window
     private readonly StandaloneCatalogService _catalog = new(new LocalDatabaseFactory());
     private readonly TextBlock _status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly StackPanel _content = new() { Margin = new Thickness(15) };
+    private bool _saving;
 
     public StandaloneCatalogWindow(string role)
     {
@@ -60,14 +61,19 @@ internal sealed class StandaloneCatalogWindow : Window
 
     private async Task RebuildAsync()
     {
-        await _factory.EnsureCreatedAsync();
-        await using var db = _factory.Create();
-        var branches = await db.Branches.AsNoTracking().OrderBy(b => b.Name).ToArrayAsync();
-        var areas = await db.DiningAreas.AsNoTracking().OrderBy(a => a.Name).ToArrayAsync();
-        var categories = await db.MenuCategories.AsNoTracking().OrderBy(c => c.Name).ToArrayAsync();
-        var existingDishes = await db.MenuItems.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
-        var tables = await db.DiningTables.AsNoTracking().OrderBy(x => x.Code).ToArrayAsync();
-        var stations = await db.KitchenStations.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
+        var snapshot = await DesktopUiWork.RunAsync(async () =>
+        {
+            await _factory.EnsureCreatedAsync().ConfigureAwait(false);
+            await using var db = _factory.Create();
+            var branches = await db.Branches.AsNoTracking().OrderBy(b => b.Name).ToArrayAsync();
+            var areas = await db.DiningAreas.AsNoTracking().OrderBy(a => a.Name).ToArrayAsync();
+            var categories = await db.MenuCategories.AsNoTracking().OrderBy(c => c.Name).ToArrayAsync();
+            var existingDishes = await db.MenuItems.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
+            var tables = await db.DiningTables.AsNoTracking().OrderBy(x => x.Code).ToArrayAsync();
+            var stations = await db.KitchenStations.AsNoTracking().OrderBy(x => x.Name).ToArrayAsync();
+            return (branches, areas, categories, existingDishes, tables, stations);
+        });
+        var (branches, areas, categories, existingDishes, tables, stations) = snapshot;
 
         _content.Children.Clear();
         _content.Children.Add(new TextBlock
@@ -91,16 +97,20 @@ internal sealed class StandaloneCatalogWindow : Window
         var branchRow = new WrapPanel();
         branchRow.Children.Add(branchName); branchRow.Children.Add(branchCode); branchRow.Children.Add(branchSave);
         branchBlock.Children.Add(branchRow);
-        branchSave.Click += async (_, _) => await SaveAsync(async database =>
+        branchSave.Click += async (_, _) =>
         {
-            var name = branchName.Text.Trim(); var code = branchCode.Text.Trim().ToUpperInvariant();
+            var name = branchName.Text.Trim();
+            var code = branchCode.Text.Trim().ToUpperInvariant();
+            await SaveAsync(async database =>
+            {
             Require(name.Length is >= 2 and <= 120 && code.Length is >= 1 and <= 20, "Enter a branch name and short code.");
             Require(!await database.Branches.AnyAsync(b => b.Code == code), "Branch code already exists.");
-            database.Branches.Add(new LocalBranch
-            {
-                Id = Guid.CreateVersion7().ToString("N"), Name = name, Code = code, IsActive = true,
+                database.Branches.Add(new LocalBranch
+                {
+                    Id = Guid.CreateVersion7().ToString("N"), Name = name, Code = code, IsActive = true,
+                });
             });
-        });
+        };
 
         var areaBlock = Block("2 · Dining area", "Assign a hall, floor or seating area to a branch.");
         var areaName = Field("Dining area name");
@@ -110,11 +120,13 @@ internal sealed class StandaloneCatalogWindow : Window
         var areaRow = new WrapPanel();
         areaRow.Children.Add(branchChoice); areaRow.Children.Add(areaName); areaRow.Children.Add(areaSave);
         areaBlock.Children.Add(areaRow);
-        areaSave.Click += async (_, _) => await SaveAsync(async database =>
+        areaSave.Click += async (_, _) =>
         {
             var branch = branchChoice.SelectedItem as LocalBranch;
-            Require(branch is not null, "Create a branch first.");
             var name = areaName.Text.Trim();
+            await SaveAsync(async database =>
+            {
+            Require(branch is not null, "Create a branch first.");
             Require(name.Length is >= 2 and <= 120, "Enter a dining area name.");
             database.DiningAreas.Add(new LocalDiningArea
             {
@@ -122,7 +134,8 @@ internal sealed class StandaloneCatalogWindow : Window
                 Name = name, SortOrder = 0, IsActive = true,
             });
             await Task.CompletedTask;
-        });
+            });
+        };
 
         var tableBlock = Block("3 · Dining table", "Tables begin Available and change with real orders and payments.");
         var areaChoice = new ComboBox { Width = 200, Height = 34, Margin = new Thickness(0, 0, 10, 8),
@@ -134,14 +147,18 @@ internal sealed class StandaloneCatalogWindow : Window
         foreach (var c in new FrameworkElement[] { areaChoice, tableName, tableCode, capacity, tableSave })
             tableRow.Children.Add(c);
         tableBlock.Children.Add(tableRow);
-        tableSave.Click += async (_, _) => await SaveAsync(async database =>
+        tableSave.Click += async (_, _) =>
         {
             var area = areaChoice.SelectedItem as LocalDiningArea;
+            var name = tableName.Text.Trim();
+            var code = tableCode.Text.Trim().ToUpperInvariant();
+            var seatsText = capacity.Text;
+            await SaveAsync(async database =>
+            {
             Require(area is not null, "Create a dining area first.");
-            var name = tableName.Text.Trim(); var code = tableCode.Text.Trim().ToUpperInvariant();
             Require(name.Length is >= 1 and <= 120 && code.Length is >= 1 and <= 30,
                 "Enter table name and code.");
-            Require(int.TryParse(capacity.Text, out var seats) && seats is >= 1 and <= 50,
+            Require(int.TryParse(seatsText, out var seats) && seats is >= 1 and <= 50,
                 "Seats must be between 1 and 50.");
             Require(!await database.DiningTables.AnyAsync(t => t.DiningAreaId == area!.Id && t.Code == code),
                 "This table code already exists in that area.");
@@ -150,22 +167,26 @@ internal sealed class StandaloneCatalogWindow : Window
                 Id = Guid.CreateVersion7().ToString("N"), DiningAreaId = area!.Id,
                 Name = name, Code = code, Capacity = seats, Status = "available", IsActive = true,
             });
-        });
+            });
+        };
 
         var categoryBlock = Block("4 · Menu category", "Categories group dishes in the photo POS.");
         var categoryName = Field("Category name"); var categorySave = Action("Add category");
         var categoryRow = new WrapPanel(); categoryRow.Children.Add(categoryName);
         categoryRow.Children.Add(categorySave); categoryBlock.Children.Add(categoryRow);
-        categorySave.Click += async (_, _) => await SaveAsync(async database =>
+        categorySave.Click += async (_, _) =>
         {
             var name = categoryName.Text.Trim();
+            await SaveAsync(async database =>
+            {
             Require(name.Length is >= 2 and <= 120, "Enter a menu category.");
             Require(!await database.MenuCategories.AnyAsync(c => c.Name == name), "Category already exists.");
             database.MenuCategories.Add(new LocalMenuCategory
             {
                 Id = Guid.CreateVersion7().ToString("N"), Name = name, SortOrder = 0, IsActive = true,
             });
-        });
+            });
+        };
 
         var menuBlock = Block("5 · Menu dish", "Set the AFN price and optional photo. The photo is copied locally; it is never uploaded.");
         var dishName = Field("Dish name"); var sku = Field("SKU (optional)");
@@ -188,17 +209,21 @@ internal sealed class StandaloneCatalogWindow : Window
             { categoryChoice, dishName, sku, price, photo, browse, menuSave })
             menuRow.Children.Add(c);
         menuBlock.Children.Add(menuRow);
-        menuSave.Click += async (_, _) => await SaveAsync(async database =>
+        menuSave.Click += async (_, _) =>
         {
             var category = categoryChoice.SelectedItem as LocalMenuCategory;
-            Require(category is not null, "Create a category first.");
             var name = dishName.Text.Trim();
-            Require(name.Length is >= 2 and <= 180, "Enter a dish name.");
-            Require(decimal.TryParse(price.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out var amount)
-                && amount >= 0 && amount <= 1_000_000, "Enter a valid nonnegative AFN price.");
+            var priceText = price.Text;
             var code = sku.Text.Trim();
+            var photoPath = photo.Text.Trim();
+            await SaveAsync(async database =>
+            {
+            Require(category is not null, "Create a category first.");
+            Require(name.Length is >= 2 and <= 180, "Enter a dish name.");
+            Require(decimal.TryParse(priceText, NumberStyles.Number, CultureInfo.CurrentCulture, out var amount)
+                && amount >= 0 && amount <= 1_000_000, "Enter a valid nonnegative AFN price.");
             Require(code.Length <= 80, "SKU cannot exceed 80 characters.");
-            var image = await CopyPhotoAsync(photo.Text.Trim());
+            var image = await CopyPhotoAsync(photoPath);
             database.MenuItems.Add(new LocalMenuItem
             {
                 Id = Guid.CreateVersion7().ToString("N"), MenuCategoryId = category!.Id,
@@ -206,7 +231,8 @@ internal sealed class StandaloneCatalogWindow : Window
                 Price = amount, Currency = "AFN", ImageUrl = image,
                 SortOrder = 0, IsAvailable = true,
             });
-        });
+            });
+        };
 
         var editDishBlock = Block("6 · Edit or hide existing dish",
             "A dish's current name, AFN price, SKU or sale availability can change without altering the historical amounts on paid orders.");
