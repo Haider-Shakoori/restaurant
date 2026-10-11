@@ -2031,13 +2031,27 @@ internal static class RestaurantOperationalPages
 
         var workflowHelp = new TextBlock
         {
-            Text = "Simple kitchen flow: receive KOT → tap READY → waiter pickup. Start/Preparing/Expo are no longer steps for staff. Historical KOT events remain unchanged.",
+            Text = "Choose the kitchen flow for new KOT rounds. Existing tickets keep their original stages and production history.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 6, 0, 12),
         };
         workflowHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         workflowPanel.Children.Add(workflowHelp);
 
+        var readyOnly = new CheckBox
+        {
+            Name = "SettingsReadyOnlyKot",
+            Content = "Ready-only KOT (recommended: tap READY and notify waiter)",
+            IsChecked = !workflowSettings.PreparingStageEnabled && !workflowSettings.ExpoEnabled,
+            Margin = new Thickness(0, 10, 0, 6),
+            FontWeight = FontWeights.SemiBold,
+        };
+        var workflowModeHint = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(18, 0, 0, 12),
+        };
+        workflowModeHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         var queue = new CheckBox
         {
             Content = "Kitchen Queue",
@@ -2083,7 +2097,30 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 4, 0, 10),
         };
 
+        void UpdateKitchenWorkflowMode()
+        {
+            var instant = readyOnly.IsChecked == true;
+            preparing.Visibility = instant ? Visibility.Collapsed : Visibility.Visible;
+            expo.Visibility = instant ? Visibility.Collapsed : Visibility.Visible;
+            if (!instant && preparing.IsChecked != true)
+                preparing.IsChecked = true;
+            expo.IsEnabled = preparing.IsChecked == true;
+            if (!expo.IsEnabled) expo.IsChecked = false;
+            workflowModeHint.Text = instant
+                ? "New tickets: QUEUED → READY → waiter pickup. No Start or Expo steps."
+                : "New tickets use their selected stages. Start preparation first, then mark READY " +
+                  "(or send to Expo when enabled). Earlier tickets keep their original workflow.";
+        }
+        readyOnly.Checked += (_, _) => UpdateKitchenWorkflowMode();
+        readyOnly.Unchecked += (_, _) => UpdateKitchenWorkflowMode();
+        preparing.Checked += (_, _) => UpdateKitchenWorkflowMode();
+        preparing.Unchecked += (_, _) => UpdateKitchenWorkflowMode();
+        workflowPanel.Children.Add(readyOnly);
+        workflowPanel.Children.Add(workflowModeHint);
         workflowPanel.Children.Add(queue);
+        workflowPanel.Children.Add(preparing);
+        workflowPanel.Children.Add(expo);
+        UpdateKitchenWorkflowMode();
 
         workflowPanel.Children.Add(courses);
         workflowPanel.Children.Add(sound);
@@ -2155,8 +2192,8 @@ internal static class RestaurantOperationalPages
                 saveWorkflow.IsEnabled = false;
                 var update = new RestaurantWorkflowSettingsUpdate(
                     queue.IsChecked == true,
-                    false, // Ready-only KOT: no Start stage
-                    false, // no Expo approval stage
+                    readyOnly.IsChecked != true && preparing.IsChecked == true,
+                    readyOnly.IsChecked != true && expo.IsChecked == true,
                     courses.IsChecked == true,
                     sound.IsChecked == true,
                     warningMinutes,
@@ -2169,7 +2206,7 @@ internal static class RestaurantOperationalPages
 
                 workflowStatus.Text =
                     $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
-                    "Kitchen READY-only · " +
+                    $"KOT {(updated.PreparingStageEnabled ? (updated.ExpoEnabled ? "START → EXPO → READY" : "START → READY") : "READY-only")} · " +
                     $"Negative stock {updated.NegativeStockPolicy.ToUpperInvariant()}.";
             }
             catch (Exception ex)
