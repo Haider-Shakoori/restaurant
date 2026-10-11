@@ -1178,7 +1178,7 @@ internal static class OperationalActionViews
                 if (targetTableBox.SelectedItem is not Choice target)
                     throw new InvalidOperationException("Select an available target table.");
 
-                await workflow.TransferOrderAsync(order.Id, target.Id);
+                await DesktopUiWork.RunAsync(() => workflow.TransferOrderAsync(order.Id, target.Id));
                 operationStatus.Text = $"{order.ClientOrderId} transferred to {target.Label}. Refresh to see the new floor state.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
@@ -1194,7 +1194,7 @@ internal static class OperationalActionViews
                 if (mergeSource.SelectedItem is not TableOrderChoice source)
                     throw new InvalidOperationException("Select the source order.");
 
-                await workflow.MergeDraftOrdersAsync(target.Id, source.Id);
+                await DesktopUiWork.RunAsync(() => workflow.MergeDraftOrdersAsync(target.Id, source.Id));
                 operationStatus.Text = $"{source.ClientOrderId} merged into {target.ClientOrderId}.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
@@ -1217,7 +1217,7 @@ internal static class OperationalActionViews
                 if (ids.Length == 0)
                     throw new InvalidOperationException("Select one or more unsent lines.");
 
-                await workflow.MoveUnsentItemsAsync(source.Id, target.Id, ids);
+                await DesktopUiWork.RunAsync(() => workflow.MoveUnsentItemsAsync(source.Id, target.Id, ids));
                 operationStatus.Text = $"{ids.Length} unsent line(s) moved from {source.ClientOrderId} to {target.ClientOrderId}. KOT history stayed on the source order.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
@@ -1240,7 +1240,7 @@ internal static class OperationalActionViews
                 if (ids.Length == 0)
                     throw new InvalidOperationException("Select one or more unsent lines.");
 
-                await workflow.SplitUnsentItemsAsync(source.Id, target.Id, ids);
+                await DesktopUiWork.RunAsync(() => workflow.SplitUnsentItemsAsync(source.Id, target.Id, ids));
                 operationStatus.Text = $"{ids.Length} unsent line(s) split to {target.Label}. Existing KOT history was unchanged.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, operationStatus.Text);
             }
@@ -2016,7 +2016,7 @@ internal static class OperationalActionViews
                 finalize.IsEnabled = false;
                 try
                 {
-                    await workflow.FinalizeDailyClosingAsync(branch.Id, date);
+                    await DesktopUiWork.RunAsync(() => workflow.FinalizeDailyClosingAsync(branch.Id, date));
                     status.Text = $"Business date {date:yyyy-MM-dd} finalized.";
                     DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
                 }
