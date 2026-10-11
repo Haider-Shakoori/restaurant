@@ -6,7 +6,7 @@ namespace BusinessOS.Restaurant.Tests;
 public sealed class DesktopCriticalActionTests
 {
     [Fact]
-    public void Successful_payment_is_locked_until_workspace_is_recreated()
+    public void Unverified_payment_remains_locked_to_avoid_double_charge()
     {
         var gate = new DesktopSubmissionGate();
         Assert.True(gate.TryBegin());
@@ -14,7 +14,20 @@ public sealed class DesktopCriticalActionTests
         gate.Finish(lockOnSuccess: true);
         Assert.True(gate.IsLocked);
         Assert.False(gate.TryBegin());
-        Assert.True(new DesktopSubmissionGate().TryBegin()); // fresh cashier page
+        Assert.True(new DesktopSubmissionGate().TryBegin()); // independent gate
+    }
+
+    [Fact]
+    public void Verified_partial_payment_allows_second_payment_on_same_page()
+    {
+        var gate = new DesktopSubmissionGate();
+        Assert.True(gate.TryBegin());
+        Assert.False(gate.TryBegin()); // rapid double click is blocked
+        gate.Finish(lockOnSuccess: false); // committed state reloaded from SQLite
+        Assert.False(gate.IsLocked);
+        Assert.True(gate.TryBegin()); // remaining balance may be collected now
+        gate.Finish(lockOnSuccess: true); // cannot verify: remain locked
+        Assert.False(gate.TryBegin());
     }
 
     [Fact]
@@ -71,8 +84,12 @@ public sealed class DesktopCriticalActionTests
             Assert.Contains(title, views);
         Assert.Contains("var paymentSubmission = new DesktopSubmissionGate();", views);
         Assert.Contains("if (!paymentSubmission.TryBegin()) return;", views);
-        Assert.Contains("paymentSubmission.Finish(lockOnSuccess: posted);", views);
-        Assert.Contains("if (!posted) pay.IsEnabled = true;", views);
+        Assert.Contains("paymentSubmission.Finish(lockOnSuccess: paymentNeedsManualVerification || (sentToDatabase && !verified));", views);
+        Assert.Contains("await RefreshCashierStateAsync();", views);
+        Assert.Contains("selected.Balance > 0", views);
+        Assert.Contains("Name = \"PosGlassModalOverlay\"", views);
+        Assert.Contains("Name = \"PosOpenPaymentModal\"", views);
+        Assert.DoesNotContain("Refresh the cashier workspace before entering another payment.", views);
         Assert.Contains("var kotSubmission = new DesktopSubmissionGate();", views);
         Assert.Contains("kotSubmission.Finish(lockOnSuccess: false);", views);
         Assert.Contains("submit.IsEnabled = true;", views);
