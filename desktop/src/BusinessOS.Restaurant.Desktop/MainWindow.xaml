@@ -218,57 +218,135 @@
                                        FontWeight="SemiBold"
                                        FontSize="10"
                                        Margin="14,0,0,6" />
-                            <Button Style="{StaticResource NavButton}" Content="⌂   Dashboard"
-                                    Command="{Binding NavigateCommand}" CommandParameter="dashboard"
-                                    Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▦   POS &amp; Orders"
-                                    Command="{Binding NavigateCommand}" CommandParameter="pos"
-                                    Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor"
-                                    Command="{Binding NavigateCommand}" CommandParameter="tables"
-                                    Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="♨   Kitchen / KOT"
-                                    Command="{Binding NavigateCommand}" CommandParameter="kitchen"
-                                    Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
-                                    Command="{Binding NavigateCommand}" CommandParameter="menu"
-                                    Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="♧   Recipes &amp; Food Cost"
-                                    Command="{Binding NavigateCommand}" CommandParameter="recipes"
-                                    Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Dashboard"
+                                     Command="{Binding NavigateCommand}" CommandParameter="dashboard"
+                                     Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE80F;" Width="28" />
+                                     <TextBlock Text="Dashboard" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="POS &amp; Orders"
+                                     Command="{Binding NavigateCommand}" CommandParameter="pos"
+                                     Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE7BF;" Width="28" />
+                                     <TextBlock Text="POS &amp; Orders" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Tables &amp; Floor"
+                                     Command="{Binding NavigateCommand}" CommandParameter="tables"
+                                     Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE8A0;" Width="28" />
+                                     <TextBlock Text="Tables &amp; Floor" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Kitchen / KOT"
+                                     Command="{Binding NavigateCommand}" CommandParameter="kitchen"
+                                     Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE713;" Width="28" />
+                                     <TextBlock Text="Kitchen / KOT" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Menu &amp; Products"
+                                     Command="{Binding NavigateCommand}" CommandParameter="menu"
+                                     Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE8A5;" Width="28" />
+                                     <TextBlock Text="Menu &amp; Products" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Recipes &amp; Food Cost"
+                                     Command="{Binding NavigateCommand}" CommandParameter="recipes"
+                                     Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE8D2;" Width="28" />
+                                     <TextBlock Text="Recipes &amp; Food Cost" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
 
                             <TextBlock Text="MANAGEMENT"
                                        Foreground="{DynamicResource TextMutedBrush}"
                                        FontWeight="SemiBold"
                                        FontSize="10"
                                        Margin="14,18,0,6" />
-                            <Button Style="{StaticResource NavButton}" Content="▤   Inventory"
-                                    Command="{Binding NavigateCommand}" CommandParameter="inventory"
-                                    Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▥   Purchases"
-                                    Command="{Binding NavigateCommand}" CommandParameter="purchases"
-                                    Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="$   Expenses"
-                                    Command="{Binding NavigateCommand}" CommandParameter="expenses"
-                                    Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="◉   Daily Closing"
-                                    Command="{Binding NavigateCommand}" CommandParameter="closing"
-                                    Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▥   Reports &amp; Accounting"
-                                    Command="{Binding NavigateCommand}" CommandParameter="reports"
-                                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Inventory"
+                                     Command="{Binding NavigateCommand}" CommandParameter="inventory"
+                                     Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE719;" Width="28" />
+                                     <TextBlock Text="Inventory" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Purchases"
+                                     Command="{Binding NavigateCommand}" CommandParameter="purchases"
+                                     Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE8D4;" Width="28" />
+                                     <TextBlock Text="Purchases" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Expenses"
+                                     Command="{Binding NavigateCommand}" CommandParameter="expenses"
+                                     Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE8D4;" Width="28" />
+                                     <TextBlock Text="Expenses" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Daily Closing"
+                                     Command="{Binding NavigateCommand}" CommandParameter="closing"
+                                     Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE10A;" Width="28" />
+                                     <TextBlock Text="Daily Closing" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Reports &amp; Accounting"
+                                     Command="{Binding NavigateCommand}" CommandParameter="reports"
+                                     Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE9D9;" Width="28" />
+                                     <TextBlock Text="Reports &amp; Accounting" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
 
                             <TextBlock Text="SYSTEM"
                                        Foreground="{DynamicResource TextMutedBrush}"
                                        FontWeight="SemiBold"
                                        FontSize="10"
                                        Margin="14,18,0,6" />
-                            <Button Style="{StaticResource NavButton}" Content="♙   Users &amp; Roles"
-                                    Command="{Binding NavigateCommand}" CommandParameter="users"
-                                    Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="⚙   Settings"
-                                    Command="{Binding NavigateCommand}" CommandParameter="settings"
-                                    Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}" />
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Users &amp; Roles"
+                                     Command="{Binding NavigateCommand}" CommandParameter="users"
+                                     Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE77B;" Width="28" />
+                                     <TextBlock Text="Users &amp; Roles" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
+                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Settings"
+                                     Command="{Binding NavigateCommand}" CommandParameter="settings"
+                                     Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}">
+                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
+                                                Text="&#xE713;" Width="28" />
+                                     <TextBlock Text="Settings" VerticalAlignment="Center" />
+                                 </StackPanel>
+                             </Button>
                         </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
