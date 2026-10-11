@@ -202,7 +202,9 @@ internal static class RestaurantOperationalPages
                 ("Cash collected (separate)", $"AFN {dailyProfit.CashCollected:N2}"),
                 ("Accounting basis", dailyProfit.IsComplete
                     ? "Consumed stock, not purchased stock"
-                    : $"PROVISIONAL · {dailyProfit.UnvaluedConsumptionMovements} historical ingredient use entries lack cost"))));
+                    : dailyProfit.ConsumptionMode.StartsWith("Manual", StringComparison.OrdinalIgnoreCase)
+                        ? $"PROVISIONAL · depends on completed physical stock counts; {dailyProfit.UnvaluedConsumptionMovements} unvalued entries"
+                        : $"PROVISIONAL · {dailyProfit.UnvaluedConsumptionMovements} historical ingredient use entries lack cost"))));
 
         root.Children.Add(DashboardCards(
             ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
