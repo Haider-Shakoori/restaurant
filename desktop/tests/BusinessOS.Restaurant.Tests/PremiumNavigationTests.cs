@@ -111,7 +111,11 @@ public sealed class PremiumNavigationTests
         Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", navigate);
         Assert.Contains("_pageRequests.IsCurrent(requestId) && CurrentRoute == route", refresh);
         Assert.True(refresh.IndexOf("_pageRequests.Begin()", StringComparison.Ordinal) <
-                    refresh.IndexOf("await RefreshDiagnosticsAsync();", StringComparison.Ordinal));
+                    refresh.IndexOf("await RestaurantOperationalPages.CreateAsync(", StringComparison.Ordinal));
+        Assert.DoesNotContain("await RefreshDiagnosticsAsync();", refresh);
+        Assert.Contains("_ = RefreshDiagnosticsAsync();", refresh);
+        Assert.Contains("IsWorkspaceLoading = true;", navigate);
+        Assert.Contains("IsWorkspaceLoading = false;", navigate);
         Assert.True(navigate.IndexOf("if (!_pageRequests.IsCurrent(requestId))", StringComparison.Ordinal) <
                     navigate.IndexOf("PageTitle = pageTitle;", StringComparison.Ordinal));
     }
