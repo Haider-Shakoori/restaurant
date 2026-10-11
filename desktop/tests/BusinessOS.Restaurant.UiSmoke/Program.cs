@@ -173,6 +173,10 @@ internal static class Program
         CheckNavigation(owner, "kitchen");
         await NavigateAsync(owner, "pos");
         CheckOptionalFullScreen(owner, "pos");
+        var currentPosWorkspace = vm.CurrentPage;
+        await vm.NavigateCommand.ExecuteAsync("pos");
+        Assert(ReferenceEquals(currentPosWorkspace, vm.CurrentPage),
+            "Re-selecting open POS does not redo menu, SQLite queries or tile layout");
         await CheckPosInteractionsAsync(owner);
 
         // The reported issue was inside the Glass-mode cloud-management dialog.
