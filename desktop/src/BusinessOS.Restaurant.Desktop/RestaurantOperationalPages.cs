@@ -1321,7 +1321,12 @@ internal static class RestaurantOperationalPages
                     ("Reason / count period", reason),
                 })
                 {
-                    content.Children.Add(Label(entry.Text));
+                    content.Children.Add(new TextBlock
+                    {
+                        Text = entry.Text,
+                        Margin = new Thickness(0, 9, 0, 4),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
                     content.Children.Add(entry.Field);
                 }
                 content.Children.Add(preview);
