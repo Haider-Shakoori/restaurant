@@ -862,20 +862,27 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> InventoryAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
-        var rows = await (from item in db.InventoryItems.AsNoTracking()
-                          join balance in db.InventoryBalances.AsNoTracking() on item.Id equals balance.InventoryItemId into balances
-                          from balance in balances.DefaultIfEmpty()
-                          join valuation in db.InventoryValuations.AsNoTracking() on item.Id equals valuation.InventoryItemId into valuations
-                          from valuation in valuations.DefaultIfEmpty()
-                          where item.IsActive
-                          orderby item.Name
-                          select new InventoryRow(item.Sku, item.Name, item.BaseUnit, item.PurchaseUnit ?? item.BaseUnit,
-                              balance == null ? 0m : balance.Quantity, item.ReorderLevel,
-                              valuation == null ? 0m : valuation.AverageUnitCost,
-                              valuation == null ? 0m : valuation.Value)).ToListAsync();
+        // Do not execute SQLite queries on the WPF dispatcher during page navigation.
+        var workspaceData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var rows = await (from item in db.InventoryItems.AsNoTracking()
+                              join balance in db.InventoryBalances.AsNoTracking() on item.Id equals balance.InventoryItemId into balances
+                              from balance in balances.DefaultIfEmpty()
+                              join valuation in db.InventoryValuations.AsNoTracking() on item.Id equals valuation.InventoryItemId into valuations
+                              from valuation in valuations.DefaultIfEmpty()
+                              where item.IsActive
+                              orderby item.Name
+                              select new InventoryRow(item.Sku, item.Name, item.BaseUnit, item.PurchaseUnit ?? item.BaseUnit,
+                                  balance == null ? 0m : balance.Quantity, item.ReorderLevel,
+                                  valuation == null ? 0m : valuation.AverageUnitCost,
+                                  valuation == null ? 0m : valuation.Value)).ToListAsync();
+            return (factory, rows);
+        });
+        var (factory, rows) = workspaceData;
+
         var grid = GridFor(rows);
         grid.Columns.Add(Column("SKU", nameof(InventoryRow.Sku), 120));
         grid.Columns.Add(Column("Ingredient", nameof(InventoryRow.Name), 220));
@@ -1232,24 +1239,31 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> PurchasesAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
-        var orders = (await (from po in db.PurchaseOrders.AsNoTracking()
-                             join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
-                             select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt, po.CompletedAt))
-                            .ToListAsync())
-            .OrderByDescending(x => x.OrderedAt)
-            .Take(100)
-            .ToList();
-        var suppliers = await db.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
-            .Select(x => new SupplierRow(x.Code, x.Name, x.Phone, x.Email)).ToListAsync();
-        var receipts = (await db.GoodsReceipts.AsNoTracking()
-                .Select(x => new ReceiptRow(x.ReceiptNumber, x.Status, x.ReceivedAt, x.PurchaseOrderId))
-                .ToListAsync())
-            .OrderByDescending(x => x.ReceivedAt)
-            .Take(100)
-            .ToList();
+        // Do not execute SQLite queries on the WPF dispatcher during page navigation.
+        var workspaceData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var orders = (await (from po in db.PurchaseOrders.AsNoTracking()
+                                 join supplier in db.Suppliers.AsNoTracking() on po.SupplierId equals supplier.Id
+                                 select new PurchaseRow(po.PoNumber, supplier.Name, po.Status, po.EstimatedTotal, po.OrderedAt, po.CompletedAt))
+                                .ToListAsync())
+                .OrderByDescending(x => x.OrderedAt)
+                .Take(100)
+                .ToList();
+            var suppliers = await db.Suppliers.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+                .Select(x => new SupplierRow(x.Code, x.Name, x.Phone, x.Email)).ToListAsync();
+            var receipts = (await db.GoodsReceipts.AsNoTracking()
+                    .Select(x => new ReceiptRow(x.ReceiptNumber, x.Status, x.ReceivedAt, x.PurchaseOrderId))
+                    .ToListAsync())
+                .OrderByDescending(x => x.ReceivedAt)
+                .Take(100)
+                .ToList();
+
+            return (factory, orders, suppliers, receipts);
+        });
+        var (factory, orders, suppliers, receipts) = workspaceData;
 
         var panel = Stack();
         panel.Children.Add(Card("Restaurant procurement", "Supplier → purchase order → goods receipt → stock movement. Receiving stock updates the local restaurant inventory."));
@@ -1683,25 +1697,32 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> ExpensesAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
-        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
-            .Select(x => new ExpenseBranchChoice(x.Id, x.Name)).ToListAsync();
-        var rows = (await (from expense in db.Expenses.AsNoTracking()
-                           join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
-                           select new
-                           {
-                               Row = new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
-                                   expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference),
-                               expense.ExpenseDate,
-                               expense.RecordedAtUtc,
-                           }).ToListAsync())
-            .OrderByDescending(x => x.ExpenseDate)
-            .ThenByDescending(x => x.RecordedAtUtc)
-            .Take(500)
-            .Select(x => x.Row)
-            .ToList();
+        // Do not execute SQLite queries on the WPF dispatcher during page navigation.
+        var workspaceData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+                .Select(x => new ExpenseBranchChoice(x.Id, x.Name)).ToListAsync();
+            var rows = (await (from expense in db.Expenses.AsNoTracking()
+                               join branch in db.Branches.AsNoTracking() on expense.BranchId equals branch.Id
+                               select new
+                               {
+                                   Row = new ExpenseRow(expense.ExpenseDate, branch.Name, expense.Category, expense.Description,
+                                       expense.Amount, expense.Currency, expense.PaymentMethod, expense.Reference),
+                                   expense.ExpenseDate,
+                                   expense.RecordedAtUtc,
+                               }).ToListAsync())
+                .OrderByDescending(x => x.ExpenseDate)
+                .ThenByDescending(x => x.RecordedAtUtc)
+                .Take(500)
+                .Select(x => x.Row)
+                .ToList();
+
+            return (factory, branches, rows);
+        });
+        var (factory, branches, rows) = workspaceData;
 
         var panel = Stack();
         panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
