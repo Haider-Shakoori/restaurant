@@ -1866,8 +1866,8 @@ internal static class OperationalActionViews
         var selectedDish = new ComboBox
         {
             Name = "KotTopSelectedDish",
-            DisplayMemberPath = "ItemName",
-            Width = 225, Height = 36,
+            DisplayMemberPath = "Label",
+            Width = 390, Height = 36,
             Margin = new Thickness(6, 4, 8, 6),
             ToolTip = "Choose the KOT dish that is ready for pickup",
         };
@@ -2416,12 +2416,15 @@ internal static class OperationalActionViews
 
         void RefreshSelectedDishes()
         {
-            var oldId = (selectedDish.SelectedItem as KitchenItemCard)?.ItemId;
+            var oldId = (selectedDish.SelectedItem as Choice)?.Id;
             var options = rows.Where(x => x.Status is "queued" or "active" or "preparing" or "expo")
                 .OrderByDescending(x => x.Priority == "rush")
-                .ThenBy(x => x.QueuedAt).ToArray();
+                .ThenBy(x => x.QueuedAt)
+                .Select(x => new Choice(x.ItemId,
+                    $"{x.ServiceLabel} · {x.KotNumber} · {x.ItemName} ×{x.Quantity}"))
+                .ToArray();
             selectedDish.ItemsSource = options;
-            selectedDish.SelectedItem = options.FirstOrDefault(x => x.ItemId == oldId)
+            selectedDish.SelectedItem = options.FirstOrDefault(x => x.Id == oldId)
                 ?? options.FirstOrDefault();
             markReady.IsEnabled = canProduce && options.Length > 0;
         }
@@ -2439,8 +2442,10 @@ internal static class OperationalActionViews
 
         markReady.Click += async (_, _) =>
         {
-            if (!markReady.IsEnabled || selectedDish.SelectedItem is not KitchenItemCard dish)
+            if (!markReady.IsEnabled || selectedDish.SelectedItem is not Choice selected)
                 return;
+            var dish = rows.FirstOrDefault(x => x.ItemId == selected.Id);
+            if (dish is null) return;
             markReady.IsEnabled = false;
             kitchenWritesInProgress++;
             try
