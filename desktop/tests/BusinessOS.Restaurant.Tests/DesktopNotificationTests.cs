@@ -91,7 +91,7 @@ public sealed class DesktopNotificationTests
         Assert.Contains("DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message)", code);
         var printer = File.ReadAllText(FileAt("src", "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
         Assert.Contains("Confirm printer recovery", printer);
-        Assert.Contains("MessageBoxButton.YesNo", printer);
+        Assert.Contains("DesktopGlassDialog.Confirm(", printer);
 
         var viewModel = File.ReadAllText(FileAt("src", "BusinessOS.Restaurant.Desktop", "MainWindowViewModel.cs"));
         Assert.Contains("ReleaseNotifications()", viewModel);
