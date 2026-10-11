@@ -241,7 +241,7 @@ internal static class Program
             "Waiter cannot open Purchases by directly invoking route command");
 
         await NavigateAsync(waiter, "pos");
-        Assert(FindButton(waiter, "Show cashier & billing") is null,
+        Assert(Descendants<Button>(waiter).All(x => x.Name != "PosOpenPaymentModal"),
             "Waiter POS never reveals cashier or payment controls");
 
         waiter.Close();
@@ -543,12 +543,39 @@ internal static class Program
         var grid = Descendants<DataGrid>(window).Single(x => x.Name == "PosActiveOrdersGrid");
         Assert(grid.IsReadOnly && grid.SelectionMode == DataGridSelectionMode.Single,
             "Active orders list safely selects one read-only order");
-        Assert(FindButton(window, "Show cashier & billing") is not null,
-            "Owner can reveal cashier and billing");
-        Click(FindButton(window, "Show cashier & billing")!);
+        var overlay = Descendants<Grid>(window)
+            .Single(x => x.Name == "PosGlassModalOverlay");
+        var glass = Descendants<Border>(window)
+            .Single(x => x.Name == "PosGlassModalCard");
+        var contentSurface = Descendants<Grid>(window)
+            .Single(x => x.Name == "FullscreenPosWorkspace");
+        Assert(contentSurface.Tag is Func<bool>, "POS has a modal-aware Escape handler");
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "POS starts full-screen with photo menu and ticket, no blocking modal");
+        Assert(FindButton(window, "Show cashier & billing") is null,
+            "Old expanding cashier panel is replaced with a focused dialog");
+        var billingTrigger = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenPaymentModal");
+        Click(billingTrigger);
+        Assert(overlay.Visibility == Visibility.Visible && glass.CornerRadius.TopLeft >= 20,
+            "Owner can open the rounded iOS-style glass billing modal");
+        Assert(Descendants<TextBlock>(overlay).Any(x => x.Name == "PosLivePaymentBalance"),
+            "Payment dialog always displays current balance");
+        Assert(Descendants<Button>(overlay).Any(x => x.Content?.ToString() == "Check current balances"),
+            "Payment dialog can check balances without page reload");
         Assert(FindButton(window, "Post payment") is { IsEnabled: true },
-            "Owner cashier controls remain interactive after expansion");
-        Click(FindButton(window, "Hide cashier & billing")!);
+            "Owner cashier controls remain interactive in modal");
+        Assert(Descendants<Grid>(window).Single(x => x.Name == "PosGlassModalOverlay")
+            .Visibility == Visibility.Visible, "Payment modal keeps background covered");
+        var close = Descendants<Button>(window).Single(x => x.Name == "PosGlassModalClose");
+        Click(close);
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "Closing a modal returns to the POS without navigating away");
+        var openSetup = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenNewOrderModal");
+        Click(openSetup);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "New order opens in an independently scrolling modal");
 
         // Select and resume a real locally persisted counter order using the
         // cached CI-only branch. No tenant cloud, payments, or printing involved.
@@ -562,6 +589,14 @@ internal static class Program
         await WaitUntilAsync(() => !string.IsNullOrEmpty(currentOrder.Text),
             "offline counter order appears in POS");
         var id = currentOrder.Text;
+        Click(close);
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "New-order flow returns to full-screen ticket without navigation");
+        var ordersTrigger = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenActiveOrdersModal");
+        Click(ordersTrigger);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Active orders opens in its own searchable modal");
         // SQLite state refresh now runs on the worker thread; the order ID
         // appears before the complete active-order grid has been reloaded.
         await WaitUntilAsync(() => grid.Items.Count > 0,
