@@ -169,6 +169,7 @@ internal static class Program
         CheckNavigation(owner, "pos");
         CheckNavigation(owner, "kitchen");
         await NavigateAsync(owner, "pos");
+        CheckOptionalFullScreen(owner, "pos");
         await CheckPosInteractionsAsync(owner);
 
         // The reported issue was inside the Glass-mode cloud-management dialog.
@@ -213,6 +214,7 @@ internal static class Program
         // seeded but previously unsent synthetic kitchen item.
         await SeedKitchenStartFixtureAsync();
         await NavigateAsync(owner, "kitchen");
+        CheckOptionalFullScreen(owner, "kitchen");
         await CheckKitchenStartResponsiveAsync(owner);
         await SeedCashierPaymentFixtureAsync();
         await NavigateAsync(owner, "pos");
@@ -513,6 +515,33 @@ internal static class Program
         if (new FileInfo(destination).Length < 2048)
             throw new InvalidOperationException("Screenshot appears empty: " + destination);
         Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
+    }
+
+    private static void CheckOptionalFullScreen(MainWindow window, string route)
+    {
+        var fullscreen = Descendants<Button>(window)
+            .Single(x => x.Name == "WorkspaceFullScreenButton");
+        var restore = Descendants<Button>(window)
+            .Single(x => x.Name == "ExitPosButton");
+        var shortcuts = Descendants<Button>(window)
+            .Single(x => x.Name == "WorkspaceShortcutsButton");
+        var sidebar = Descendants<Border>(window)
+            .Single(x => x.Name == "SidebarContainer");
+        Assert(fullscreen.Visibility == Visibility.Visible &&
+            shortcuts.Visibility == Visibility.Visible &&
+            sidebar.Visibility == Visibility.Visible &&
+            restore.Visibility == Visibility.Collapsed,
+            route + " opens in a normal navigable Windows window by default");
+        Click(fullscreen);
+        Assert(restore.Visibility == Visibility.Visible &&
+            sidebar.Visibility == Visibility.Collapsed &&
+            fullscreen.Visibility == Visibility.Collapsed,
+            route + " enters optional full-screen mode by top toolbar");
+        Click(restore);
+        Assert(fullscreen.Visibility == Visibility.Visible &&
+            sidebar.Visibility == Visibility.Visible &&
+            restore.Visibility == Visibility.Collapsed,
+            route + " restores the normal window and sidebar without leaving the page");
     }
 
     private static async Task CheckPosInteractionsAsync(MainWindow window)
