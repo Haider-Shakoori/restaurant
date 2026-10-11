@@ -44,10 +44,17 @@ internal static class RestaurantPhotoPosCatalog
         var categoryFilters = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         var cards = new WrapPanel { Name = "PosPhotoMenuTiles" };
         var activeCategory = "All items";
-        // Load operator origin exactly once per photo catalogue rather than
-        // hitting WindowsSessionStore for every tile each time the page opens.
-        var tenantOriginTask = Task.Run(async () =>
-            (await new WindowsSessionStore().LoadAsync().ConfigureAwait(false))?.TenantBaseUrl);
+        // Capture the tenant origin AND operating mode once for the whole
+        // photo catalogue. The old path repeatedly read the encrypted
+        // activation file (once for each image), even on an offline cache hit.
+        var photoContextTask = Task.Run(async () =>
+        {
+            var session = await new WindowsSessionStore().LoadAsync().ConfigureAwait(false);
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore()
+                .LoadAsync().ConfigureAwait(false);
+            return (Origin: session?.TenantBaseUrl,
+                    Standalone: BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation));
+        });
         const int BatchSize = 48;
         var limit = BatchSize;
         var rendered = new Dictionary<string, Button>(StringComparer.Ordinal);
@@ -133,8 +140,9 @@ internal static class RestaurantPhotoPosCatalog
                     loading = true;
                     try
                     {
-                        var origin = await tenantOriginTask;
-                        var location = await CacheMenuPhotoAsync(item.ImageUrl, origin);
+                        var context = await photoContextTask;
+                        var location = await CacheMenuPhotoWithModeAsync(
+                            item.ImageUrl, context.Origin, context.Standalone);
                         if (location is null || !image.IsLoaded) return;
                         var key = location.LocalPath;
                         if (!DecodedImages.TryGetValue(key, out var weak) ||
@@ -221,8 +229,15 @@ internal static class RestaurantPhotoPosCatalog
 
     private static async Task<Uri?> CacheMenuPhotoAsync(string url, string? tenantUrl)
     {
+        // Kept as the stable public-to-test private entry point. The gallery
+        // uses the batched activation lookup instead.
         var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
-        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
+        return await CacheMenuPhotoWithModeAsync(
+            url, tenantUrl, BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation));
+    }
+
+    private static async Task<Uri?> CacheMenuPhotoWithModeAsync(string url, string? tenantUrl, bool standalone)
+    {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "BusinessOS", "Restaurant", "menu-photos");
 
