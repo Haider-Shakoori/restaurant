@@ -1835,7 +1835,11 @@ internal static class OperationalActionViews
         var root = new StackPanel();
         root.Children.Add(Header(
             "Kitchen / KOT",
-            "Tap READY when food can be picked up. The waiter sees the pickup alert in the mobile app after synchronization."));
+            settings.ReadyOnlyKotEnabled
+                ? "Tap READY to notify the waiter when food can be picked up."
+                : settings.ExpoEnabled
+                    ? "Tickets progress through START → TO EXPO → PASS EXPO before waiter pickup."
+                    : "Tickets progress through START → READY before waiter pickup."));
 
         var filterRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
         var stationFilter = new ComboBox
@@ -1874,7 +1878,7 @@ internal static class OperationalActionViews
         var markReady = Button("READY");
         markReady.Name = "KotTopReadyButton";
         markReady.MinHeight = 42;
-        markReady.ToolTip = "F2 · Notify waiter that selected dish is ready for pickup";
+        markReady.ToolTip = "F2 · Advance selected dish through the workflow set for its KOT round";
         var boardRefresh = Button("Refresh board");
         boardRefresh.Name = "KotTopRefreshButton";
         boardRefresh.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
@@ -2160,11 +2164,35 @@ internal static class OperationalActionViews
             Func<CancellationToken, Task>? primaryAction = null;
             string? success = null;
 
-            if (canProduce && row.Status is "queued" or "active" or "preparing" or "expo")
+            if (canProduce && (row.Status is "queued" or "active" or "preparing" or "expo"))
             {
-                primary = Button("READY");
-                primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                success = $"{row.ItemName} READY — the assigned waiter will see the pickup alert after sync.";
+                if (row.PreparingEnabled && row.Status is "queued" or "active")
+                {
+                    primary = Button("START");
+                    primaryAction = token => workflow.StartKitchenItemAsync(row.ItemId, token);
+                    success = $"{row.ItemName} started preparation.";
+                }
+                else if (row.ExpoEnabled && row.Status == "preparing")
+                {
+                    primary = Button("TO EXPO");
+                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
+                    success = $"{row.ItemName} sent to Expo. Pickup is not yet ready.";
+                }
+                else if (row.ExpoEnabled && row.Status == "expo")
+                {
+                    if (canExpo)
+                    {
+                        primary = Button("PASS EXPO");
+                        primaryAction = token => workflow.PassExpoItemAsync(row.ItemId, token);
+                        success = $"{row.ItemName} READY — waiter receives pickup update after sync.";
+                    }
+                }
+                else
+                {
+                    primary = Button("READY");
+                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
+                    success = $"{row.ItemName} READY — waiter receives pickup update after sync.";
+                }
             }
 
             if (primary is not null && primaryAction is not null)
@@ -2378,7 +2406,11 @@ internal static class OperationalActionViews
             handoffText.Text = ready > 0
                 ? $"{ready} READY FOR PICKUP • The waiter receives an in-app alert after LAN sync; background push requires cloud connectivity. " +
                   "RECALL, WASTE and RE-FIRE are exception actions requiring a reason."
-                : "Kitchen flow: New KOT → READY → Waiter pickup → Served → Billing. No Start step.";
+                : (settings.ReadyOnlyKotEnabled
+                    ? "Kitchen flow: New KOT → READY → Waiter pickup → Served → Billing."
+                    : settings.ExpoEnabled
+                        ? "Kitchen flow: New KOT → START → TO EXPO → PASS EXPO → Waiter pickup."
+                        : "Kitchen flow: New KOT → START → READY → Waiter pickup.");
         }
 
         void RenderBoard()
@@ -2414,19 +2446,37 @@ internal static class OperationalActionViews
             }
         }
 
+        (string Label, Func<CancellationToken, Task>? Action, string Success) KitchenNextStep(KitchenItemCard row)
+        {
+            if (row.PreparingEnabled && row.Status is "queued" or "active")
+                return ("START", token => workflow.StartKitchenItemAsync(row.ItemId, token),
+                    $"{row.ItemName} started.");
+            if (row.ExpoEnabled && row.Status == "preparing")
+                return ("TO EXPO", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
+                    $"{row.ItemName} moved to Expo. No waiter alert yet.");
+            if (row.ExpoEnabled && row.Status == "expo")
+                return ("PASS EXPO", canExpo ? token => workflow.PassExpoItemAsync(row.ItemId, token) : null,
+                    $"{row.ItemName} ready for waiter pickup.");
+            return ("READY", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
+                $"{row.ItemName} ready for waiter pickup.");
+        }
+
         void RefreshSelectedDishes()
         {
             var oldId = (selectedDish.SelectedItem as Choice)?.Id;
             var options = rows.Where(x => x.Status is "queued" or "active" or "preparing" or "expo")
+                .Where(x => canProduce && (!x.ExpoEnabled || x.Status != "expo" || canExpo))
                 .OrderByDescending(x => x.Priority == "rush")
                 .ThenBy(x => x.QueuedAt)
                 .Select(x => new Choice(x.ItemId,
-                    $"{x.ServiceLabel} · {x.KotNumber} · {x.ItemName} ×{x.Quantity}"))
+                    $"{x.ServiceLabel} · {x.KotNumber} · {x.ItemName} ×{x.Quantity} · {KitchenNextStep(x).Label}"))
                 .ToArray();
             selectedDish.ItemsSource = options;
             selectedDish.SelectedItem = options.FirstOrDefault(x => x.Id == oldId)
                 ?? options.FirstOrDefault();
-            markReady.IsEnabled = canProduce && options.Length > 0;
+            var selected = rows.FirstOrDefault(x => x.ItemId == (selectedDish.SelectedItem as Choice)?.Id);
+            markReady.Content = selected is null ? "READY" : KitchenNextStep(selected).Label;
+            markReady.IsEnabled = selected is not null && KitchenNextStep(selected).Action is not null;
         }
 
         async Task ReloadKitchenBoardAsync()
@@ -2450,10 +2500,10 @@ internal static class OperationalActionViews
             kitchenWritesInProgress++;
             try
             {
-                await DesktopUiWork.RunBoundedAsync(
-                    token => workflow.MarkKitchenItemReadyAsync(dish.ItemId, token),
-                    TimeSpan.FromSeconds(25));
-                statusText.Text = $"{dish.ItemName} READY for waiter pickup.";
+                var action = KitchenNextStep(dish);
+                if (action.Action is null) return;
+                await DesktopUiWork.RunBoundedAsync(action.Action, TimeSpan.FromSeconds(25));
+                statusText.Text = action.Success;
                 await ReloadKitchenBoardAsync();
             }
             catch (Exception ex)
@@ -2477,6 +2527,13 @@ internal static class OperationalActionViews
 
         RefreshStationChoices();
         RefreshSelectedDishes();
+        selectedDish.SelectionChanged += (_, _) =>
+        {
+            var selected = rows.FirstOrDefault(x => x.ItemId == (selectedDish.SelectedItem as Choice)?.Id);
+            markReady.Content = selected is null ? "READY" : KitchenNextStep(selected).Label;
+            markReady.IsEnabled = selected is not null && canProduce &&
+                KitchenNextStep(selected).Action is not null;
+        };
         stationFilter.SelectionChanged += (_, _) => RenderBoard();
         statusFilter.SelectionChanged += (_, _) => RenderBoard();
         RenderBoard();
