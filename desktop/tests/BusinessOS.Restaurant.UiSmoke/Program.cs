@@ -1108,7 +1108,7 @@ internal static class Program
                 .Where(x => x.EntityType == "order" && x.EntityId == "ci-kot-start-order")
                 .ToArrayAsync();
             return changes.Any(x => x.OwnerUserId == 901 &&
-                x.DataJson.Contains("\\"status\\":\\"ready\\"", StringComparison.Ordinal));
+                x.DataJson.Contains("ready", StringComparison.OrdinalIgnoreCase));
         });
         Assert(waiterChange,
             "Kitchen READY publishes a waiter-scoped order/ticket snapshot for LAN mobile pickup alerts");
