@@ -2326,7 +2326,7 @@ internal static class OperationalActionViews
         {
             // Single operational action, independent of legacy kitchen round flags.
             return ("READY", token => workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token),
-                $"{row.ItemName} ready. Waiter pickup alert available after LAN/mobile sync.");
+                $"{row.ItemName} ready for waiter pickup. Mobile alert follows the next LAN/cloud sync.");
         }
 
         void RefreshSelectedDishes()
