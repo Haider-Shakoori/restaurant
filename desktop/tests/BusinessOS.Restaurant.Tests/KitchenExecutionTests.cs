@@ -195,6 +195,77 @@ public sealed class KitchenExecutionTests
         }
     }
 
+    [Fact]
+    public async Task Expo_mode_defers_waiter_ready_alert_until_expo_passes()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var manager = new LocalTerminalPrincipal(
+                "manager-device", 99, "manager-99", "Kitchen Manager", "manager", "tenant-1");
+            var settings = new LocalRestaurantSettingsService(factory);
+            var saved = await settings.UpdateAsync(new RestaurantWorkflowSettingsUpdate(
+                true, true, true, false, true, 10, 20, false, "block"), manager);
+            Assert.False(saved.ReadyOnlyKotEnabled);
+            Assert.True(saved.PreparingStageEnabled && saved.ExpoEnabled);
+
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            var waiter = Waiter();
+            await PushOneAsync(sync, waiter, "OPEN-EXPO", "order.open", new
+            {
+                client_order_id = "ORDER-EXPO",
+                dining_table_id = "table-1",
+            });
+            await PushOneAsync(sync, waiter, "ADD-EXPO", "order.item.add", new
+            {
+                client_order_id = "ORDER-EXPO",
+                client_line_id = "LINE-EXPO",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, waiter, "SUBMIT-EXPO", "order.submit", new
+            {
+                client_order_id = "ORDER-EXPO",
+            });
+
+            string itemId;
+            await using (var db = factory.Create())
+            {
+                var item = await db.KitchenTicketItems.AsNoTracking().SingleAsync();
+                itemId = item.Id;
+            }
+
+            await kitchen.StartItemAsync(itemId, manager, CancellationToken.None);
+            await kitchen.ReadyItemAsync(itemId, manager, CancellationToken.None);
+            await using (var db = factory.Create())
+            {
+                Assert.Equal("expo", (await db.KitchenTicketItems.AsNoTracking()
+                    .SingleAsync(x => x.Id == itemId)).Status);
+                Assert.Equal("expo", (await db.Orders.AsNoTracking().SingleAsync()).Status);
+                Assert.DoesNotContain(await db.Changes.AsNoTracking()
+                    .Where(x => x.EntityType == "order").ToArrayAsync(),
+                    x => (x.DataJson?.Contains("\\"ready\\"", StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            await kitchen.PassExpoItemAsync(itemId, manager, CancellationToken.None);
+            await using (var db = factory.Create())
+            {
+                Assert.Equal("ready", (await db.KitchenTicketItems.AsNoTracking()
+                    .SingleAsync(x => x.Id == itemId)).Status);
+                var order = await db.Orders.AsNoTracking().SingleAsync();
+                Assert.Equal("ready", order.Status);
+                Assert.Contains(await db.Changes.AsNoTracking()
+                    .Where(x => x.EntityType == "order" && x.OwnerUserId == 1).ToArrayAsync(),
+                    x => (x.DataJson?.Contains("\\"ready\\"", StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static async Task<JsonElement> PushOneAsync(
         LocalSyncService sync,
         LocalTerminalPrincipal principal,
