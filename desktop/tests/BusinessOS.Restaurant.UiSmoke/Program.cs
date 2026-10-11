@@ -562,6 +562,10 @@ internal static class Program
         await WaitUntilAsync(() => !string.IsNullOrEmpty(currentOrder.Text),
             "offline counter order appears in POS");
         var id = currentOrder.Text;
+        // SQLite state refresh now runs on the worker thread; the order ID
+        // appears before the complete active-order grid has been reloaded.
+        await WaitUntilAsync(() => grid.Items.Count > 0,
+            "active POS orders list refresh completes asynchronously");
         Assert(grid.Items.Cast<object>().OfType<object>().Any(),
             "New order refreshes the active order list without navigating away");
 
