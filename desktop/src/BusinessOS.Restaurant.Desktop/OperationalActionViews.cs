@@ -1084,6 +1084,26 @@ internal static class OperationalActionViews
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 4),
         };
+        var quickTableBox = Combo(tables, "Label");
+        quickTableBox.Name = "PosQuickTablePicker";
+        quickTableBox.Width = 250;
+        quickTableBox.Height = 40;
+        quickTableBox.ToolTip = "Choose an available table, then tap dishes. The order opens automatically.";
+        quickTableBox.SelectionChanged += (_, _) =>
+        {
+            if (quickTableBox.SelectedItem is not Choice chosen) return;
+            serviceTypeBox.SelectedItem = "dine_in";
+            tableBox.SelectedItem = tables.FirstOrDefault(x => x.Id == chosen.Id);
+            // Never silently switch an order already in progress to another
+            // table. The quick selector applies to the next order only.
+        };
+        var quickTableLabel = new TextBlock
+        {
+            Text = "TABLE", FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(2, 15, 8, 0),
+        };
+        quickActions.Children.Add(quickTableLabel);
+        quickActions.Children.Add(quickTableBox);
         foreach (var button in new[] { newOrderModal, activeOrdersModal, viewTicketModal, editItemsModal })
         {
             button.MinHeight = 40;
