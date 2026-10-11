@@ -2281,31 +2281,6 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 4, 0, 10),
         };
 
-        void UpdateKitchenWorkflowMode()
-        {
-            var instant = readyOnly.IsChecked == true;
-            preparing.Visibility = instant ? Visibility.Collapsed : Visibility.Visible;
-            expo.Visibility = instant ? Visibility.Collapsed : Visibility.Visible;
-            if (!instant && preparing.IsChecked != true)
-                preparing.IsChecked = true;
-            expo.IsEnabled = preparing.IsChecked == true;
-            if (!expo.IsEnabled) expo.IsChecked = false;
-            workflowModeHint.Text = instant
-                ? "New tickets: QUEUED → READY → waiter pickup. No Start or Expo steps."
-                : "New tickets use their selected stages. Start preparation first, then mark READY " +
-                  "(or send to Expo when enabled). Earlier tickets keep their original workflow.";
-        }
-        readyOnly.Checked += (_, _) => UpdateKitchenWorkflowMode();
-        readyOnly.Unchecked += (_, _) => UpdateKitchenWorkflowMode();
-        preparing.Checked += (_, _) => UpdateKitchenWorkflowMode();
-        preparing.Unchecked += (_, _) => UpdateKitchenWorkflowMode();
-        workflowPanel.Children.Add(readyOnly);
-        workflowPanel.Children.Add(workflowModeHint);
-        workflowPanel.Children.Add(queue);
-        workflowPanel.Children.Add(preparing);
-        workflowPanel.Children.Add(expo);
-        UpdateKitchenWorkflowMode();
-
         workflowPanel.Children.Add(courses);
         workflowPanel.Children.Add(sound);
         workflowPanel.Children.Add(managerVoid);
