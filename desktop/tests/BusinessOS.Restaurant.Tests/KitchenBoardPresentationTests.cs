@@ -37,7 +37,9 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("KotTopActionToolbar", source);
         Assert.Contains("KotIndependentContentScroll", source);
         Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
-        Assert.Contains("workflow.RefireKitchenItemAsync(row.ItemId, reason, token)", source);
+        Assert.DoesNotContain("Button(\"RE-FIRE\")", source);
+        Assert.DoesNotContain("Button(\"RECALL\")", source);
+        Assert.DoesNotContain("Button(\"MARK WASTE\")", source);
         Assert.Contains("DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25))", source);
         Assert.Contains("kitchenWritesInProgress > 0", source);
         Assert.Contains("DesktopUiWork.RunAsync(async () =>", source);
@@ -80,9 +82,9 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("row.Status == \"ready\"", source);
         Assert.Contains("role", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token)", source);
-        Assert.Contains("workflow.RecallKitchenItemAsync(", source);
-        Assert.Contains("workflow.RecordKitchenWasteAsync(", source);
-        Assert.Contains("workflow.RefireKitchenItemAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
     }
 
     [Fact]
