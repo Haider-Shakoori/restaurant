@@ -33,7 +33,10 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("workflow.StartKitchenItemAsync(", source);
         Assert.Contains("workflow.MarkKitchenItemReadyAsync(", source);
         Assert.Contains("workflow.PassExpoItemAsync(", source);
-        Assert.Contains("await workflow.RefireKitchenItemAsync(", source);
+        Assert.Contains("workflow.RefireKitchenItemAsync(row.ItemId, reason, token)", source);
+        Assert.Contains("DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25))", source);
+        Assert.Contains("kitchenWritesInProgress > 0", source);
+        Assert.Contains("DesktopUiWork.RunAsync(async () =>", source);
         Assert.Contains("pollTimer.Start();", source);
         Assert.Contains("ageTimer.Start();", source);
     }
@@ -48,7 +51,7 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("OPEN POS & ORDERS · MARK SERVED", source);
         Assert.Contains("row.Status == \"ready\"", source);
         Assert.Contains("role", source, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("workflow.PassExpoItemAsync(row.ItemId)", source);
+        Assert.Contains("workflow.PassExpoItemAsync(row.ItemId, token)", source);
         Assert.Contains("workflow.RecallKitchenItemAsync(", source);
         Assert.Contains("workflow.RecordKitchenWasteAsync(", source);
         Assert.Contains("workflow.RefireKitchenItemAsync(", source);
