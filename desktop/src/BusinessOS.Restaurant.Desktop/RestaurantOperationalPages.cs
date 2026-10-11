@@ -147,7 +147,7 @@ internal static class RestaurantOperationalPages
                 .Where(x => x.ExpenseDate == since)
                 .Select(x => x.Amount).ToListAsync();
             var cashRows = await accounting.Payments.AsNoTracking()
-                .Where(x => x.Status == "completed" || x.Status == "accepted")
+                .Where(x => x.Status == "posted")
                 .Select(x => new { x.ReceivedAt, x.Amount })
                 .ToListAsync();
             var usedRows = await accounting.StockMovements.AsNoTracking()
