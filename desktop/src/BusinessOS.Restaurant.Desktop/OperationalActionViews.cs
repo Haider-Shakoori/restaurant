@@ -234,6 +234,12 @@ internal static class OperationalActionViews
         form.Children.Add(advancedItemDetails);
 
         var add = Button("Add item");
+        // When the first photo is tapped with no current order, take the
+        // operator straight to table/guest setup and remember that dish.
+        // Opening the order then adds it without another menu search.
+        var firstPhotoAwaitingTable = false;
+        Action? showQuickOrderSetup = null;
+        Action? closeQuickOrderSetup = null;
         var submit = Button("Send new KOT round");
         submit.Name = "PosSendKotButton";
         submit.ToolTip = "F9 · Send unsent items to the kitchen";
@@ -251,8 +257,14 @@ internal static class OperationalActionViews
             item =>
             {
                 menuBox.SelectedItem = menu.FirstOrDefault(x => x.Id == item.Id);
-                if (menuBox.SelectedItem is MenuChoice)
-                    add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                if (menuBox.SelectedItem is not MenuChoice) return;
+                if (string.IsNullOrWhiteSpace(orderIdBox.Text))
+                {
+                    firstPhotoAwaitingTable = true;
+                    showQuickOrderSetup?.Invoke();
+                    return;
+                }
+                add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             });
         form.Children.Insert(form.Children.IndexOf(menuBox), photoCatalog);
         form.Children.Add(Label("4 · KITCHEN & ORDER ADJUSTMENTS"));
@@ -642,8 +654,13 @@ internal static class OperationalActionViews
                     serviceType, tableId, branchId, reference, guests));
 
                 await RefreshPosStateAsync();
-                status.Text = "Order opened locally. Add items, or resume it later from the active orders list.";
+                status.Text = "Order opened. Add dishes and send KOT using the top toolbar.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
+                if (firstPhotoAwaitingTable && menuBox.SelectedItem is MenuChoice)
+                {
+                    firstPhotoAwaitingTable = false;
+                    add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                }
             }
             catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
             finally { open.IsEnabled = true; }
@@ -728,8 +745,9 @@ internal static class OperationalActionViews
                 kitchenInstructionsBox.Clear();
                 allergyBox.Clear();
                 modifiersBox.UnselectAll();
-                status.Text = $"{qty} × {item.Name} added. Send KOT when this round is ready.";
+                status.Text = $"{qty} × {item.Name} added. Add other dishes or press Send KOT (F9).";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
+                closeQuickOrderSetup?.Invoke();
             }
             catch (Exception ex) { status.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
             finally { add.IsEnabled = true; }
@@ -1363,7 +1381,21 @@ internal static class OperationalActionViews
             closeModalButton.Focus();
         }
         closeModalButton.Click += (_, _) => CloseModal();
-        newOrderModal.Click += (_, _) => OpenModal("order");
+        showQuickOrderSetup = () =>
+        {
+            OpenModal("order");
+            guestBox.Focus();
+        };
+        closeQuickOrderSetup = () =>
+        {
+            if (modalOverlay.Visibility == Visibility.Visible && !paymentBusy)
+                CloseModal();
+        };
+        newOrderModal.Click += (_, _) =>
+        {
+            firstPhotoAwaitingTable = false;
+            OpenModal("order");
+        };
         activeOrdersModal.Click += (_, _) => OpenModal("orders");
         viewTicketModal.Click += (_, _) => OpenModal("ticket");
         editItemsModal.Click += (_, _) => OpenModal("items");
