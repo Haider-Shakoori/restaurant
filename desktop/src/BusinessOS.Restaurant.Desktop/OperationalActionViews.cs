@@ -1719,7 +1719,7 @@ internal static class OperationalActionViews
         var root = new StackPanel();
         root.Children.Add(Header(
             "Kitchen / KOT",
-            "Item-level KDS. Queue and Preparing are independent; Expo appears only when enabled. Rush and aging stay visible without changing the app shell."));
+            "Tap READY when food can be picked up. The waiter sees the pickup alert in the mobile app after synchronization."));
 
         var filterRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
         var stationFilter = new ComboBox
@@ -1747,6 +1747,25 @@ internal static class OperationalActionViews
 
         filterRow.Children.Add(stationFilter);
         filterRow.Children.Add(statusFilter);
+        var selectedDish = new ComboBox
+        {
+            Name = "KotTopSelectedDish",
+            DisplayMemberPath = "ItemName",
+            Width = 225, Height = 36,
+            Margin = new Thickness(6, 4, 8, 6),
+            ToolTip = "Choose the KOT dish that is ready for pickup",
+        };
+        var markReady = Button("READY");
+        markReady.Name = "KotTopReadyButton";
+        markReady.MinHeight = 42;
+        markReady.ToolTip = "F2 · Notify waiter that selected dish is ready for pickup";
+        var boardRefresh = Button("Refresh board");
+        boardRefresh.Name = "KotTopRefreshButton";
+        boardRefresh.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        boardRefresh.ToolTip = "F5 · Reload the kitchen board";
+        filterRow.Children.Add(selectedDish);
+        filterRow.Children.Add(markReady);
+        filterRow.Children.Add(boardRefresh);
         filterRow.Children.Add(statusText);
         root.Children.Add(filterRow);
 
@@ -2025,32 +2044,11 @@ internal static class OperationalActionViews
             Func<CancellationToken, Task>? primaryAction = null;
             string? success = null;
 
-            if (canProduce && (row.Status is "queued" or "active"))
+            if (canProduce && row.Status is "queued" or "active" or "preparing" or "expo")
             {
-                if (row.PreparingEnabled)
-                {
-                    primary = Button("START");
-                    primaryAction = token => workflow.StartKitchenItemAsync(row.ItemId, token);
-                    success = $"{row.ItemName} started.";
-                }
-                else
-                {
-                    primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
-                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                    success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
-                }
-            }
-            else if (canProduce && row.Status == "preparing")
-            {
-                primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
+                primary = Button("READY");
                 primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
-            }
-            else if (canExpo && row.Status == "expo")
-            {
-                primary = Button("PASS EXPO");
-                primaryAction = token => workflow.PassExpoItemAsync(row.ItemId, token);
-                success = $"{row.ItemName} passed Expo.";
+                success = $"{row.ItemName} READY — the assigned waiter will see the pickup alert after sync.";
             }
 
             if (primary is not null && primaryAction is not null)
@@ -2082,7 +2080,7 @@ internal static class OperationalActionViews
                     {
                         App.LogRecoverableException("kitchen-transition-failed", ex);
                         primary.IsEnabled = true;
-                        primary.Content = row.PreparingEnabled ? "START / RETRY" : "RETRY";
+                        primary.Content = "READY · RETRY";
                         statusText.Text = ex.Message;
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
@@ -2262,10 +2260,9 @@ internal static class OperationalActionViews
                 $"{visible.Length} visible · {active} in production · " +
                 $"{expo} expo · {ready} ready · {rush} rush · {overdue} delayed";
             handoffText.Text = ready > 0
-                ? $"{ready} item(s) READY FOR PICKUP • Waiter delivers food → POS & Orders → Mark served (when every item is ready) → Issue bill → Payment. " +
+                ? $"{ready} READY FOR PICKUP • The waiter receives an in-app alert after LAN sync; background push requires cloud connectivity. " +
                   "RECALL, WASTE and RE-FIRE are exception actions requiring a reason."
-                : "Kitchen flow: Prepare → READY FOR PICKUP → Waiter serves → POS marks served → Billing. " +
-                  "Expo approval is required when enabled.";
+                : "Kitchen flow: New KOT → READY → Waiter pickup → Served → Billing. No Start step.";
         }
 
         void RenderBoard()
@@ -2301,7 +2298,64 @@ internal static class OperationalActionViews
             }
         }
 
+        void RefreshSelectedDishes()
+        {
+            var oldId = (selectedDish.SelectedItem as KitchenItemCard)?.ItemId;
+            var options = rows.Where(x => x.Status is "queued" or "active" or "preparing" or "expo")
+                .OrderByDescending(x => x.Priority == "rush")
+                .ThenBy(x => x.QueuedAt).ToArray();
+            selectedDish.ItemsSource = options;
+            selectedDish.SelectedItem = options.FirstOrDefault(x => x.ItemId == oldId)
+                ?? options.FirstOrDefault();
+            markReady.IsEnabled = canProduce && options.Length > 0;
+        }
+
+        async Task ReloadKitchenBoardAsync()
+        {
+            var latestRows = await DesktopUiWork.RunAsync(() => LoadKitchenBoardRowsAsync(factory));
+            if (!kitchenViewActive) return;
+            rows.Clear();
+            rows.AddRange(latestRows);
+            RefreshStationChoices();
+            RefreshSelectedDishes();
+            RenderBoard();
+        }
+
+        markReady.Click += async (_, _) =>
+        {
+            if (!markReady.IsEnabled || selectedDish.SelectedItem is not KitchenItemCard dish)
+                return;
+            markReady.IsEnabled = false;
+            kitchenWritesInProgress++;
+            try
+            {
+                await DesktopUiWork.RunBoundedAsync(
+                    token => workflow.MarkKitchenItemReadyAsync(dish.ItemId, token),
+                    TimeSpan.FromSeconds(25));
+                statusText.Text = $"{dish.ItemName} READY for waiter pickup.";
+                await ReloadKitchenBoardAsync();
+            }
+            catch (Exception ex)
+            {
+                App.LogRecoverableException("kitchen-topbar-ready", ex);
+                statusText.Text = "Check KOT status before retrying: " + ex.Message;
+            }
+            finally
+            {
+                kitchenWritesInProgress--;
+                RefreshSelectedDishes();
+            }
+        };
+        boardRefresh.Click += async (_, _) =>
+        {
+            boardRefresh.IsEnabled = false;
+            try { await ReloadKitchenBoardAsync(); }
+            catch (Exception ex) { statusText.Text = "KOT refresh: " + ex.Message; }
+            finally { boardRefresh.IsEnabled = true; }
+        };
+
         RefreshStationChoices();
+        RefreshSelectedDishes();
         stationFilter.SelectionChanged += (_, _) => RenderBoard();
         statusFilter.SelectionChanged += (_, _) => RenderBoard();
         RenderBoard();
@@ -2369,6 +2423,7 @@ internal static class OperationalActionViews
                     boardSignature = latestSignature;
 
                     RefreshStationChoices();
+                    RefreshSelectedDishes();
                     RenderBoard();
 
                     if (settings.KotSoundEnabled && newProduction.Length > 0)
@@ -2396,12 +2451,29 @@ internal static class OperationalActionViews
             pollTimer.Stop();
         };
 
-        return new ScrollViewer
+        // Fixed action toolbar and independently scrolling KOT cards.
+        var kitchenHeader = root.Children[0];
+        root.Children.RemoveAt(0);
+        root.Children.Remove(filterRow);
+        var actionToolbar = new StackPanel { Name = "KotTopActionToolbar", Margin = new Thickness(0, 0, 0, 8) };
+        actionToolbar.Children.Add(kitchenHeader);
+        actionToolbar.Children.Add(filterRow);
+        var toolbarGlass = Card(actionToolbar);
+        var shell = new Grid { Name = "KotTopbarAndContent" };
+        shell.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        shell.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(toolbarGlass, 0);
+        shell.Children.Add(toolbarGlass);
+        var contentScroll = new ScrollViewer
         {
+            Name = "KotIndependentContentScroll",
             Content = WorkspaceFrostedSurface.Wrap(root),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
+        Grid.SetRow(contentScroll, 1);
+        shell.Children.Add(contentScroll);
+        return shell;
     }
 
     public static async Task<FrameworkElement> ClosingAsync()
