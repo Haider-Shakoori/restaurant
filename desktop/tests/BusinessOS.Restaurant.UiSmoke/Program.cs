@@ -211,12 +211,12 @@ internal static class Program
         Assert(FindButton(owner, "+ Create Expense") is not null, "Create Expense is clickable");
         await CheckFormAsync(app, owner, "+ Create Expense", "Create Expense", "Save Expense", null);
 
-        // Reproduce the real user's Kitchen/KOT START freeze on an isolated,
-        // seeded but previously unsent synthetic kitchen item.
+        // One-tap READY on an isolated KOT must notify the waiter without
+        // forcing a separate Start or Expo stage.
         await SeedKitchenStartFixtureAsync();
         await NavigateAsync(owner, "kitchen");
         CheckOptionalFullScreen(owner, "kitchen");
-        await CheckKitchenStartResponsiveAsync(owner);
+        await CheckKitchenReadyResponsiveAsync(owner);
         await SeedCashierPaymentFixtureAsync();
         await NavigateAsync(owner, "pos");
         await CheckPartialPaymentsWithoutPageRefreshAsync(owner);
@@ -1047,28 +1047,30 @@ internal static class Program
         await db.SaveChangesAsync();
     }
 
-    private static async Task CheckKitchenStartResponsiveAsync(MainWindow owner)
+    private static async Task CheckKitchenReadyResponsiveAsync(MainWindow owner)
     {
-        var start = Descendants<Button>(owner)
-            .FirstOrDefault(button => button.Content?.ToString() == "START")
-            ?? throw new InvalidOperationException("Seeded kitchen item START action missing.");
-        Click(start);
+        var ready = Descendants<Button>(owner)
+            .FirstOrDefault(button => button.Name == "KotTopReadyButton")
+            ?? throw new InvalidOperationException("KOT toolbar READY action missing.");
+        Assert(FindButton(owner, "START") is null,
+            "No KOT Start step is exposed: kitchen action is READY only.");
+        Click(ready);
         // The dispatcher must process unrelated input while the SQLite
         // transaction is in flight (UI must not appear hung).
         await owner.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
-        Assert(!start.IsEnabled, "Kitchen START disables repeat clicks while saving");
+        Assert(!ready.IsEnabled, "KOT READY disables repeat clicks while saving");
 
         await WaitUntilAsync(() =>
             Descendants<TextBlock>(owner).Any(x =>
-                x.Text.Contains("started", StringComparison.OrdinalIgnoreCase)),
-            "Kitchen START reports success while UI stays responsive");
+                x.Text.Contains("READY", StringComparison.OrdinalIgnoreCase)),
+            "Kitchen READY reports pickup while UI stays responsive");
         // Even the assertion must not perform synchronous SQLite work on the
         // WPF dispatcher during an in-flight transaction.
         var persisted = await DesktopUiTestKitchenStatusAsync();
-        Assert(persisted == "preparing",
-            "Kitchen START persists exactly the intended preparing state");
+        Assert(persisted == "ready",
+            "One-tap READY persists the correct kitchen item state");
         Assert(FindButton(owner, "PASS EXPO") is null,
-            "Kitchen preparing step does not bypass Expo or Ready stages");
+            "No unnecessary Start or Expo approval steps remain");
     }
 
     private static Task<string?> DesktopUiTestKitchenStatusAsync() =>
@@ -1083,12 +1085,11 @@ internal static class Program
 
     private static async Task SeedCashierPaymentFixtureAsync()
     {
-        // The real KOT is first started, then prepared and served. Build a
-        // local bill with the existing workflow; no fake payment responses.
+        // The test KOT was made ready with a single tap; serve that order,
+        // then test a genuine local bill and payment without mocking results.
         await Task.Run(async () =>
         {
             var workflow = new DesktopRestaurantWorkflowService();
-            await workflow.MarkKitchenItemReadyAsync("ci-kot-ticket-item");
             await workflow.ServeOrderAsync("ci-kot-start-order");
 
             await workflow.CreateBillAsync("ci-kot-start-order");
