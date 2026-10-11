@@ -25,20 +25,18 @@ public sealed class KitchenBoardPresentationTests
     }
 
     [Fact]
-    public void Existing_kot_state_transitions_and_kitchen_timer_are_retained()
+    public void Kitchen_has_only_ready_actions_and_retains_timer_and_mobile_alerts()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
 
-        Assert.Contains("workflow.StartKitchenItemAsync(", source);
-        Assert.Contains("row.PreparingEnabled", source);
-        Assert.Contains("row.ExpoEnabled", source);
+        Assert.DoesNotContain("workflow.StartKitchenItemAsync(", source);
+        Assert.DoesNotContain("Button(\"START\")", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
         Assert.Contains("KotTopReadyButton", source);
         Assert.Contains("KotTopActionToolbar", source);
         Assert.Contains("KotIndependentContentScroll", source);
-        Assert.Contains("workflow.MarkKitchenItemReadyAsync(", source);
-        Assert.Contains("workflow.MarkKitchenItemReadyAsync(", source);
-        Assert.Contains("workflow.PassExpoItemAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
         Assert.Contains("workflow.RefireKitchenItemAsync(row.ItemId, reason, token)", source);
         Assert.Contains("DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25))", source);
         Assert.Contains("kitchenWritesInProgress > 0", source);
@@ -48,7 +46,7 @@ public sealed class KitchenBoardPresentationTests
     }
 
     [Fact]
-    public void Ready_only_kot_is_an_explicit_settings_switch_with_per_round_stage_choices()
+    public void Ready_only_kot_is_the_only_visible_kitchen_mode_with_legacy_api_compatibility()
     {
         var root = RepositoryRoot();
         var view = File.ReadAllText(Path.Combine(root, "desktop", "src",
@@ -59,8 +57,11 @@ public sealed class KitchenBoardPresentationTests
             "BusinessOS.Restaurant.LocalServer", "LocalKitchenService.cs"));
 
         Assert.Contains("SettingsReadyOnlyKot", view);
-        Assert.Contains("readyOnly.IsChecked != true && preparing.IsChecked == true", view);
-        Assert.Contains("readyOnly.IsChecked != true && expo.IsChecked == true", view);
+        Assert.Contains("One-touch KOT: READY alerts the waiter (always enabled)", view);
+        Assert.Contains("false, // Ready-only KOT has no START action.", view);
+        Assert.Contains("false, // Expo is not part of the restaurant's workflow.", view);
+        Assert.DoesNotContain("var preparing = new CheckBox", view);
+        Assert.DoesNotContain("var expo = new CheckBox", view);
         Assert.Contains("public bool ReadyOnlyKotEnabled", service);
         Assert.Contains("PreparingStageEnabled: true", service);
         Assert.Contains("round.PreparingEnabled", kitchen);
@@ -78,7 +79,7 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("OPEN POS & ORDERS · MARK SERVED", source);
         Assert.Contains("row.Status == \"ready\"", source);
         Assert.Contains("role", source, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("workflow.PassExpoItemAsync(row.ItemId, token)", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token)", source);
         Assert.Contains("workflow.RecallKitchenItemAsync(", source);
         Assert.Contains("workflow.RecordKitchenWasteAsync(", source);
         Assert.Contains("workflow.RefireKitchenItemAsync(", source);
