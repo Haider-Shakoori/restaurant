@@ -221,19 +221,19 @@
                             <Button Style="{StaticResource NavButton}" Content="⌂   Dashboard"
                                     Command="{Binding NavigateCommand}" CommandParameter="dashboard"
                                     Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▣   POS &amp; Orders"
+                            <Button Style="{StaticResource NavButton}" Content="▦   POS &amp; Orders"
                                     Command="{Binding NavigateCommand}" CommandParameter="pos"
                                     Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="▦   Tables &amp; Floor"
                                     Command="{Binding NavigateCommand}" CommandParameter="tables"
                                     Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="☷   Kitchen / KOT"
+                            <Button Style="{StaticResource NavButton}" Content="♨   Kitchen / KOT"
                                     Command="{Binding NavigateCommand}" CommandParameter="kitchen"
                                     Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}" />
                             <Button Style="{StaticResource NavButton}" Content="☕   Menu &amp; Products"
                                     Command="{Binding NavigateCommand}" CommandParameter="menu"
                                     Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}" />
-                            <Button Style="{StaticResource NavButton}" Content="▤   Recipes &amp; Food Cost"
+                            <Button Style="{StaticResource NavButton}" Content="♧   Recipes &amp; Food Cost"
                                     Command="{Binding NavigateCommand}" CommandParameter="recipes"
                                     Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}" />
 
@@ -335,7 +335,19 @@
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="{Binding ThemeButtonText}"
                                     Command="{Binding ToggleThemeCommand}" />
-                            <Button x:Name="RefreshButton" Margin="8,0,0,0"
+                            <Button x:Name="WorkspaceShortcutsButton" Margin="8,0,0,0"
+                                     Style="{StaticResource TopBarGhostButton}"
+                                     Content="⌨  Keys"
+                                     Visibility="Collapsed"
+                                     ToolTip="F1 shows page shortcuts · F11 toggles full screen"
+                                     Click="OnWorkspaceShortcutsClick" />
+                             <Button x:Name="WorkspaceFullScreenButton" Margin="8,0,0,0"
+                                     Style="{StaticResource TopBarGhostButton}"
+                                     Content="⛶  Full screen"
+                                     Visibility="Collapsed"
+                                     ToolTip="Toggle full screen (F11)"
+                                     Click="OnWorkspaceFullScreenClick" />
+                             <Button x:Name="RefreshButton" Margin="8,0,0,0"
                                     Style="{StaticResource TopBarGhostButton}"
                                     Content="↻  Refresh"
                                     Command="{Binding RefreshCommand}" />
@@ -428,7 +440,7 @@
                         Margin="0,6,24,0" Padding="16,9"
                         Background="#0F172A"
                         Foreground="White" FontWeight="Bold"
-                        Content="Exit POS  (Esc)" Visibility="Collapsed"
+                        Content="⛶  Restore window (F11)" Visibility="Collapsed"
                         Click="OnExitPosClick" />
             </Grid>
         </Grid>
