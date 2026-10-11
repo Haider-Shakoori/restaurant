@@ -390,27 +390,32 @@ internal static class OperationalActionViews
         // are wired, preserving the existing authoritative local workflows.
 
         var cashier = new StackPanel { Margin = new Thickness(0, 18, 0, 0) };
-        cashier.Children.Add(Header("Cashier & billing", "Restaurant flow: serve ready order → issue bill → optional discount/split → payment → receipt."));
+        cashier.Children.Add(Header("Checkout", "Serve the order, issue its bill and collect payment. The active cashier is managed automatically."));
         var cashierStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,8,0,0) };
         cashierStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-        var branchBox = Combo(branches, "Label");
-        var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
-        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260; sessionBox.Name = "PosCashierSessionPicker";
-        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 260;
+        // One local cashier workflow: do not expose branch selection, opening
+        // cash or a redundant cashier-session picker in the checkout modal.
+        // Sessions remain audited in SQLite and are resolved by bill branch
+        // and the signed-in operator only when posting an actual payment.
+        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 360;
         var billBox = Combo(bills, "Display"); billBox.Width = 360; billBox.Name = "PosBillPicker";
         var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
         var amountBox = new TextBox { Name = "PosPaymentAmount", Text = "0", Height = 38, Width = 180, Margin = new Thickness(0,4,8,6) };
         var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
         var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
 
-        cashier.Children.Add(Label("Branch / opening cash"));
-        var sessionOpenRow = new WrapPanel(); sessionOpenRow.Children.Add(branchBox); sessionOpenRow.Children.Add(openingCash);
-        var openSession = Button("Open cashier session"); sessionOpenRow.Children.Add(openSession); cashier.Children.Add(sessionOpenRow);
-        cashier.Children.Add(Label("Open cashier session")); cashier.Children.Add(sessionBox);
         cashier.Children.Add(Label("Order")); cashier.Children.Add(orderBox);
         var orderActions = new WrapPanel(); var serve = Button("Mark served"); var issue = Button("Issue bill"); orderActions.Children.Add(serve); orderActions.Children.Add(issue); cashier.Children.Add(orderActions);
         cashier.Children.Add(Label("Open bill")); cashier.Children.Add(billBox);
-        var discountRow = new WrapPanel(); discountRow.Children.Add(discountBox); var discount = Button("Apply % discount"); discountRow.Children.Add(discount); discountRow.Children.Add(splitCountBox); var split = Button("Split equally"); discountRow.Children.Add(split); cashier.Children.Add(discountRow);
+        var discountRow = new WrapPanel(); discountRow.Children.Add(discountBox); var discount = Button("Apply % discount"); discountRow.Children.Add(discount); discountRow.Children.Add(splitCountBox); var split = Button("Split equally"); discountRow.Children.Add(split);
+        var adjustments = new Expander
+        {
+            Header = "Discounts & split payments (optional)",
+            IsExpanded = false,
+            Margin = new Thickness(0, 10, 0, 4),
+            Content = discountRow,
+        };
+        cashier.Children.Add(adjustments);
         var paymentBalance = new TextBlock
         {
             Name = "PosLivePaymentBalance", Text = "Choose an open bill to view the amount due.",
@@ -419,8 +424,16 @@ internal static class OperationalActionViews
         };
         paymentBalance.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
         cashier.Children.Add(paymentBalance);
-        cashier.Children.Add(Label("Payment method")); cashier.Children.Add(paymentMethod);
-        cashier.Children.Add(Label("Amount (AFN)")); cashier.Children.Add(amountBox);
+        var checkoutFields = new WrapPanel { Margin = new Thickness(0, 6, 0, 6) };
+        var amountField = new StackPanel { Margin = new Thickness(0, 0, 24, 0) };
+        amountField.Children.Add(Label("Amount (AFN)"));
+        amountField.Children.Add(amountBox);
+        var methodField = new StackPanel();
+        methodField.Children.Add(Label("Payment method"));
+        methodField.Children.Add(paymentMethod);
+        checkoutFields.Children.Add(amountField);
+        checkoutFields.Children.Add(methodField);
+        cashier.Children.Add(checkoutFields);
         var payRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) };
         var pay = Button("Post payment"); pay.MinHeight = 48;
         var receipt = Button("Queue receipt");
@@ -444,7 +457,6 @@ internal static class OperationalActionViews
             if (billBox.SelectedItem is BillChoice selected && selected.Balance > 0m)
                 amountBox.Text = selected.Balance.ToString("0.00");
         };
-        sessionBox.SelectedIndex = sessions.Count > 0 ? 0 : -1;
         orderBox.SelectedIndex = orders.Count > 0 ? 0 : -1;
         billBox.SelectedIndex = bills.Count > 0 ? 0 : -1;
         ShowLiveBalance();
@@ -452,7 +464,7 @@ internal static class OperationalActionViews
         async Task RefreshCashierStateAsync(string? preferredOrderId = null)
         {
             var chosenBillId = (billBox.SelectedItem as BillChoice)?.Id;
-            var chosenSessionId = (sessionBox.SelectedItem as CashierSessionChoice)?.Id;
+
             var latest = await DesktopUiWork.RunAsync(async () =>
             {
                 await using var liveDb = factory.Create();
@@ -473,9 +485,7 @@ internal static class OperationalActionViews
             bills.AddRange(latest.Bills);
             sessions.Clear();
             sessions.AddRange(latest.Sessions);
-            sessionBox.ItemsSource = sessions.ToArray();
-            sessionBox.SelectedItem = sessions.FirstOrDefault(x => x.Id == chosenSessionId)
-                ?? sessions.FirstOrDefault();
+
             billBox.ItemsSource = bills.ToArray();
             billBox.SelectedItem = (preferredOrderId is not null
                 ? bills.FirstOrDefault(x => x.OrderId == preferredOrderId)
@@ -507,7 +517,6 @@ internal static class OperationalActionViews
             finally { verifyBalance.IsEnabled = true; }
         };
 
-        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await DesktopUiWork.RunAsync(() => workflow.OpenCashierSessionAsync(b.Id, cash)); await RefreshCashierStateAsync(); cashierStatus.Text = "Cashier session opened and selected."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
         serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await DesktopUiWork.RunAsync(() => workflow.ServeOrderAsync(o.Id)); await RefreshCashierStateAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
         issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await DesktopUiWork.RunAsync(() => workflow.CreateBillAsync(o.Id)); await RefreshCashierStateAsync(o.Id); cashierStatus.Text = "Bill issued. Payment is ready in this dialog."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
         discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await DesktopUiWork.RunAsync(() => workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount")); await RefreshCashierStateAsync(); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
@@ -529,16 +538,44 @@ internal static class OperationalActionViews
             {
                 if (billBox.SelectedItem is not BillChoice bill)
                     throw new InvalidOperationException("Select an outstanding bill.");
-                if (sessionBox.SelectedItem is not CashierSessionChoice session)
-                    throw new InvalidOperationException("Open a cashier session first.");
                 if (!decimal.TryParse(amountBox.Text, out var amount) ||
                     amount <= 0m || amount > bill.Balance)
                     throw new InvalidOperationException("Enter an amount greater than zero and no more than the balance due.");
                 var method = paymentMethod.SelectedItem?.ToString() ?? "cash";
+                cashierStatus.Text = "Verifying the local cashier session…";
+                var cashierContext = await DesktopUiWork.RunAsync(async () =>
+                {
+                    var actor = await workflow.CurrentPrincipalAsync().ConfigureAwait(false);
+                    await using var db = factory.Create();
+                    var branchId = await db.Bills.AsNoTracking()
+                        .Where(x => x.Id == bill.Id)
+                        .Select(x => x.BranchId)
+                        .SingleAsync().ConfigureAwait(false);
+                    var existingSessionId = await db.CashierSessions.AsNoTracking()
+                        .Where(x => x.BranchId == branchId &&
+                                    x.CashierUserId == actor.UserId &&
+                                    x.Status == "open")
+                        .OrderByDescending(x => x.OpenedAt)
+                        .Select(x => x.Id).FirstOrDefaultAsync().ConfigureAwait(false);
+                    return (BranchId: branchId, SessionId: existingSessionId);
+                });
+                // First checkout creates the signed-in cashier's shift with
+                // zero opening float if none exists. Manual float counts and
+                // closing remain in the management workflow, not this modal.
+                var sessionId = cashierContext.SessionId;
+                if (sessionId is null)
+                {
+                    cashierStatus.Text = "Starting the current cashier session…";
+                    var created = await DesktopUiWork.RunAsync(() =>
+                        workflow.OpenCashierSessionAsync(cashierContext.BranchId, 0m));
+                    sessionId = System.Text.Json.JsonSerializer
+                        .SerializeToElement(created).GetProperty("id").GetString()
+                        ?? throw new InvalidOperationException("Cashier session ID missing.");
+                }
                 cashierStatus.Text = "Posting payment securely. Do not close or press Pay again…";
                 sentToDatabase = true;
                 await DesktopUiWork.RunAsync(() =>
-                    workflow.AddPaymentAsync(bill.Id, session.Id, amount, method));
+                    workflow.AddPaymentAsync(bill.Id, sessionId, amount, method));
                 await RefreshCashierStateAsync();
                 verified = true;
                 paymentNeedsManualVerification = false;
