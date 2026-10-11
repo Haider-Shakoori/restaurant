@@ -1137,12 +1137,17 @@ internal static class OperationalActionViews
                 ShadowDepth = 8, BlurRadius = 30, Opacity = 0.36,
             },
         };
-        modalOverlay.SizeChanged += (_, _) =>
+        var dialogPreferredWidth = 860d;
+        void FitModalToViewport()
         {
-            modalCard.MaxHeight = Math.Max(260, modalOverlay.ActualHeight - 36);
-            modalCard.MaxWidth = Math.Max(340, modalOverlay.ActualWidth - 36);
-            modalCard.Width = Math.Min(860, Math.Max(340, modalOverlay.ActualWidth - 36));
-        };
+            var viewportWidth = modalOverlay.ActualWidth;
+            var viewportHeight = modalOverlay.ActualHeight;
+            if (viewportWidth < 1 || viewportHeight < 1) return;
+            modalCard.MaxHeight = Math.Max(260, viewportHeight - 36);
+            modalCard.MaxWidth = Math.Max(300, viewportWidth - 36);
+            modalCard.Width = Math.Min(dialogPreferredWidth, Math.Max(300, viewportWidth - 36));
+        }
+        modalOverlay.SizeChanged += (_, _) => FitModalToViewport();
         var modalLayout = new Grid();
         modalLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         modalLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -1255,6 +1260,17 @@ internal static class OperationalActionViews
                 "kitchen" => "Fire courses, void individual items, or cancel an order with an audit reason.",
                 _ => "Choose service type and table, then open your order.",
             };
+            dialogPreferredWidth = section switch
+            {
+                "payment" => 670d,
+                "ticket" => 590d,
+                "order" => 700d,
+                "orders" => 820d,
+                "items" => 780d,
+                "kitchen" => 740d,
+                _ => 820d,
+            };
+            FitModalToViewport();
             modalScroll.ScrollToTop();
             root.Effect = glassBlur;
             root.IsHitTestVisible = false;
