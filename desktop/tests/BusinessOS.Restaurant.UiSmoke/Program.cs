@@ -1094,8 +1094,8 @@ internal static class Program
 
         await WaitUntilAsync(() =>
             Descendants<TextBlock>(owner).Any(x =>
-                x.Text.Contains("READY", StringComparison.OrdinalIgnoreCase)),
-            "Kitchen READY reports pickup while UI stays responsive");
+                x.Text.Contains("CI Kitchen Test Dish ready for waiter pickup.", StringComparison.OrdinalIgnoreCase)),
+            "Kitchen READY finishes SQLite write and reports exact dish pickup confirmation");
         // Even the assertion must not perform synchronous SQLite work on the
         // WPF dispatcher during an in-flight transaction.
         var persisted = await DesktopUiTestKitchenStatusAsync();
