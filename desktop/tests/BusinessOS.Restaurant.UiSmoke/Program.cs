@@ -546,6 +546,20 @@ internal static class Program
         var grid = Descendants<DataGrid>(window).Single(x => x.Name == "PosActiveOrdersGrid");
         Assert(grid.IsReadOnly && grid.SelectionMode == DataGridSelectionMode.Single,
             "Active orders list safely selects one read-only order");
+        var toolbar = Descendants<StackPanel>(window)
+            .Single(x => x.Name == "PosFullscreenTopToolbar");
+        var toolbarActions = Descendants<WrapPanel>(toolbar)
+            .Single(x => x.Name == "PosTopActions");
+        Assert(toolbarActions.Children.OfType<Button>().Count() >= 6,
+            "POS action buttons are all grouped in the top toolbar");
+        var menuPane = Descendants<Border>(window)
+            .Single(x => x.Name == "PosPhotoFirstPane");
+        var rootLayout = Descendants<Grid>(window)
+            .Single(x => x.Name == "FullscreenPosWorkspace");
+        Assert(!rootLayout.Children.OfType<ScrollViewer>()
+            .Any(x => x.Name == "PosTicketIndependentScroll") &&
+            menuPane.Visibility == Visibility.Visible,
+            "Full screen is reserved for menu photography; no permanent narrow ticket rail");
         var overlay = Descendants<Grid>(window)
             .Single(x => x.Name == "PosGlassModalOverlay");
         var glass = Descendants<Border>(window)
@@ -574,6 +588,13 @@ internal static class Program
         Click(close);
         Assert(overlay.Visibility == Visibility.Collapsed,
             "Closing a modal returns to the POS without navigating away");
+        var viewTicket = Descendants<Button>(toolbar)
+            .Single(x => x.Name == "PosOpenTicketModal");
+        Click(viewTicket);
+        Assert(overlay.Visibility == Visibility.Visible &&
+            Descendants<StackPanel>(overlay).Any(x => x.Name == "PosFullscreenOrderTicket"),
+            "Ticket is accessible via top-bar button without shrinking the menu");
+        Click(close);
         var openSetup = Descendants<Button>(window)
             .Single(x => x.Name == "PosOpenNewOrderModal");
         Click(openSetup);
@@ -1000,7 +1021,7 @@ internal static class Program
             var workflow = new DesktopRestaurantWorkflowService();
             await workflow.MarkKitchenItemReadyAsync("ci-kot-ticket-item");
             await workflow.ServeOrderAsync("ci-kot-start-order");
-            await workflow.OpenCashierSessionAsync("ci-synced-branch", 0m);
+
             await workflow.CreateBillAsync("ci-kot-start-order");
         });
     }
@@ -1017,16 +1038,17 @@ internal static class Program
 
         var billPicker = Descendants<ComboBox>(overlay)
             .Single(x => x.Name == "PosBillPicker");
-        var sessionPicker = Descendants<ComboBox>(overlay)
-            .Single(x => x.Name == "PosCashierSessionPicker");
+
         var amount = Descendants<TextBox>(overlay)
             .Single(x => x.Name == "PosPaymentAmount");
         var balance = Descendants<TextBlock>(overlay)
             .Single(x => x.Name == "PosLivePaymentBalance");
         var pay = FindButton(overlay, "Post payment")
             ?? throw new InvalidOperationException("Payment action missing from modal");
-        Assert(billPicker.SelectedItem is not null && sessionPicker.SelectedItem is not null,
-            "Payment modal preselects an open bill and current cashier session");
+        Assert(billPicker.SelectedItem is not null &&
+               !Descendants<ComboBox>(overlay).Any(x => x.Name == "PosCashierSessionPicker") &&
+               FindButton(overlay, "Open cashier session") is null,
+            "Checkout preselects the bill without a cashier-session or opening-cash form");
         Assert(balance.Text.Contains("100.00", StringComparison.Ordinal),
             "Open bill displays original 100 AFN balance without refreshing the page");
 
@@ -1056,6 +1078,12 @@ internal static class Program
         Assert(persisted.Status == "paid" && persisted.PaidAmount == 100m &&
                persisted.BalanceDue == 0m && persisted.Payments.SequenceEqual(new[] { 40m, 60m }),
             "Exactly two distinct local payments settle 100 AFN; no duplicate charge or refresh");
+        var localShifts = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            return await db.CashierSessions.CountAsync(x => x.BranchId == "ci-synced-branch");
+        });
+        Assert(localShifts == 1, "Single signed-in cashier shift is automatically opened exactly once");
 
         Click(Descendants<Button>(owner).Single(x => x.Name == "PosGlassModalClose"));
     }
