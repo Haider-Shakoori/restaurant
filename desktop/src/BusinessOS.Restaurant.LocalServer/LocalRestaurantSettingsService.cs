@@ -20,7 +20,7 @@ public sealed record RestaurantWorkflowSettings(
 
     public static RestaurantWorkflowSettings Defaults { get; } = new(
         KitchenQueueEnabled: true,
-        PreparingStageEnabled: false,
+        PreparingStageEnabled: true,
         ExpoEnabled: false,
         CoursesEnabled: false,
         KotSoundEnabled: true,
