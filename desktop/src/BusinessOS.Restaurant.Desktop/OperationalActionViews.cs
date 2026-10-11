@@ -908,49 +908,33 @@ internal static class OperationalActionViews
         }
 
 
-        // Waiters may enter orders but never see cashier-only billing/session
-        // controls. Local service authorization remains the final action gate.
+        // The modal layout is shared by orders, item configuration and
+        // billing. Reparent the original controls, never clone workflow
+        // buttons or bypass role/permission checks.
         var operatorSession = await new WindowsSessionStore().LoadAsync();
         var role = operatorSession?.User.Role?.Trim().ToLowerInvariant();
-        if (role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier)
-        {
-            var cashierCard = Card(cashier);
-            cashierCard.Visibility = Visibility.Collapsed;
-            var toggleCashier = Button("Show cashier & billing");
-            toggleCashier.MinHeight = 42;
-            toggleCashier.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-            toggleCashier.Margin = new Thickness(0, 14, 0, 8);
-            toggleCashier.Click += (_, _) =>
-            {
-                var showing = cashierCard.Visibility != Visibility.Visible;
-                cashierCard.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
-                toggleCashier.Content = showing ? "Hide cashier & billing" : "Show cashier & billing";
-            };
-            // Cashier actions stay alongside the order/cart summary instead
-            // of being hidden after the entire left-column POS form.
-            orderListPanel.Children.Add(toggleCashier);
-            orderListPanel.Children.Add(cashierCard);
-        }
-        // The photo menu is the main workspace. Order setup, live cart, KOT,
-        // advanced modifiers, and cashier stay together in the right ticket rail.
-        // Reparent the existing controls; never create duplicate order actions.
+        Border? cashierCard = role is RestaurantRoles.Owner or RestaurantRoles.Manager or RestaurantRoles.Cashier
+            ? Card(cashier) : null;
+
         form.Children.Remove(photoCatalog);
         form.Children.Remove(menuSearchBox);
         var oldSearchLabel = form.Children.OfType<TextBlock>()
             .FirstOrDefault(label => label.Text == "Search menu");
         if (oldSearchLabel is not null) form.Children.Remove(oldSearchLabel);
+        // Keep the live action feedback in the ticket, not at the bottom of
+        // the long order-setup form.
+        form.Children.Remove(status);
 
         root.Children.Remove(formCard);
         root.Children.Remove(ordersCard);
         root.RowDefinitions.Clear();
         root.ColumnDefinitions.Clear();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.7, GridUnitType.Star) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.65, GridUnitType.Star) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var catalogTitle = Header("PHOTO MENU", "Search or tap a dish. The order ticket remains on the right.");
         var catalogHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-        catalogHeader.Children.Add(catalogTitle);
+        catalogHeader.Children.Add(Header("PHOTO MENU", "Tap a dish to add it to the selected order."));
         catalogHeader.Children.Add(menuSearchBox);
         var catalog = new DockPanel();
         DockPanel.SetDock(catalogHeader, Dock.Top);
@@ -967,43 +951,213 @@ internal static class OperationalActionViews
         Grid.SetColumn(leftCard, 0);
         root.Children.Add(leftCard);
 
+        // Move ticket lines and totals out of the large Active Orders panel.
+        orderListPanel.Children.Remove(currentOrderLines);
+        orderListPanel.Children.Remove(currentOrderTotal);
         var ticketPanel = new StackPanel { Name = "PosFullscreenOrderTicket" };
-        ticketPanel.Children.Add(ordersCard);
-        var editOrderSection = new Expander
+        ticketPanel.Children.Add(Header("CURRENT TICKET", "Menu on the left · orders and billing one tap away."));
+        ticketPanel.Children.Add(selectionSummary);
+        // The summary already lives in the original form; remove it before
+        // reparenting the same live TextBlock.
+        form.Children.Remove(selectionSummary);
+        ticketPanel.Children.Add(currentOrderLines);
+        ticketPanel.Children.Add(currentOrderTotal);
+        ticketPanel.Children.Add(status);
+
+        var quickActions = new WrapPanel { Margin = new Thickness(0, 10, 0, 8) };
+        var newOrderModal = Button("+ New order");
+        newOrderModal.Name = "PosOpenNewOrderModal";
+        var activeOrdersModal = Button("Active orders");
+        activeOrdersModal.Name = "PosOpenActiveOrdersModal";
+        activeOrdersModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var editItemsModal = Button("Order & item options");
+        editItemsModal.Name = "PosOpenItemOptionsModal";
+        editItemsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var kitchenModal = Button("KOT & adjustments");
+        kitchenModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var billingModal = Button("Payments & billing");
+        billingModal.Name = "PosOpenPaymentModal";
+        billingModal.MinHeight = 46;
+        foreach (var button in new[] { newOrderModal, activeOrdersModal, editItemsModal })
+            quickActions.Children.Add(button);
+        quickActions.Children.Add(submit);
+        quickActions.Children.Add(kitchenModal);
+        if (cashierCard is not null) quickActions.Children.Add(billingModal);
+        ticketPanel.Children.Add(quickActions);
+        ticketPanel.Children.Add(new TextBlock
         {
-            Header = "Order setup, items, modifiers & KOT",
-            IsExpanded = true,
-            Margin = new Thickness(0, 12, 0, 0),
-            Content = formCard,
-        };
-        ticketPanel.Children.Add(editOrderSection);
+            Text = "KOT stays linked to this order. Payment changes appear immediately after successful posting.",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6),
+            Foreground = System.Windows.Media.Brushes.SlateGray,
+        });
         var rightScroll = new ScrollViewer
         {
-            Content = ticketPanel,
+            Name = "PosTicketIndependentScroll",
+            Content = Card(ticketPanel),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
         Grid.SetColumn(rightScroll, 2);
         root.Children.Add(rightScroll);
-        root.MinHeight = 680;
-        root.SizeChanged += (_, _) =>
-        {
-            var narrow = root.ActualWidth < 920;
-            root.ColumnDefinitions[0].Width = narrow
-                ? new GridLength(1, GridUnitType.Star) : new GridLength(1.7, GridUnitType.Star);
-            root.ColumnDefinitions[1].Width = new GridLength(narrow ? 8 : 14);
-            root.ColumnDefinitions[2].Width = narrow
-                ? new GridLength(1, GridUnitType.Star) : new GridLength(1, GridUnitType.Star);
-        };
+        root.Margin = new Thickness(0);
+        root.MinHeight = 0;
 
-        return new ScrollViewer
+        // iOS-inspired frosted modal: blur ONLY the background workspace,
+        // then tint/dim beneath an independently scrolling focusable dialog.
+        var posHost = new Grid { Name = "FullscreenPosWorkspace", ClipToBounds = true };
+        posHost.Children.Add(WorkspaceFrostedSurface.Wrap(root));
+        var modalOverlay = new Grid
         {
-            Content = WorkspaceFrostedSurface.Wrap(root),
-            Name = "FullscreenPosWorkspace",
+            Name = "PosGlassModalOverlay",
+            Background = new SolidColorBrush(Color.FromArgb(135, 12, 23, 42)),
+            Visibility = Visibility.Collapsed,
+        };
+        Panel.SetZIndex(modalOverlay, 40);
+        var modalCard = new Border
+        {
+            Name = "PosGlassModalCard",
+            Background = new SolidColorBrush(Color.FromArgb(245, 248, 251, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(225, 255, 255, 255)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(0),
+            Width = 860,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = Color.FromRgb(8, 22, 44),
+                ShadowDepth = 8, BlurRadius = 30, Opacity = 0.36,
+            },
+        };
+        modalOverlay.SizeChanged += (_, _) =>
+        {
+            modalCard.MaxHeight = Math.Max(260, modalOverlay.ActualHeight - 36);
+            modalCard.MaxWidth = Math.Max(340, modalOverlay.ActualWidth - 36);
+            modalCard.Width = Math.Min(860, Math.Max(340, modalOverlay.ActualWidth - 36));
+        };
+        var modalLayout = new Grid();
+        modalLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        modalLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        modalLayout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var modalHeader = new Grid { Margin = new Thickness(24, 20, 24, 12) };
+        modalHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        modalHeader.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var modalHeaderText = new StackPanel();
+        var modalTitle = HeaderText("Order setup", 24, true);
+        modalTitle.Name = "PosGlassModalTitle";
+        var modalDescription = new TextBlock
+        {
+            Text = "Set the order and add dishes.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = System.Windows.Media.Brushes.SlateGray,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        modalHeaderText.Children.Add(modalTitle);
+        modalHeaderText.Children.Add(modalDescription);
+        modalHeader.Children.Add(modalHeaderText);
+        var closeModalButton = Button("Close  ×");
+        closeModalButton.Name = "PosGlassModalClose";
+        closeModalButton.MinHeight = 38;
+        closeModalButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        Grid.SetColumn(closeModalButton, 1);
+        modalHeader.Children.Add(closeModalButton);
+        modalLayout.Children.Add(modalHeader);
+        var modalScroll = new ScrollViewer
+        {
+            Name = "PosModalIndependentScroll",
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Padding = new Thickness(22, 0, 22, 12),
         };
+        var modalBody = new StackPanel();
+        modalBody.Children.Add(formCard);
+        modalBody.Children.Add(ordersCard);
+        if (cashierCard is not null) modalBody.Children.Add(cashierCard);
+        modalScroll.Content = modalBody;
+        Grid.SetRow(modalScroll, 1);
+        modalLayout.Children.Add(modalScroll);
+        var modalFooter = new TextBlock
+        {
+            Text = "Esc closes this panel  •  Data is stored locally  •  Orders and payments remain audited",
+            Padding = new Thickness(24, 11, 24, 13),
+            Foreground = System.Windows.Media.Brushes.SlateGray,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        Grid.SetRow(modalFooter, 2);
+        modalLayout.Children.Add(modalFooter);
+        modalCard.Child = modalLayout;
+        modalOverlay.Children.Add(modalCard);
+        posHost.Children.Add(modalOverlay);
+
+        var glassBlur = new System.Windows.Media.Effects.BlurEffect
+        {
+            Radius = 12, KernelType = System.Windows.Media.Effects.KernelType.Gaussian,
+            RenderingBias = System.Windows.Media.Effects.RenderingBias.Performance,
+        };
+        IInputElement? previouslyFocused = null;
+        bool CloseModal()
+        {
+            if (modalOverlay.Visibility != Visibility.Visible) return false;
+            if (paymentBusy)
+            {
+                cashierStatus.Text = "Payment is being verified. Please wait.";
+                return true;
+            }
+            modalOverlay.Visibility = Visibility.Collapsed;
+            root.Effect = null;
+            root.IsHitTestVisible = true;
+            if (previouslyFocused is System.Windows.UIElement focusTarget)
+                focusTarget.Focus();
+            return true;
+        }
+        void OpenModal(string section)
+        {
+            if (paymentBusy) return;
+            previouslyFocused = System.Windows.Input.Keyboard.FocusedElement;
+            formCard.Visibility = section is "order" or "items" or "kitchen"
+                ? Visibility.Visible : Visibility.Collapsed;
+            ordersCard.Visibility = section == "orders" ? Visibility.Visible : Visibility.Collapsed;
+            if (cashierCard is not null)
+                cashierCard.Visibility = section == "payment" ? Visibility.Visible : Visibility.Collapsed;
+            advancedOrderActions.Visibility = section == "kitchen"
+                ? Visibility.Visible : Visibility.Collapsed;
+            toggleOrderActions.Content = section == "kitchen"
+                ? "Hide course firing / void / cancel" : "Show course firing / void / cancel";
+            modalTitle.Text = section switch
+            {
+                "orders" => "Active orders",
+                "payment" => "Payments & billing",
+                "items" => "Item options & KOT",
+                "kitchen" => "Kitchen adjustments",
+                _ => "New order & setup",
+            };
+            modalDescription.Text = section switch
+            {
+                "orders" => "Find a ticket, resume it, or start another order.",
+                "payment" => "Serve, bill, collect payment, and view current outstanding balances.",
+                "items" => "Adjust quantity, modifiers, and kitchen notes before sending a KOT.",
+                "kitchen" => "Fire courses, void individual items, or cancel an order with an audit reason.",
+                _ => "Choose service type and table, then open your order.",
+            };
+            modalScroll.ScrollToTop();
+            root.Effect = glassBlur;
+            root.IsHitTestVisible = false;
+            modalOverlay.Visibility = Visibility.Visible;
+            closeModalButton.Focus();
+        }
+        closeModalButton.Click += (_, _) => CloseModal();
+        newOrderModal.Click += (_, _) => OpenModal("order");
+        activeOrdersModal.Click += (_, _) => OpenModal("orders");
+        editItemsModal.Click += (_, _) => OpenModal("items");
+        kitchenModal.Click += (_, _) => OpenModal("kitchen");
+        if (cashierCard is not null)
+            billingModal.Click += (_, _) => OpenModal("payment");
+        // Escape must dismiss an open modal, not leave full-screen POS.
+        posHost.Tag = (Func<bool>)CloseModal;
+        return posHost;
     }
+
 
     public static async Task<FrameworkElement> TablesAsync()
     {
