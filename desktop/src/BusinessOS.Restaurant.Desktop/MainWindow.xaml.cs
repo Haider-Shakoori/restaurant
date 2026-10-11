@@ -128,13 +128,23 @@ public partial class MainWindow : Window
             return;
         if (e.Key == Key.Escape)
         {
+            // POS dialogs own the first Escape. Never leave the POS while a
+            // payment confirmation or an order editor is open.
+            if (_viewModel.CurrentPage is FrameworkElement workspace &&
+                workspace.Tag is Func<bool> closeModal && closeModal())
+            {
+                e.Handled = true;
+                return;
+            }
             e.Handled = true;
             await _viewModel.NavigateCommand.ExecuteAsync("dashboard");
         }
         else if (e.Key == Key.F11)
         {
+            // Full-screen POS is always the default, not a separate toggle
+            // that accidentally shrinks the cashier workspace.
             e.Handled = true;
-            SetPosFullScreen(!_posFullScreen);
+            SetPosFullScreen(true);
         }
     }
 
