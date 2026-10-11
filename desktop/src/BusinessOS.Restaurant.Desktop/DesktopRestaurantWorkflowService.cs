@@ -135,6 +135,18 @@ public sealed class DesktopRestaurantWorkflowService
         return clientOrderId;
     }
 
+    public async Task UpdateGuestsAsync(string clientOrderId, int totalGuests, CancellationToken token = default)
+    {
+        if (totalGuests is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(totalGuests), "Guest count must be between 1 and 100.");
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            guest_count = totalGuests,
+        });
+        await PushSingleAsync("order.guests.update", payload, token);
+    }
+
     public async Task AddItemAsync(string clientOrderId, string menuItemId, int quantity, string? notes = null, CancellationToken token = default)
         => await AddItemAsync(
             clientOrderId,
