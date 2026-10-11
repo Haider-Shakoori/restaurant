@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -20,6 +21,14 @@ internal sealed record PhotoPosItem(string Id, string Name, string Category, dec
 internal static class RestaurantPhotoPosCatalog
 {
     private static readonly SemaphoreSlim DownloadSlots = new(3);
+    // Cache decoded thumbnails only while they are referenced by the UI;
+    // the durable source of truth is always the per-user disk cache.
+    private static readonly ConcurrentDictionary<string, WeakReference<BitmapImage>> DecodedImages = new();
+    private static readonly HttpClient PhotosClient = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+    }) { Timeout = TimeSpan.FromSeconds(8) };
     private const int MaximumImageBytes = 3 * 1024 * 1024;
 
     public static FrameworkElement Build(
@@ -35,6 +44,10 @@ internal static class RestaurantPhotoPosCatalog
         var categoryFilters = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         var cards = new WrapPanel { Name = "PosPhotoMenuTiles" };
         var activeCategory = "All items";
+        // Load operator origin exactly once per photo catalogue rather than
+        // hitting WindowsSessionStore for every tile each time the page opens.
+        var tenantOriginTask = Task.Run(async () =>
+            (await new WindowsSessionStore().LoadAsync().ConfigureAwait(false))?.TenantBaseUrl);
         var tileControls = new List<(PhotoPosItem Item, Button Tile)>();
 
         void Filter()
@@ -79,15 +92,29 @@ internal static class RestaurantPhotoPosCatalog
                 {
                     try
                     {
-                        var origin = (await new WindowsSessionStore().LoadAsync())?.TenantBaseUrl;
+                        var origin = await tenantOriginTask;
                         var location = await CacheMenuPhotoAsync(item.ImageUrl, origin);
-                        if (location is null) return;
-                        var bitmap = new BitmapImage();
-                        bitmap.BeginInit();
-                        bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                        bitmap.UriSource = location;
-                        bitmap.EndInit();
-                        bitmap.Freeze();
+                        if (location is null || !image.IsLoaded) return;
+                        var key = location.LocalPath;
+                        if (!DecodedImages.TryGetValue(key, out var weak) ||
+                            !weak.TryGetTarget(out var bitmap))
+                        {
+                            bitmap = await Task.Run(() =>
+                            {
+                                // Decode from the durable file; OnLoad releases
+                                // its handle and allows an offline restart.
+                                var loaded = new BitmapImage();
+                                loaded.BeginInit();
+                                loaded.CacheOption = BitmapCacheOption.OnLoad;
+                                loaded.DecodePixelWidth = 320;
+                                loaded.UriSource = location;
+                                loaded.EndInit();
+                                loaded.Freeze();
+                                return loaded;
+                            });
+                            DecodedImages[key] = new WeakReference<BitmapImage>(bitmap);
+                        }
+                        if (!image.IsLoaded) return;
                         image.Source = bitmap;
                         image.Visibility = Visibility.Visible;
                     }
@@ -164,8 +191,10 @@ internal static class RestaurantPhotoPosCatalog
         if (!IsAllowedTenantMediaUrl(url, tenantUrl)) return null;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
         var file = Path.Combine(root, hash + ".img");
-        if (File.Exists(file) && new FileInfo(file).Length > 0 &&
-            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
+        // Download once, retain on disk indefinitely. The old 15-minute
+        // TTL caused unnecessary repeat network traffic after every refresh.
+        // An explicitly changed image URL gets a distinct SHA-256 key.
+        if (File.Exists(file) && new FileInfo(file).Length > 0)
             return new Uri(file);
 
         // Standalone mode must not fetch menu photos from a remote URL.
@@ -176,12 +205,9 @@ internal static class RestaurantPhotoPosCatalog
         await DownloadSlots.WaitAsync();
         try
         {
-            if (File.Exists(file) && new FileInfo(file).Length > 0 &&
-            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
+            if (File.Exists(file) && new FileInfo(file).Length > 0)
                 return new Uri(file);
-            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
-            { Timeout = TimeSpan.FromSeconds(8) };
-            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            using var response = await PhotosClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode ||
                 response.Content.Headers.ContentType?.MediaType is not ("image/jpeg" or "image/png" or "image/webp") ||
                 response.Content.Headers.ContentLength > MaximumImageBytes)
