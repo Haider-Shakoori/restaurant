@@ -747,6 +747,10 @@ internal static class Program
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
             var opened = modal!;
+            Assert(opened.Content is Border { Name: "DesktopGlassModalBody" },
+                "Operational modal uses the shared frosted iOS-style surface");
+            Assert((main.Content as UIElement)?.Effect is System.Windows.Media.Effects.BlurEffect,
+                "Each operational modal blurs its owning workspace");
             await CaptureWindowAsync(opened, Path.Combine(
                 GalleryDirectory, "dialogs",
                 ThemeManager.Current.ToString().ToLowerInvariant() + "-" +
