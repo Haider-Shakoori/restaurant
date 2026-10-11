@@ -169,6 +169,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 CurrentPage = refreshedPage;
                 ClearWorkspaceError();
                 Trace.WriteLine($"[Restaurant] refresh {route}: {stopwatch.ElapsedMilliseconds} ms");
+                DesktopWorkspaceTiming.Record("refresh", route, stopwatch.ElapsedMilliseconds);
                 // Refresh network badges asynchronously AFTER publishing the
                 // local page. Never gate POS on a remote health check.
                 _ = RefreshDiagnosticsAsync();
@@ -303,6 +304,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             CurrentRoute = route;
             ClearWorkspaceError();
             Trace.WriteLine($"[Restaurant] navigation {route}: {stopwatch.ElapsedMilliseconds} ms");
+            DesktopWorkspaceTiming.Record("navigation", route, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception)
         {
