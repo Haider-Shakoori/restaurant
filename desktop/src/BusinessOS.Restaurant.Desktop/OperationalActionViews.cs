@@ -395,11 +395,11 @@ internal static class OperationalActionViews
         cashierStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         var branchBox = Combo(branches, "Label");
         var openingCash = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
-        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260;
+        var sessionBox = Combo(sessions, "Cashier"); sessionBox.Width = 260; sessionBox.Name = "PosCashierSessionPicker";
         var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 260;
-        var billBox = Combo(bills, "Display"); billBox.Width = 360;
+        var billBox = Combo(bills, "Display"); billBox.Width = 360; billBox.Name = "PosBillPicker";
         var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
-        var amountBox = new TextBox { Text = "0", Height = 34, Width = 130, Margin = new Thickness(0,4,8,6) };
+        var amountBox = new TextBox { Name = "PosPaymentAmount", Text = "0", Height = 38, Width = 180, Margin = new Thickness(0,4,8,6) };
         var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
         var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
 
@@ -444,6 +444,9 @@ internal static class OperationalActionViews
             if (billBox.SelectedItem is BillChoice selected && selected.Balance > 0m)
                 amountBox.Text = selected.Balance.ToString("0.00");
         };
+        sessionBox.SelectedIndex = sessions.Count > 0 ? 0 : -1;
+        orderBox.SelectedIndex = orders.Count > 0 ? 0 : -1;
+        billBox.SelectedIndex = bills.Count > 0 ? 0 : -1;
         ShowLiveBalance();
 
         async Task RefreshCashierStateAsync(string? preferredOrderId = null)
