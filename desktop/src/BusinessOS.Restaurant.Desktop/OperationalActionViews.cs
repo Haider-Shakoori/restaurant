@@ -850,7 +850,7 @@ internal static class OperationalActionViews
             var awaiting = lines.Count(x => x.Status is "pending" or "held");
             selectionSummary.Text = order is null
                 ? $"Order {orderIdBox.Text} · {lines.Length} line(s) · {awaiting} awaiting KOT"
-                : $"{order.ServiceType.Replace('_', ' ')} · {order.GuestCount} guest(s) · {order.Status} · AFN {order.Total:N2} · " +
+                : $"{order.ServiceType.Replace('_', ' ')} · {order.Guests} guest(s) · {order.Status} · AFN {order.Total:N2} · " +
                   $"{lines.Length} line(s), {awaiting} awaiting KOT";
             lineBox.ItemsSource = lines;
             currentOrderLines.ItemsSource = lines;
@@ -1372,7 +1372,7 @@ internal static class OperationalActionViews
             var order = orders.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text);
             guestsHint.Text = order is null
                 ? "Choose an active dine-in order from Orders before adding guests."
-                : $"Current guests: {order.GuestCount}. New guests join the same order and table.";
+                : $"Current guests: {order.Guests}. New guests join the same order and table.";
             additionalGuests.Text = "1";
             guestStatus.Text = string.Empty;
             OpenModal("guests");
@@ -1389,7 +1389,7 @@ internal static class OperationalActionViews
                     throw new InvalidOperationException("Guests can only be added to an unbilled dine-in order.");
                 if (!int.TryParse(additionalGuests.Text, out var joining) || joining < 1)
                     throw new InvalidOperationException("Enter a positive number of additional guests.");
-                var newTotal = checked(order.GuestCount + joining);
+                var newTotal = checked(order.Guests + joining);
                 // The workflow validates actual table capacity and sends an
                 // idempotent LAN guest count mutation.
                 await DesktopUiWork.RunAsync(() =>
