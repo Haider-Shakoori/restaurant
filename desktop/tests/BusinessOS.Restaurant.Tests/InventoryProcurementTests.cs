@@ -661,7 +661,7 @@ public sealed class InventoryProcurementTests
             Assert.Equal(8m, (await db.InventoryBalances.SingleAsync()).Quantity);
             Assert.Equal(800m, (await db.InventoryValuations.SingleAsync()).Value);
             var movements = await db.StockMovements.AsNoTracking().ToArrayAsync();
-            var consumed = Assert.Single(movements.Where(x => x.SourceType == "manual_stock_count"));
+            var consumed = Assert.Single(movements, x => x.SourceType == "manual_stock_count");
             Assert.Equal("consumption", consumed.MovementType);
             Assert.Equal(-12m, consumed.QuantityDelta);
             Assert.Equal(100m, consumed.UnitCost);
