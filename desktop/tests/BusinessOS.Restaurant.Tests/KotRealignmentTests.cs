@@ -1770,6 +1770,67 @@ public sealed class KotRealignmentTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task Ready_only_setting_completes_old_staged_kot_without_start_and_notifies_waiter()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var settings = new LocalRestaurantSettingsService(factory);
+            var staged = new RestaurantWorkflowSettingsUpdate(
+                KitchenQueueEnabled: true,
+                PreparingStageEnabled: true,
+                ExpoEnabled: true,
+                CoursesEnabled: false,
+                KotSoundEnabled: true,
+                KitchenWarningMinutes: 10,
+                KitchenLateMinutes: 20,
+                RequireManagerApprovalForPostKotVoid: false);
+            await settings.UpdateAsync(staged, Manager());
+            var kitchen = new LocalKitchenService(factory);
+            var sync = new LocalSyncService(factory, catalog, kitchen);
+            await OpenAsync(sync);
+            await AddAsync(sync, "ADD-READY-LEGACY", "LINE-READY-LEGACY", "item-grill", 1);
+            await PushOneAsync(sync, Waiter(), "SEND-READY-LEGACY", "order.kot.send",
+                new { client_order_id = "ORDER-1" });
+
+            string kitchenItemId;
+            await using (var db = factory.Create())
+            {
+                var round = await db.KotRounds.AsNoTracking().SingleAsync();
+                Assert.True(round.PreparingEnabled && round.ExpoEnabled);
+                kitchenItemId = (await db.KitchenTicketItems.AsNoTracking().SingleAsync()).Id;
+            }
+            // Changing the restaurant to simple Ready-only must not require
+            // START or Expo even for rounds created under the old staged flow.
+            await settings.UpdateAsync(staged with { PreparingStageEnabled = false, ExpoEnabled = false }, Manager());
+            await kitchen.ReadyItemAsync(kitchenItemId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyItemAsync(kitchenItemId, Kitchen(), CancellationToken.None);
+
+            await using (var db = factory.Create())
+            {
+                Assert.Equal("ready",
+                    (await db.KitchenTicketItems.AsNoTracking().SingleAsync()).Status);
+                Assert.True((await db.KotRounds.AsNoTracking().SingleAsync()).PreparingEnabled);
+                Assert.True((await db.KotRounds.AsNoTracking().SingleAsync()).ExpoEnabled);
+                Assert.Equal("ready", (await db.Orders.AsNoTracking().SingleAsync()).Status);
+            }
+            var waiterSync = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(Waiter(), 0, 100, CancellationToken.None));
+            var changes = waiterSync.GetProperty("changes").EnumerateArray().ToArray();
+            Assert.Contains(changes, change =>
+                change.GetProperty("entity_type").GetString() == "order" &&
+                change.GetProperty("data").GetProperty("status").GetString() == "ready");
+            Assert.Contains(changes, change =>
+                change.GetProperty("entity_type").GetString() == "kitchen_ticket" &&
+                change.GetProperty("data").GetProperty("status").GetString() == "ready");
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
