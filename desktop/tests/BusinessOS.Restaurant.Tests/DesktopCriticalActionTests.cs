@@ -78,10 +78,15 @@ public sealed class DesktopCriticalActionTests
         Assert.Contains("DesktopGlassDialog.Confirm(message, title)", views);
         foreach (var title in new[] {
             "Confirm order line void", "Confirm order cancellation",
-            "Confirm kitchen recall", "Confirm kitchen waste", "Confirm kitchen re-fire",
             "Confirm end-of-day closing"
         })
             Assert.Contains(title, views);
+        // Kitchen operators get only READY; advanced production reversals
+        // remain audited service operations, not extra buttons on the board.
+        Assert.DoesNotContain("Confirm kitchen recall", views);
+        Assert.DoesNotContain("Confirm kitchen waste", views);
+        Assert.DoesNotContain("Confirm kitchen re-fire", views);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", views);
         Assert.Contains("var paymentSubmission = new DesktopSubmissionGate();", views);
         Assert.Contains("if (!paymentSubmission.TryBegin()) return;", views);
         Assert.Contains("paymentSubmission.Finish(lockOnSuccess: paymentNeedsManualVerification || (sentToDatabase && !verified));", views);
