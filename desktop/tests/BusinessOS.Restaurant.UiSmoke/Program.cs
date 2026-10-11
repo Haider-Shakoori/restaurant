@@ -138,6 +138,7 @@ internal static class Program
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
         await CheckPersistentMenuPhotoCacheAsync();
+        CheckDashboardProfitLossCalculation();
 
         // Reproduce a real offline tenant with a branch previously synchronized
         // into the disposable CI SQLite snapshot; never seed user databases.
@@ -516,6 +517,37 @@ internal static class Program
         if (new FileInfo(destination).Length < 2048)
             throw new InvalidOperationException("Screenshot appears empty: " + destination);
         Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
+    }
+
+    private static void CheckDashboardProfitLossCalculation()
+    {
+        // Real financial arithmetic, not a snapshot string assertion. Raw
+        // material RECEIPTS must not be counted as consumed food inventory.
+        var type = typeof(MainWindow).Assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.DashboardProfitLoss", throwOnError: true)!;
+        var calculate = type.GetMethod("Compute",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)
+            ?? throw new InvalidOperationException("Dashboard P&L calculation missing");
+        (string Source, decimal QuantityDelta, decimal? UnitCost)[] movements =
+        [
+            ("goods_receipt", 20m, 100m),  // purchased raw meat: NOT a P&L cost
+            ("manual_stock_count", -12m, 100m), // 12 kg actually used
+            ("kitchen_production", -2m, 50m), // explicit recipe consumption
+        ];
+        var result = calculate.Invoke(null, [2200m, movements, 300m, 1800m, "Manual physical count"])!;
+        decimal Get(string field) => (decimal)type.GetProperty(field)!.GetValue(result)!;
+        Assert(Get("Revenue") == 2200m &&
+               Get("CostedFoodConsumption") == 1300m &&
+               Get("GrossProfit") == 900m &&
+               Get("OperatingExpenses") == 300m &&
+               Get("NetOperatingProfit") == 600m &&
+               Get("CashCollected") == 1800m,
+               "P&L excludes purchases, costs actual consumption and separates cash from sales");
+
+        (string, decimal, decimal?)[] unvalued = [("kitchen_production", -1m, null)];
+        var provisional = calculate.Invoke(null, [100m, unvalued, 0m, 100m, "Recipe"])!;
+        Assert(type.GetProperty("IsComplete")!.GetValue(provisional) is false,
+            "Historical unpriced kitchen consumption makes reported profit provisional");
     }
 
     private static async Task CheckPersistentMenuPhotoCacheAsync()
