@@ -258,6 +258,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         // A later refresh or navigation supersedes even a still-loading earlier route.
         var requestId = _pageRequests.Begin();
+        // Re-clicking the already active item need not rebuild its menu tiles,
+        // query SQLite or trigger image loads. Operators can use the explicit
+        // toolbar Refresh action when they require fresh source data.
+        if (CurrentPage is not null && CurrentRoute == route)
+        {
+            IsWorkspaceLoading = false;
+            return;
+        }
         var stopwatch = Stopwatch.StartNew();
         IsWorkspaceLoading = true;
         WorkspaceLoadingMessage = "Opening " + route + "…";
