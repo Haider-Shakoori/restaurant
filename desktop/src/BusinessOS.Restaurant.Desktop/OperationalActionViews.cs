@@ -2167,7 +2167,13 @@ internal static class OperationalActionViews
             if ((canProduce || canExpo && row.ExpoEnabled && row.Status == "expo") &&
                 (row.Status is "queued" or "active" or "preparing" or "expo"))
             {
-                if (row.PreparingEnabled && row.Status is "queued" or "active")
+                if (settings.ReadyOnlyKotEnabled)
+                {
+                    primary = Button("READY");
+                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
+                    success = $"{row.ItemName} is READY. The waiter gets a pickup update through LAN/mobile sync.";
+                }
+                else if (row.PreparingEnabled && row.Status is "queued" or "active")
                 {
                     primary = Button("START");
                     primaryAction = token => workflow.StartKitchenItemAsync(row.ItemId, token);
@@ -2233,7 +2239,7 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (canRecallWaste && (row.Status is "ready" or "completed"))
+            if (!settings.ReadyOnlyKotEnabled && canRecallWaste && (row.Status is "ready" or "completed"))
             {
                 var recall = Button("RECALL");
                 recall.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
@@ -2276,7 +2282,7 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (canRecallWaste && (row.Status is "preparing" or "expo" or "ready" or "completed"))
+            if (!settings.ReadyOnlyKotEnabled && canRecallWaste && (row.Status is "preparing" or "expo" or "ready" or "completed"))
             {
                 var waste = Button("MARK WASTE");
                 waste.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
@@ -2319,7 +2325,7 @@ internal static class OperationalActionViews
                 };
             }
 
-            if (canRefire && (row.Status is "ready" or "expo" or "completed"))
+            if (!settings.ReadyOnlyKotEnabled && canRefire && (row.Status is "ready" or "expo" or "completed"))
             {
                 var refire = Button("RE-FIRE");
                 actions.Children.Add(refire);
@@ -2405,8 +2411,10 @@ internal static class OperationalActionViews
                 $"{visible.Length} visible · {active} in production · " +
                 $"{expo} expo · {ready} ready · {rush} rush · {overdue} delayed";
             handoffText.Text = ready > 0
-                ? $"{ready} READY FOR PICKUP • The waiter receives an in-app alert after LAN sync; background push requires cloud connectivity. " +
-                  "RECALL, WASTE and RE-FIRE are exception actions requiring a reason."
+                ? settings.ReadyOnlyKotEnabled
+                    ? $"{ready} READY FOR PICKUP • Waiter alerts are delivered through connected mobile/LAN sync."
+                    : $"{ready} READY FOR PICKUP • The waiter receives an in-app alert after LAN sync; background push requires cloud connectivity. " +
+                      "RECALL, WASTE and RE-FIRE are exception actions requiring a reason."
                 : (settings.ReadyOnlyKotEnabled
                     ? "Kitchen flow: New KOT → READY → Waiter pickup → Served → Billing."
                     : settings.ExpoEnabled
@@ -2449,6 +2457,9 @@ internal static class OperationalActionViews
 
         (string Label, Func<CancellationToken, Task>? Action, string Success) KitchenNextStep(KitchenItemCard row)
         {
+            if (settings.ReadyOnlyKotEnabled)
+                return ("READY", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
+                    $"{row.ItemName} ready. Waiter notified through mobile/LAN synchronization.");
             if (row.PreparingEnabled && row.Status is "queued" or "active")
                 return ("START", token => workflow.StartKitchenItemAsync(row.ItemId, token),
                     $"{row.ItemName} started.");
