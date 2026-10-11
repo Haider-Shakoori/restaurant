@@ -214,6 +214,9 @@ internal static class Program
         await SeedKitchenStartFixtureAsync();
         await NavigateAsync(owner, "kitchen");
         await CheckKitchenStartResponsiveAsync(owner);
+        await SeedCashierPaymentFixtureAsync();
+        await NavigateAsync(owner, "pos");
+        await CheckPartialPaymentsWithoutPageRefreshAsync(owner);
 
         foreach (var route in new[] { "pos", "tables", "kitchen", "closing", "users" })
             await NavigateAsync(owner, route);
@@ -987,6 +990,75 @@ internal static class Program
                 .Select(x => x.Status)
                 .SingleOrDefaultAsync();
         });
+
+    private static async Task SeedCashierPaymentFixtureAsync()
+    {
+        // The real KOT is first started, then prepared and served. Build a
+        // local bill with the existing workflow; no fake payment responses.
+        await Task.Run(async () =>
+        {
+            var workflow = new DesktopRestaurantWorkflowService();
+            await workflow.MarkKitchenItemReadyAsync("ci-kot-ticket-item");
+            await workflow.ServeOrderAsync("ci-kot-start-order");
+            await workflow.OpenCashierSessionAsync("ci-synced-branch", 0m);
+            await workflow.CreateBillAsync("ci-kot-start-order");
+        });
+    }
+
+    private static async Task CheckPartialPaymentsWithoutPageRefreshAsync(MainWindow owner)
+    {
+        var overlay = Descendants<Grid>(owner)
+            .Single(x => x.Name == "PosGlassModalOverlay");
+        var launch = Descendants<Button>(owner)
+            .Single(x => x.Name == "PosOpenPaymentModal");
+        Click(launch);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Partial payment workflow opens as an iOS-style blurred modal");
+
+        var billPicker = Descendants<ComboBox>(overlay)
+            .Single(x => x.Name == "PosBillPicker");
+        var sessionPicker = Descendants<ComboBox>(overlay)
+            .Single(x => x.Name == "PosCashierSessionPicker");
+        var amount = Descendants<TextBox>(overlay)
+            .Single(x => x.Name == "PosPaymentAmount");
+        var balance = Descendants<TextBlock>(overlay)
+            .Single(x => x.Name == "PosLivePaymentBalance");
+        var pay = FindButton(overlay, "Post payment")
+            ?? throw new InvalidOperationException("Payment action missing from modal");
+        Assert(billPicker.SelectedItem is not null && sessionPicker.SelectedItem is not null,
+            "Payment modal preselects an open bill and current cashier session");
+        Assert(balance.Text.Contains("100.00", StringComparison.Ordinal),
+            "Open bill displays original 100 AFN balance without refreshing the page");
+
+        amount.Text = "40";
+        Click(pay);
+        await WaitUntilAsync(() =>
+            balance.Text.Contains("60.00", StringComparison.Ordinal) && pay.IsEnabled,
+            "First payment updates the live balance and safely allows another payment");
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Payment modal stays open for the remaining partial payment");
+
+        amount.Text = "60";
+        Click(pay);
+        await WaitUntilAsync(() => billPicker.SelectedItem is null &&
+            balance.Text.Contains("No outstanding bill", StringComparison.Ordinal),
+            "Final payment settles the bill in-place without reloading the POS");
+        Assert(!pay.IsEnabled, "POS disables payments when no balance is due");
+
+        var persisted = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            var bill = await db.Bills.SingleAsync(x => x.OrderId == "ci-kot-start-order");
+            var payments = await db.Payments.AsNoTracking().Where(x => x.BillId == bill.Id)
+                .OrderBy(x => x.Amount).Select(x => x.Amount).ToArrayAsync();
+            return (bill.Status, bill.PaidAmount, bill.BalanceDue, Payments: payments);
+        });
+        Assert(persisted.Status == "paid" && persisted.PaidAmount == 100m &&
+               persisted.BalanceDue == 0m && persisted.Payments.SequenceEqual(new[] { 40m, 60m }),
+            "Exactly two distinct local payments settle 100 AFN; no duplicate charge or refresh");
+
+        Click(Descendants<Button>(owner).Single(x => x.Name == "PosGlassModalClose"));
+    }
 
     private static async Task SeedRecipeFixtureAsync()
     {
