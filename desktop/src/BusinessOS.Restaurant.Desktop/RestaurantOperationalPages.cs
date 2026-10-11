@@ -1122,9 +1122,9 @@ internal static class RestaurantOperationalPages
                             throw new InvalidOperationException("Enter a nonzero stock change.");
                         if (string.IsNullOrWhiteSpace(reason.Text))
                             throw new InvalidOperationException("Enter the reason for this correction.");
-                        if (amount < 0 && MessageBox.Show(dialog,
+                        if (amount < 0 && !DesktopGlassDialog.Confirm(
                             $"Remove {Math.Abs(amount)} {selectedItem.BaseUnit} of {selectedItem.Name} from stock?",
-                            "Confirm negative stock adjustment", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                            "Confirm negative stock adjustment", dialog))
                             return;
                         if (!save.IsEnabled) return;
                         var branchId = selectedBranch.Id;
@@ -2418,14 +2418,12 @@ internal static class RestaurantOperationalPages
             if (picker.ShowDialog() != true)
                 return;
 
-            var confirmation = MessageBox.Show(
+            var confirmation = DesktopGlassDialog.Confirm(
                 "Restore this backup only after the restaurant has stopped taking orders. " +
                 "It will replace the local database on the next launch. " +
                 "The app will first retain a safety copy of the current database. Continue?",
-                "Stage a restaurant restore",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-            if (confirmation != MessageBoxResult.Yes)
+                "Stage a restaurant restore");
+            if (!confirmation)
                 return;
 
             restoreButton.IsEnabled = false;
@@ -2542,13 +2540,11 @@ internal static class RestaurantOperationalPages
                 return;
             }
 
-            var answer = MessageBox.Show(
+            var answer = DesktopGlassDialog.Confirm(
                 "Check the physical printer output first. A retry could print a duplicate " +
                 "ticket or receipt. Confirm that you have checked and want to requeue this exact job.",
-                "Confirm printer recovery",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-            if (answer != MessageBoxResult.Yes)
+                "Confirm printer recovery");
+            if (!answer)
                 return;
 
             retry.IsEnabled = false;
