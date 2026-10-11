@@ -32,7 +32,9 @@ public sealed class RecipeWorkspaceNavigationTests
             "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
         Assert.Contains("\"recipes\" => await MenuAsync(recipesOnly: true)", source);
         Assert.Contains("route == \"recipes\" && !modules.RecipesEnabled", source);
-        Assert.Contains("var recipeRows = await (from version in db.Recipes.AsNoTracking()", source);
+        Assert.Contains("var recipeRows = await DesktopUiWork.RunAsync(async () =>", source);
+        Assert.Contains("await using var recipeDb = factory.Create();", source);
+        Assert.Contains("from version in recipeDb.Recipes.AsNoTracking()", source);
         Assert.Contains("panel.Children.Add(recipeGrid)", source);
         Assert.Contains("View Recipes", source);
         Assert.Contains("+ Create Recipe Version", source);
