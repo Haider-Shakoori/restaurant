@@ -13,6 +13,68 @@ namespace BusinessOS.Restaurant.Desktop;
 /// </summary>
 internal static class DesktopGlassDialog
 {
+    public static bool Confirm(string message, string title, Window? owner = null)
+    {
+        var dialog = BuildPrompt(message, title, confirmation: true, owner);
+        return ShowDialog(dialog) == true;
+    }
+
+    public static void Notice(string message, string title, Window? owner = null)
+    {
+        var dialog = BuildPrompt(message, title, confirmation: false, owner);
+        ShowDialog(dialog);
+    }
+
+    private static Window BuildPrompt(string message, string title, bool confirmation, Window? owner)
+    {
+        var content = new StackPanel { Margin = new Thickness(23, 22, 23, 18) };
+        content.Children.Add(new TextBlock
+        {
+            Text = title, FontSize = 19, FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12),
+        });
+        content.Children.Add(new TextBlock
+        {
+            Text = message, FontSize = 14, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 22),
+        });
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        var cancel = new Button
+        {
+            Content = confirmation ? "Cancel" : "OK",
+            MinWidth = 100, Height = 38, Margin = new Thickness(0, 0, 10, 0),
+            IsCancel = true,
+        };
+        actions.Children.Add(cancel);
+        var dialog = new Window
+        {
+            Title = title, Width = 530, SizeToContent = SizeToContent.Height,
+            MaxHeight = 440, MinHeight = 160,
+            ResizeMode = ResizeMode.NoResize,
+            Content = new ScrollViewer
+            {
+                Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            },
+        };
+        if (owner is not null) dialog.Owner = owner;
+        cancel.Click += (_, _) => dialog.DialogResult = false;
+        if (confirmation)
+        {
+            var proceed = new Button
+            {
+                Content = "Confirm", MinWidth = 110, Height = 38, IsDefault = true,
+            };
+            proceed.Click += (_, _) => dialog.DialogResult = true;
+            actions.Children.Add(proceed);
+        }
+        content.Children.Add(actions);
+        return dialog;
+    }
+
     public static bool? ShowDialog(Window dialog)
     {
         var owner = dialog.Owner ?? System.Windows.Application.Current?.Windows
