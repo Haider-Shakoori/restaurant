@@ -325,7 +325,7 @@ internal static class OperationalActionViews
         orderListPanel.Children.Add(currentOrderLines);
         orderListPanel.Children.Add(currentOrderTotal);
         orderListPanel.Children.Add(Header("ACTIVE ORDERS",
-            "Click an order to resume taking items or send another KOT round. Refresh for changes from waiter tablets."));
+            "Search and select the ticket to resume ordering or send a new kitchen round."));
         var orderOverview = new TextBlock { Margin = new Thickness(0, 0, 0, 12), FontWeight = FontWeights.SemiBold };
         orderOverview.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         orderListPanel.Children.Add(orderOverview);
@@ -925,6 +925,45 @@ internal static class OperationalActionViews
         // the long order-setup form.
         form.Children.Remove(status);
 
+        // A short, three-tab editor is easier to use than the previous
+        // vertically endless POS form. Existing controls and click handlers
+        // are moved, not duplicated or recreated.
+        var originalSections = form.Children.Cast<UIElement>().ToArray();
+        var itemsIndex = Array.FindIndex(originalSections,
+            x => x is TextBlock text && text.Text == "3 · ADD ITEMS");
+        var adjustmentsIndex = Array.FindIndex(originalSections,
+            x => x is TextBlock text && text.Text == "4 · KITCHEN & ORDER ADJUSTMENTS");
+        if (itemsIndex <= 0 || adjustmentsIndex <= itemsIndex)
+            throw new InvalidOperationException("POS editor sections could not be organized.");
+        form.Children.Clear();
+        static StackPanel PosTabSection(IEnumerable<UIElement> elements)
+        {
+            var panel = new StackPanel { Margin = new Thickness(3, 12, 3, 4) };
+            foreach (var element in elements) panel.Children.Add(element);
+            return panel;
+        }
+        var posEditorTabs = new TabControl
+        {
+            Name = "PosEditorTabs", SelectedIndex = 0,
+            Margin = new Thickness(0, 0, 0, 6),
+        };
+        posEditorTabs.Items.Add(new TabItem
+        {
+            Header = "1 · Order setup",
+            Content = PosTabSection(originalSections.Take(itemsIndex)),
+        });
+        posEditorTabs.Items.Add(new TabItem
+        {
+            Header = "2 · Add & customize",
+            Content = PosTabSection(originalSections.Skip(itemsIndex).Take(adjustmentsIndex - itemsIndex)),
+        });
+        posEditorTabs.Items.Add(new TabItem
+        {
+            Header = "3 · KOT actions",
+            Content = PosTabSection(originalSections.Skip(adjustmentsIndex)),
+        });
+        form.Children.Add(posEditorTabs);
+
         root.Children.Remove(formCard);
         root.Children.Remove(ordersCard);
         root.RowDefinitions.Clear();
@@ -1117,6 +1156,10 @@ internal static class OperationalActionViews
             previouslyFocused = System.Windows.Input.Keyboard.FocusedElement;
             formCard.Visibility = section is "order" or "items" or "kitchen"
                 ? Visibility.Visible : Visibility.Collapsed;
+            posEditorTabs.SelectedIndex = section switch
+            {
+                "items" => 1, "kitchen" => 2, _ => 0,
+            };
             ordersCard.Visibility = section == "orders" ? Visibility.Visible : Visibility.Collapsed;
             if (cashierCard is not null)
                 cashierCard.Visibility = section == "payment" ? Visibility.Visible : Visibility.Collapsed;
@@ -1153,6 +1196,13 @@ internal static class OperationalActionViews
         kitchenModal.Click += (_, _) => OpenModal("kitchen");
         if (cashierCard is not null)
             billingModal.Click += (_, _) => OpenModal("payment");
+        useSelected.Click += (_, _) =>
+        {
+            if (grid.SelectedItem is OrderChoice selected &&
+                selected.Status is not ("closed" or "cancelled" or "billed" or "paid"))
+                CloseModal();
+        };
+        startOrderFromList.Click += (_, _) => OpenModal("order");
         // Escape must dismiss an open modal, not leave full-screen POS.
         posHost.Tag = (Func<bool>)CloseModal;
         return posHost;
