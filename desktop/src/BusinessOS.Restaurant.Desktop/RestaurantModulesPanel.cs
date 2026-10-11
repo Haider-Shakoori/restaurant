@@ -48,13 +48,20 @@ internal static class RestaurantModulesPanel
         var recipes = Check("Recipes and portion costing", initial.RecipesEnabled);
         var inventory = Check("Inventory and stock tracking", initial.InventoryEnabled);
         var purchasing = Check("Purchasing and suppliers (requires inventory)", initial.PurchasingEnabled);
-        var automatic = Check("Automatic ingredient consumption (requires recipes + inventory)", initial.AutomaticRecipeConsumptionEnabled);
+        var automatic = Check("Deduct ingredients automatically when a KOT is prepared (recipe mode)",
+            initial.AutomaticRecipeConsumptionEnabled);
         foreach (var check in new[] { recipes, inventory, purchasing, automatic })
         {
             check.IsEnabled = canEdit;
             root.Children.Add(check);
         }
 
+        var modeHelp = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(16, 6, 0, 14),
+        };
+        root.Children.Add(modeHelp);
         void ApplyDependencies()
         {
             if (inventory.IsChecked != true)
@@ -66,10 +73,14 @@ internal static class RestaurantModulesPanel
                 automatic.IsChecked = false;
             purchasing.IsEnabled = canEdit && inventory.IsChecked == true;
             automatic.IsEnabled = canEdit && recipes.IsChecked == true && inventory.IsChecked == true;
+            modeHelp.Text = automatic.IsChecked == true
+                ? "RECIPE MODE — KOT production consumes configured recipe quantities. Manual stock counts are disabled to prevent double costing."
+                : "MANUAL MODE — Sending a KOT does not deduct new recipe portions. Go to Inventory → Count Remaining Stock after service: opening stock + received stock − physical closing balance = consumption. This feeds ingredient cost in profit reports. Existing committed history is never reversed.";
         }
 
         recipes.Click += (_, _) => ApplyDependencies();
         inventory.Click += (_, _) => ApplyDependencies();
+        automatic.Click += (_, _) => ApplyDependencies();
         ApplyDependencies();
 
         var status = new TextBlock
@@ -189,7 +200,9 @@ internal static class RestaurantModulesPanel
                     await cache.ApplyCloudModulesAsync(confirmed);
                 }
                 Display(confirmed);
-                status.Text = "Modules saved to Web and cached locally. Refresh the workspace to apply them.";
+                status.Text = standalone
+                    ? "Local consumption mode saved. Open Inventory to record actual stock counts."
+                    : "Mode saved on Web and cached locally. Check online devices have synchronized before counting stock.";
             }
             catch (Exception ex) { status.Text = "Modules not changed: " + ex.Message; }
             finally { save.IsEnabled = canEdit; }
@@ -197,7 +210,7 @@ internal static class RestaurantModulesPanel
 
         root.Children.Add(new TextBlock
         {
-            Text = "No module switch deletes recipes, supplier orders, stock movements or payment history.",
+            Text = "Switching modes never rewrites historical stock movements or payments. Reconcile outstanding KOT reservations before switching to manual counts. Purchases change stock and cash, but do not become consumption expenses until used.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 12, 0, 0),
         });
