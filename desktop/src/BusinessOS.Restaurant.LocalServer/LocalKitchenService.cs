@@ -440,6 +440,10 @@ public sealed class LocalKitchenService
         var wasReady = item.Status == "ready";
         await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken);
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        // TicketSnapshotAsync materializes AsNoTracking() records. Flush the
+        // updated kitchen item within the same transaction before reading
+        // the pickup payload, otherwise mobile may receive stale QUEUED JSON.
+        await db.SaveChangesAsync(cancellationToken);
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
