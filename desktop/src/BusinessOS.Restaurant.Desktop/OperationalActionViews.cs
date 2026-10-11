@@ -16,8 +16,7 @@ internal static class OperationalActionViews
     // Only irreversible changes ask for confirmation. Normal order entry and
     // KOT production remain quick single-click workflows.
     private static bool ConfirmOperationalChange(string message, string title) =>
-        MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Warning)
-        == MessageBoxResult.Yes;
+        DesktopGlassDialog.Confirm(message, title);
 
     public static async Task<FrameworkElement> PosAsync()
     {
