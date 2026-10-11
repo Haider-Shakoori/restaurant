@@ -617,6 +617,59 @@ public sealed class InventoryProcurementTests
         }
     }
 
+    [Fact]
+    public async Task Manual_remaining_stock_count_records_real_consumption_once_and_values_food_cost()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var inventory = new LocalInventoryService(factory);
+            var manager = InventoryUser();
+            var item = JsonSerializer.SerializeToElement(await inventory.CreateItemAsync(
+                "MEAT", "Meat", "kg", "kg", 1m, 0m, manager, CancellationToken.None));
+            var supplier = JsonSerializer.SerializeToElement(await inventory.CreateSupplierAsync(
+                "MEAT-VENDOR", "Meat vendor", null, null, null, manager, CancellationToken.None));
+            var po = JsonSerializer.SerializeToElement(await inventory.CreatePurchaseOrderAsync(
+                "branch-1", supplier.GetProperty("id").GetString()!,
+                [new LocalPurchaseOrderLineRequest(item.GetProperty("id").GetString()!, 20m, 100m)],
+                "Test purchase", manager, CancellationToken.None));
+            await inventory.ReceivePurchaseOrderAsync(
+                po.GetProperty("id").GetString()!,
+                [new LocalReceivePurchaseOrderLineRequest(po.GetProperty("lines")[0].GetProperty("id").GetString()!, 20m)],
+                "receipt-meat-1", "Test delivery", manager, CancellationToken.None);
+
+            var modules = new LocalRestaurantSettingsService(factory);
+            await Assert.ThrowsAsync<LocalSyncConflictException>(() =>
+                inventory.RecordManualConsumptionAsync("branch-1",
+                    item.GetProperty("id").GetString()!, 8m, "COUNT-1",
+                    "Closing stock count", manager, CancellationToken.None));
+            await modules.ApplyStandaloneModulesAsync(new RestaurantModuleFlags(
+                RecipesEnabled: true, InventoryEnabled: true,
+                PurchasingEnabled: true, AutomaticRecipeConsumptionEnabled: false));
+
+            var first = JsonSerializer.SerializeToElement(await inventory.RecordManualConsumptionAsync(
+                "branch-1", item.GetProperty("id").GetString()!, 8m, "COUNT-1",
+                "Closing stock count", manager, CancellationToken.None));
+            var replay = JsonSerializer.SerializeToElement(await inventory.RecordManualConsumptionAsync(
+                "branch-1", item.GetProperty("id").GetString()!, 8m, "COUNT-1",
+                "Closing stock count", manager, CancellationToken.None));
+            Assert.Equal(first.GetProperty("id").GetString(), replay.GetProperty("id").GetString());
+
+            await using var db = factory.Create();
+            Assert.Equal(8m, (await db.InventoryBalances.SingleAsync()).Quantity);
+            Assert.Equal(800m, (await db.InventoryValuations.SingleAsync()).Value);
+            var movements = await db.StockMovements.AsNoTracking().ToArrayAsync();
+            var consumed = Assert.Single(movements.Where(x => x.SourceType == "manual_stock_count"));
+            Assert.Equal("consumption", consumed.MovementType);
+            Assert.Equal(-12m, consumed.QuantityDelta);
+            Assert.Equal(100m, consumed.UnitCost);
+            Assert.Equal(1200m, -consumed.QuantityDelta * consumed.UnitCost!.Value);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static async Task<JsonElement> PushOneAsync(
         LocalSyncService sync,
         LocalTerminalPrincipal principal,
