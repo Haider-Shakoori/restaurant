@@ -2164,7 +2164,8 @@ internal static class OperationalActionViews
             Func<CancellationToken, Task>? primaryAction = null;
             string? success = null;
 
-            if (canProduce && (row.Status is "queued" or "active" or "preparing" or "expo"))
+            if ((canProduce || canExpo && row.ExpoEnabled && row.Status == "expo") &&
+                (row.Status is "queued" or "active" or "preparing" or "expo"))
             {
                 if (row.PreparingEnabled && row.Status is "queued" or "active")
                 {
