@@ -14,8 +14,13 @@ public sealed class RecipeWorkspaceNavigationTests
         var recipes = shell.Descendants().Single(x =>
             x.Name.LocalName == "Button" &&
             (string?)x.Attribute("CommandParameter") == "recipes");
-        Assert.Equal("▤   Recipes & Food Cost",
-            (string?)recipes.Attribute("Content"));
+        Assert.Equal("Recipes & Food Cost", (string?)recipes.Attribute("AutomationProperties.Name"));
+        Assert.Contains(recipes.Descendants(), element =>
+            element.Name.LocalName == "TextBlock" &&
+            (string?)element.Attribute("Text") == "Recipes & Food Cost");
+        Assert.Contains(recipes.Descendants(), element =>
+            element.Name.LocalName == "TextBlock" &&
+            (string?)element.Attribute("FontFamily") == "Segoe MDL2 Assets");
         Assert.Contains("CanViewRecipes", (string?)recipes.Attribute("Visibility"));
     }
 
