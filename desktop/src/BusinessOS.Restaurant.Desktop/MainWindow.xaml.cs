@@ -298,7 +298,7 @@ public partial class MainWindow : Window
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
 
-            if (signIn.ShowDialog() != true || signIn.SignedInSession is null)
+            if (DesktopGlassDialog.ShowDialog(signIn) != true || signIn.SignedInSession is null)
                 return;
 
             // Never reuse a view model, navigation authorization or cached pages
