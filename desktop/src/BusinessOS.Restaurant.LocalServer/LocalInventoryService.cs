@@ -531,6 +531,103 @@ public sealed class LocalInventoryService
         return await MovementSnapshotAsync(db, movement, cancellationToken);
     }
 
+    /// <summary>
+    /// Reconcile a physical closing count to book stock in MANUAL mode.
+    /// Only negative consumption is accepted here; positive corrections use
+    /// ordinary audited stock adjustments and are not an expense.
+    /// A new consumed movement has an average-cost value recognized by P&L.
+    /// </summary>
+    public async Task<object> RecordManualConsumptionAsync(
+        string branchId,
+        string inventoryItemId,
+        decimal physicalRemainingBase,
+        string clientCountId,
+        string reason,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureInventoryRole(actor);
+        if (physicalRemainingBase < 0)
+            throw new LocalSyncConflictException("invalid_payload", "Remaining stock cannot be negative.");
+        if (string.IsNullOrWhiteSpace(clientCountId) || string.IsNullOrWhiteSpace(reason))
+            throw new LocalSyncConflictException("invalid_payload", "Count ID and reason are required.");
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await RequireModuleAsync(db, "inventory_enabled", cancellationToken);
+        // In manual mode, sold dishes never reserve/consume recipe quantities.
+        // Mixing count-based consumption with automatic consumption would
+        // double-charge COGS; require the operator to toggle first.
+        if (await ModuleEnabledAsync(db, "automatic_recipe_consumption_enabled", cancellationToken))
+            throw new LocalSyncConflictException("inventory_mode_conflict",
+                "Switch Settings → Modules → Manual physical consumption before counting stock.");
+
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        await RequireBranchAsync(db, branchId, cancellationToken);
+        var item = await RequireInventoryItemAsync(db, inventoryItemId, cancellationToken);
+        var key = $"manual-count:{branchId}:{clientCountId.Trim()}";
+        var existing = await db.StockMovements
+            .SingleOrDefaultAsync(x => x.IdempotencyKey == key, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.InventoryItemId != item.Id)
+                throw new LocalSyncConflictException("idempotency_conflict",
+                    "This count ID belongs to a different ingredient.");
+            return await MovementSnapshotAsync(db, existing, cancellationToken);
+        }
+
+        var balance = await db.InventoryBalances
+            .SingleOrDefaultAsync(x => x.BranchId == branchId && x.InventoryItemId == item.Id, cancellationToken);
+        var onHand = Quantity(balance?.Quantity ?? 0m);
+        var remaining = Quantity(physicalRemainingBase);
+        if (remaining > onHand)
+            throw new LocalSyncConflictException("invalid_payload",
+                "Physical stock is above book quantity. Use Adjust Stock for corrections or receive a purchase first.");
+        if (remaining == onHand)
+            throw new LocalSyncConflictException("no_change",
+                "Count matches the recorded balance; nothing was consumed.");
+
+        var valuation = await GetOrCreateValuationAsync(db, branchId, item.Id, cancellationToken);
+        var averageCost = Money(valuation.AverageUnitCost);
+        var delta = Quantity(remaining - onHand);
+        var movement = await RecordMovementAsync(
+            db, branchId, item, actor, "consumption", delta,
+            "manual_stock_count", clientCountId.Trim(), key,
+            null, averageCost, reason.Trim(), cancellationToken);
+
+        valuation.Quantity = Quantity(Math.Max(0m, valuation.Quantity + delta));
+        valuation.Value = Money(Math.Max(0m, valuation.Value - Money(-delta * averageCost)));
+        // Keep historical average cost for subsequent purchases/counts.
+        // No menu recipe item is linked to a manual period stock count.
+
+        LocalCloudOutboxWriter.Enqueue(db, actor, "inventory.adjust", "stock_movement", movement.Id,
+            new
+            {
+                branch_id = branchId,
+                local_inventory_item_id = item.Id,
+                quantity_delta = delta,
+                client_adjustment_id = clientCountId.Trim(),
+                reason = reason.Trim(),
+                consumption_method = "manual_stock_count",
+                unit_cost = averageCost,
+            });
+        LocalOperationsControlService.AddAudit(db, actor, "inventory",
+            "inventory.manual_consumption", branchId, "stock_movement", movement.Id,
+            new
+            {
+                inventory_item_id = item.Id,
+                before = onHand,
+                physical_remaining = remaining,
+                consumed = -delta,
+                average_unit_cost = averageCost,
+                consumption_cost = Money(-delta * averageCost),
+                reason = reason.Trim(),
+            });
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return await MovementSnapshotAsync(db, movement, cancellationToken);
+    }
+
     public async Task<object[]> MovementsAsync(
         string? branchId,
         string? inventoryItemId,
