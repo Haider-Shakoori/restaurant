@@ -926,22 +926,28 @@ internal static class Program
         await owner.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
         Assert(!start.IsEnabled, "Kitchen START disables repeat clicks while saving");
 
-        var factory = new LocalDatabaseFactory();
-        await WaitUntilAsync(() =>
-            {
-                // SQLite command is synchronous here in the CI harness only.
-                // The actual Kitchen click runs on a background worker.
-                using var db = factory.Create();
-                return db.KitchenTicketItems.AsNoTracking()
-                    .Any(x => x.Id == "ci-kot-ticket-item" && x.Status == "preparing");
-            }, "Kitchen START persists preparing state without UI freeze");
         await WaitUntilAsync(() =>
             Descendants<TextBlock>(owner).Any(x =>
                 x.Text.Contains("started", StringComparison.OrdinalIgnoreCase)),
             "Kitchen START reports success while UI stays responsive");
+        // Even the assertion must not perform synchronous SQLite work on the
+        // WPF dispatcher during an in-flight transaction.
+        var persisted = await DesktopUiTestKitchenStatusAsync();
+        Assert(persisted == "preparing",
+            "Kitchen START persists exactly the intended preparing state");
         Assert(FindButton(owner, "PASS EXPO") is null,
             "Kitchen preparing step does not bypass Expo or Ready stages");
     }
+
+    private static Task<string?> DesktopUiTestKitchenStatusAsync() =>
+        Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            return await db.KitchenTicketItems.AsNoTracking()
+                .Where(x => x.Id == "ci-kot-ticket-item")
+                .Select(x => x.Status)
+                .SingleOrDefaultAsync();
+        });
 
     private static async Task SeedRecipeFixtureAsync()
     {
