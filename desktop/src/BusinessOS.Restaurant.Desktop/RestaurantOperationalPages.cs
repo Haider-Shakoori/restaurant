@@ -61,7 +61,7 @@ internal static class RestaurantOperationalPages
             {
                 Owner = System.Windows.Application.Current?.MainWindow,
             };
-            dialog.ShowDialog();
+            DesktopGlassDialog.ShowDialog(dialog);
             if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
                 await vm.RefreshCommand.ExecuteAsync(null);
         }
@@ -82,7 +82,7 @@ internal static class RestaurantOperationalPages
             {
                 Owner = System.Windows.Application.Current?.MainWindow,
             };
-            dialog.ShowDialog();
+            DesktopGlassDialog.ShowDialog(dialog);
             if (dialog.SavedChanges)
             {
                 var refreshed = await RefreshOperationalSnapshotAsync();
@@ -412,7 +412,7 @@ internal static class RestaurantOperationalPages
             var recipeGrid = GridFor(versions);
             recipeGrid.AutoGenerateColumns = true;
             dialog.Content = recipeGrid;
-            dialog.ShowDialog();
+            DesktopGlassDialog.ShowDialog(dialog);
         };
         // Cloud-owned catalog edits never disappear on the next snapshot refresh.
         var editCatalog = new Button { Content = standalone
@@ -608,7 +608,7 @@ internal static class RestaurantOperationalPages
 
             dialog.Content = BuildRecipeVersionEditor(
                 form, ingredientRows, remove, summary, feedback, save, cancel);
-            if (dialog.ShowDialog() == true)
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
             {
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
                     "Recipe version saved. Refresh Recipes to view it.");
@@ -677,7 +677,7 @@ internal static class RestaurantOperationalPages
             var costGrid = GridFor(preview);
             costGrid.AutoGenerateColumns = true;
             dialog.Content = costGrid;
-            dialog.ShowDialog();
+            DesktopGlassDialog.ShowDialog(dialog);
         };
         costPreview.HorizontalAlignment = HorizontalAlignment.Left;
         costPreview.Margin = new Thickness(0, 0, 10, 10);
@@ -1058,7 +1058,7 @@ internal static class RestaurantOperationalPages
                 Content = content,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
-            if (dialog.ShowDialog() == true)
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
             {
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Ingredient created successfully.");
                 if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
@@ -1165,7 +1165,7 @@ internal static class RestaurantOperationalPages
                 form.Children.Add(save);
                 form.Children.Add(error);
                 dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-                if (dialog.ShowDialog() == true)
+                if (DesktopGlassDialog.ShowDialog(dialog) == true)
                     DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Audited stock adjustment posted. Refresh Inventory.");
             }
             catch (Exception ex) { DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message); }
@@ -1339,7 +1339,7 @@ internal static class RestaurantOperationalPages
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            if (dialog.ShowDialog() == true)
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Supplier saved. Refresh Purchases to see it.");
         };
         panel.Children.Add(addSupplier);
@@ -1490,7 +1490,7 @@ internal static class RestaurantOperationalPages
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            if (dialog.ShowDialog() == true)
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated. Refresh Purchases to see it.");
         };
         panel.Children.Add(purchaseButton);
@@ -1586,7 +1586,7 @@ internal static class RestaurantOperationalPages
             };
             form.Children.Add(save);
             dialog.Content = new ScrollViewer { Content = form, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            if (dialog.ShowDialog() == true)
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Outstanding purchase received. Refresh Purchases and Inventory.");
         };
         panel.Children.Add(receivePending);
@@ -1666,7 +1666,7 @@ internal static class RestaurantOperationalPages
                 {
                     Owner = System.Windows.Application.Current?.MainWindow,
                 };
-                dialog.ShowDialog();
+                DesktopGlassDialog.ShowDialog(dialog);
                 if (dialog.SavedChanges)
                 {
                     var refreshed = await RefreshOperationalSnapshotAsync();
@@ -1860,22 +1860,9 @@ internal static class RestaurantOperationalPages
             content.Children.Add(actions);
             dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
-            // Blur the underlying workspace while the modal is open, restoring
-            // its original effect even if the dialog closes unexpectedly.
-            var ownerContent = owner?.Content as UIElement;
-            var previousEffect = ownerContent?.Effect;
-            try
-            {
-                if (ownerContent is not null)
-                    ownerContent.Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 9 };
-                if (dialog.ShowDialog() == true)
-                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
-                        "Expense saved. Refresh Expenses to see the latest ledger entry.");
-            }
-            finally
-            {
-                if (ownerContent is not null) ownerContent.Effect = previousEffect;
-            }
+            if (DesktopGlassDialog.ShowDialog(dialog) == true)
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
+                    "Expense saved. Refresh Expenses to see the latest ledger entry.");
         };
 
         return Scroll(panel);
