@@ -154,9 +154,11 @@ internal static class RestaurantOperationalPages
                 .Where(x => x.MovementType == "consumption")
                 .Select(x => new { x.SourceType, x.QuantityDelta, x.UnitCost, x.OccurredAt })
                 .ToListAsync();
-            var flags = await accounting.ModuleSettings.AsNoTracking().ToListAsync();
-            var recipe = flags.FirstOrDefault(x => x.Key == "automatic_recipe_consumption_enabled")?.Value;
-            var mode = recipe is "true" or "1" ? "Recipe" : "Manual physical count";
+            var recipe = await accounting.RestaurantSettings.AsNoTracking()
+                .Where(x => x.Key == "automatic_recipe_consumption_enabled")
+                .Select(x => x.Value).FirstOrDefaultAsync();
+            var mode = recipe is null || recipe.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                recipe == "1" ? "Recipe" : "Manual physical count";
             return DashboardProfitLoss.Compute(
                 sales,
                 usedRows.Where(x => DateOnly.FromDateTime(x.OccurredAt.LocalDateTime) == since)
