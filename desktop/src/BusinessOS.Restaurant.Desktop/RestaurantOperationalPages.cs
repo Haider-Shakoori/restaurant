@@ -750,18 +750,22 @@ internal static class RestaurantOperationalPages
         {
             // A first-class recipe workspace must list saved versions on the
             // page itself; the View Recipes dialog drills into ingredients.
-            var recipeRows = await (from version in db.Recipes.AsNoTracking()
-                join menuItem in db.MenuItems.AsNoTracking() on version.MenuItemId equals menuItem.Id
-                join branch in db.Branches.AsNoTracking() on version.BranchId equals branch.Id
-                orderby menuItem.Name, version.Version descending
-                select new
-                {
-                    Branch = branch.Name,
-                    MenuItem = menuItem.Name,
-                    Recipe = version.Name,
-                    version.Version,
-                    Active = version.IsActive,
-                }).ToListAsync();
+            var recipeRows = await DesktopUiWork.RunAsync(async () =>
+            {
+                await using var recipeDb = factory.Create();
+                return await (from version in recipeDb.Recipes.AsNoTracking()
+                    join menuItem in recipeDb.MenuItems.AsNoTracking() on version.MenuItemId equals menuItem.Id
+                    join branch in recipeDb.Branches.AsNoTracking() on version.BranchId equals branch.Id
+                    orderby menuItem.Name, version.Version descending
+                    select new
+                    {
+                        Branch = branch.Name,
+                        MenuItem = menuItem.Name,
+                        Recipe = version.Name,
+                        version.Version,
+                        Active = version.IsActive,
+                    }).ToListAsync();
+            });
 
             panel.Children.Add(Card("Recipe versions",
                 recipeRows.Count == 0
