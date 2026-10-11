@@ -209,6 +209,12 @@ internal static class Program
         Assert(FindButton(owner, "+ Create Expense") is not null, "Create Expense is clickable");
         await CheckFormAsync(app, owner, "+ Create Expense", "Create Expense", "Save Expense", null);
 
+        // Reproduce the real user's Kitchen/KOT START freeze on an isolated,
+        // seeded but previously unsent synthetic kitchen item.
+        await SeedKitchenStartFixtureAsync();
+        await NavigateAsync(owner, "kitchen");
+        await CheckKitchenStartResponsiveAsync(owner);
+
         foreach (var route in new[] { "pos", "tables", "kitchen", "closing", "users" })
             await NavigateAsync(owner, route);
         await CheckFormAsync(app, owner, "Add Users / Manage Roles",
@@ -831,6 +837,110 @@ internal static class Program
                 "corrected supplier saved exactly once");
         }
         finally { if (second.IsVisible) second.Close(); }
+    }
+
+    private static async Task SeedKitchenStartFixtureAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        await using var db = factory.Create();
+        var when = DateTimeOffset.UtcNow;
+        var branchId = "ci-synced-branch";
+        const string orderId = "ci-kot-start-order";
+        const string itemId = "ci-kot-start-item";
+        const string kitchenId = "ci-kot-start-kitchen";
+        const string roundId = "ci-kot-start-round";
+
+        db.DiningAreas.Add(new LocalDiningArea
+        {
+            Id = "ci-kot-area", BranchId = branchId,
+            Name = "CI Kitchen Test Area", IsActive = true,
+        });
+        db.DiningTables.Add(new LocalDiningTable
+        {
+            Id = "ci-kot-table", DiningAreaId = "ci-kot-area",
+            Code = "CI-KOT-T1", Name = "CI KOT Table",
+            Status = "occupied", Capacity = 2, IsActive = true,
+        });
+        db.KitchenStations.Add(new LocalKitchenStation
+        {
+            Id = "ci-kot-station", BranchId = branchId,
+            Code = "CI-KOT", Name = "CI Kitchen Station", IsActive = true,
+        });
+        // This item has NO recipe: it tests KOT state transitions without
+        // needing or consuming any real stock.
+        db.MenuItems.Add(new LocalMenuItem
+        {
+            Id = "ci-kot-menu", Sku = "CI-KOT-MENU", Name = "CI Kitchen Test Dish",
+            Price = 100m, Currency = "AFN", IsAvailable = true,
+        });
+        db.Orders.Add(new LocalOrder
+        {
+            Id = orderId, ClientOrderId = "CI-KOT-START",
+            BranchId = branchId, DiningTableId = "ci-kot-table",
+            WaiterId = 901, WaiterPublicId = "ci-test-operator",
+            WaiterName = "CI owner", Status = "submitted",
+            GuestCount = 2, CreatedAtUtc = when, UpdatedAtUtc = when,
+            SubmittedAt = when,
+        });
+        db.OrderItems.Add(new LocalOrderItem
+        {
+            Id = itemId, OrderId = orderId, MenuItemId = "ci-kot-menu",
+            ClientLineId = "ci-kot-line", ItemName = "CI Kitchen Test Dish",
+            UnitPrice = 100m, LineTotal = 100m, Quantity = 1,
+            Status = "queued", KotRoundId = roundId, RoundNumber = 1,
+            CreatedAtUtc = when, UpdatedAtUtc = when,
+        });
+        db.KotRounds.Add(new LocalKotRound
+        {
+            Id = roundId, OrderId = orderId, BranchId = branchId,
+            RoundNumber = 1, DisplayNumber = 1,
+            KotNumber = "CI-KOT-0001", BusinessDate = DateOnly.FromDateTime(DateTime.Today),
+            MutationId = "ci-start-kot-round",
+            QueueEnabled = true, PreparingEnabled = true, SentAt = when,
+        });
+        db.KitchenTickets.Add(new LocalKitchenTicket
+        {
+            Id = kitchenId, OrderId = orderId, KotRoundId = roundId,
+            RoundNumber = 1, KitchenStationId = "ci-kot-station",
+            TicketNumber = "CI-KOT-TICKET", KotNumber = "CI-KOT-0001",
+            Status = "queued", QueuedAt = when,
+            CreatedAtUtc = when, UpdatedAtUtc = when,
+        });
+        db.KitchenTicketItems.Add(new LocalKitchenTicketItem
+        {
+            Id = "ci-kot-ticket-item", KitchenTicketId = kitchenId,
+            OrderItemId = itemId, ItemName = "CI Kitchen Test Dish",
+            Quantity = 1, Status = "queued",
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CheckKitchenStartResponsiveAsync(MainWindow owner)
+    {
+        var start = Descendants<Button>(owner)
+            .FirstOrDefault(button => button.Content?.ToString() == "START")
+            ?? throw new InvalidOperationException("Seeded kitchen item START action missing.");
+        Click(start);
+        // The dispatcher must process unrelated input while the SQLite
+        // transaction is in flight (UI must not appear hung).
+        await owner.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        Assert(!start.IsEnabled, "Kitchen START disables repeat clicks while saving");
+
+        var factory = new LocalDatabaseFactory();
+        await WaitUntilAsync(() =>
+            {
+                // SQLite command is synchronous here in the CI harness only.
+                // The actual Kitchen click runs on a background worker.
+                using var db = factory.Create();
+                return db.KitchenTicketItems.AsNoTracking()
+                    .Any(x => x.Id == "ci-kot-ticket-item" && x.Status == "preparing");
+            }, "Kitchen START persists preparing state without UI freeze");
+        await WaitUntilAsync(() =>
+            Descendants<TextBlock>(owner).Any(x =>
+                x.Text.Contains("started", StringComparison.OrdinalIgnoreCase)),
+            "Kitchen START reports success while UI stays responsive");
+        Assert(FindButton(owner, "PASS EXPO") is null,
+            "Kitchen preparing step does not bypass Expo or Ready stages");
     }
 
     private static async Task SeedRecipeFixtureAsync()
