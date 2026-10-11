@@ -1060,7 +1060,7 @@ internal static class Program
             RoundNumber = 1, DisplayNumber = 1,
             KotNumber = "CI-KOT-0001", BusinessDate = DateOnly.FromDateTime(DateTime.Today),
             MutationId = "ci-start-kot-round",
-            QueueEnabled = true, PreparingEnabled = true, SentAt = when,
+            QueueEnabled = true, PreparingEnabled = false, SentAt = when,
         });
         db.KitchenTickets.Add(new LocalKitchenTicket
         {
