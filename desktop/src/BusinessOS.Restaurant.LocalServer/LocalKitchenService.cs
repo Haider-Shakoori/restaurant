@@ -437,11 +437,21 @@ public sealed class LocalKitchenService
         var ticket = await RequireTicketAsync(db, item.KitchenTicketId, cancellationToken);
         var round = await RequireRoundAsync(db, ticket, cancellationToken);
 
+        var wasReady = item.Status == "ready";
         await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken);
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        // Notify the assigned waiter even when only one item of a larger KOT
+        // is ready and the aggregate order stays "submitted". Mobile/LAN
+        // pickup alerts derive their state from the kitchen_tickets snapshot.
+        if (!wasReady)
+        {
+            var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+            AddChange(db, "order", order.Id, order.WaiterId,
+                await BasicOrderSnapshotAsync(db, order, cancellationToken));
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -1194,22 +1204,15 @@ public sealed class LocalKitchenService
                 $"Kitchen item cannot move from {item.Status} to ready.");
         }
 
-        if (round.PreparingEnabled && item.Status != "preparing")
-        {
-            throw new LocalSyncConflictException(
-                "order_state_conflict",
-                "This KOT round uses the Preparing stage. Start the item before marking it ready.");
-        }
-
-        if (!round.PreparingEnabled && item.Status is not ("queued" or "active"))
-        {
-            throw new LocalSyncConflictException(
-                "order_state_conflict",
+        // Simplified restaurant KOT: a single READY action is valid directly
+        // from the queued/active state, even for historical rounds originally
+        // configured with Preparing or Expo stages.
+        if (item.Status is not ("queued" or "active" or "preparing" or "expo"))
+            throw new LocalSyncConflictException("order_state_conflict",
                 $"Kitchen item cannot move from {item.Status} to ready.");
-        }
 
         var now = DateTimeOffset.UtcNow;
-        item.Status = round.ExpoEnabled ? "expo" : "ready";
+        item.Status = "ready";
         item.ReadyAt ??= now;
 
         var orderItem = await db.OrderItems
@@ -1217,16 +1220,16 @@ public sealed class LocalKitchenService
         orderItem.Status = item.Status;
         orderItem.UpdatedAtUtc = now;
 
-        if (!round.PreparingEnabled)
-        {
-            await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
-        }
+        // The inventory service deduplicates by kitchen production key.
+        // Committing here handles direct queued→ready and preserves prior
+        // consumption for tickets previously moved to Preparing.
+        await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
 
         LocalOperationsControlService.AddAudit(
             db,
             actor,
             "kitchen",
-            round.ExpoEnabled ? "kitchen.item_sent_to_expo" : "kitchen.item_ready",
+            "kitchen.item_ready",
             null,
             "kitchen_ticket_item",
             item.Id,
