@@ -273,14 +273,8 @@ public partial class MainWindow : Window
         }
         if (route == "kitchen")
         {
-            var caption = e.Key switch
-            {
-                Key.F2 => "START",
-                Key.F3 => "READY",
-                Key.F4 => "PASS EXPO",
-                _ => null,
-            };
-            if (caption is not null) e.Handled = TryOperationalClick(caption: caption);
+            if (e.Key == Key.F2)
+                e.Handled = TryOperationalClick(name: "KotTopReadyButton");
         }
     }
 
