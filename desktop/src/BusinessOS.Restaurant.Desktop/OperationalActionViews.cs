@@ -1009,14 +1009,74 @@ internal static class OperationalActionViews
         root.Children.Remove(ordersCard);
         root.RowDefinitions.Clear();
         root.ColumnDefinitions.Clear();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1.65, GridUnitType.Star) });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var catalogHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
-        catalogHeader.Children.Add(Header("PHOTO MENU", "Tap a dish to add it to the selected order."));
+        // Place ALL frequent POS actions in one compact top toolbar.
+        // Keep the full width below for the photo menu; the order ticket
+        // remains available in a modal rather than occupying a permanent rail.
+        var newOrderModal = Button("+ New order");
+        newOrderModal.Name = "PosOpenNewOrderModal";
+        var activeOrdersModal = Button("Orders");
+        activeOrdersModal.Name = "PosOpenActiveOrdersModal";
+        activeOrdersModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var viewTicketModal = Button("View ticket");
+        viewTicketModal.Name = "PosOpenTicketModal";
+        viewTicketModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var editItemsModal = Button("Item options");
+        editItemsModal.Name = "PosOpenItemOptionsModal";
+        editItemsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var kitchenModal = Button("KOT actions");
+        kitchenModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var billingModal = Button("Payments");
+        billingModal.Name = "PosOpenPaymentModal";
+        billingModal.MinHeight = 42;
+
+        var quickActions = new WrapPanel
+        {
+            Name = "PosTopActions", Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 4),
+        };
+        foreach (var button in new[] { newOrderModal, activeOrdersModal, viewTicketModal, editItemsModal })
+        {
+            button.MinHeight = 40;
+            quickActions.Children.Add(button);
+        }
+        kitchenActions.Children.Remove(submit);
+        submit.MinHeight = 40;
+        quickActions.Children.Add(submit);
+        kitchenModal.MinHeight = 40;
+        quickActions.Children.Add(kitchenModal);
+        if (cashierCard is not null) quickActions.Children.Add(billingModal);
+
+        // Current-order context is visible even while the ticket is closed.
+        var topContext = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(215, 242, 247, 253)),
+            BorderBrush = new SolidColorBrush(Color.FromArgb(190, 225, 233, 244)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 7, 12, 7),
+            Margin = new Thickness(0, 2, 0, 6),
+            Child = selectionSummary,
+        };
+        selectionSummary.Margin = new Thickness(0);
+        selectionSummary.MaxHeight = 40;
+        var topToolbar = new StackPanel
+        {
+            Name = "PosFullscreenTopToolbar",
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+        topToolbar.Children.Add(quickActions);
+        topToolbar.Children.Add(topContext);
+        Grid.SetRow(topToolbar, 0);
+        root.Children.Add(topToolbar);
+
+        var catalogHeader = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
         catalogHeader.Children.Add(menuSearchBox);
-        var catalog = new DockPanel();
+        var catalog = new DockPanel { LastChildFill = true };
         DockPanel.SetDock(catalogHeader, Dock.Top);
         catalog.Children.Add(catalogHeader);
         catalog.Children.Add(new ScrollViewer
@@ -1026,58 +1086,21 @@ internal static class OperationalActionViews
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         });
-        var leftCard = Card(catalog);
-        leftCard.Name = "PosPhotoFirstPane";
-        Grid.SetColumn(leftCard, 0);
-        root.Children.Add(leftCard);
+        var menuPane = Card(catalog);
+        menuPane.Name = "PosPhotoFirstPane";
+        Grid.SetRow(menuPane, 1);
+        root.Children.Add(menuPane);
 
-        // Move ticket lines and totals out of the large Active Orders panel.
+        // Only display ticket details when needed so the photo menu always
+        // retains the maximum available viewport.
         orderListPanel.Children.Remove(currentOrderLines);
         orderListPanel.Children.Remove(currentOrderTotal);
         var ticketPanel = new StackPanel { Name = "PosFullscreenOrderTicket" };
-        ticketPanel.Children.Add(Header("CURRENT TICKET", "Menu on the left · orders and billing one tap away."));
-        // WPF cannot attach an element to two logical parents at once.
-        ticketPanel.Children.Add(selectionSummary);
+        ticketPanel.Children.Add(Header("CURRENT TICKET", "Confirm dishes and totals before sending the kitchen round."));
         ticketPanel.Children.Add(currentOrderLines);
         ticketPanel.Children.Add(currentOrderTotal);
         ticketPanel.Children.Add(status);
-
-        var quickActions = new WrapPanel { Margin = new Thickness(0, 10, 0, 8) };
-        var newOrderModal = Button("+ New order");
-        newOrderModal.Name = "PosOpenNewOrderModal";
-        var activeOrdersModal = Button("Active orders");
-        activeOrdersModal.Name = "PosOpenActiveOrdersModal";
-        activeOrdersModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-        var editItemsModal = Button("Order & item options");
-        editItemsModal.Name = "PosOpenItemOptionsModal";
-        editItemsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-        var kitchenModal = Button("KOT & adjustments");
-        kitchenModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
-        var billingModal = Button("Payments & billing");
-        billingModal.Name = "PosOpenPaymentModal";
-        billingModal.MinHeight = 46;
-        foreach (var button in new[] { newOrderModal, activeOrdersModal, editItemsModal })
-            quickActions.Children.Add(button);
-        kitchenActions.Children.Remove(submit);
-        quickActions.Children.Add(submit);
-        quickActions.Children.Add(kitchenModal);
-        if (cashierCard is not null) quickActions.Children.Add(billingModal);
-        ticketPanel.Children.Add(quickActions);
-        ticketPanel.Children.Add(new TextBlock
-        {
-            Text = "KOT stays linked to this order. Payment changes appear immediately after successful posting.",
-            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 6),
-            Foreground = System.Windows.Media.Brushes.SlateGray,
-        });
-        var rightScroll = new ScrollViewer
-        {
-            Name = "PosTicketIndependentScroll",
-            Content = Card(ticketPanel),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        };
-        Grid.SetColumn(rightScroll, 2);
-        root.Children.Add(rightScroll);
+        var ticketCard = Card(ticketPanel);
         root.Margin = new Thickness(0);
         root.MinHeight = 0;
 
@@ -1152,6 +1175,7 @@ internal static class OperationalActionViews
         var modalBody = new StackPanel();
         modalBody.Children.Add(formCard);
         modalBody.Children.Add(ordersCard);
+        modalBody.Children.Add(ticketCard);
         if (cashierCard is not null) modalBody.Children.Add(cashierCard);
         modalScroll.Content = modalBody;
         Grid.SetRow(modalScroll, 1);
@@ -1201,6 +1225,7 @@ internal static class OperationalActionViews
                 "items" => 1, "kitchen" => 2, _ => 0,
             };
             ordersCard.Visibility = section == "orders" ? Visibility.Visible : Visibility.Collapsed;
+            ticketCard.Visibility = section == "ticket" ? Visibility.Visible : Visibility.Collapsed;
             if (cashierCard is not null)
                 cashierCard.Visibility = section == "payment" ? Visibility.Visible : Visibility.Collapsed;
             advancedOrderActions.Visibility = section == "kitchen"
@@ -1210,6 +1235,7 @@ internal static class OperationalActionViews
             modalTitle.Text = section switch
             {
                 "orders" => "Active orders",
+                "ticket" => "Current ticket",
                 "payment" => "Payments & billing",
                 "items" => "Item options & KOT",
                 "kitchen" => "Kitchen adjustments",
@@ -1218,7 +1244,8 @@ internal static class OperationalActionViews
             modalDescription.Text = section switch
             {
                 "orders" => "Find a ticket, resume it, or start another order.",
-                "payment" => "Serve, bill, collect payment, and view current outstanding balances.",
+                "ticket" => "Review the current dishes and total. Use Send KOT in the top toolbar.",
+                "payment" => "One cashier · serve, bill and collect payment without changing screens.",
                 "items" => "Adjust quantity, modifiers, and kitchen notes before sending a KOT.",
                 "kitchen" => "Fire courses, void individual items, or cancel an order with an audit reason.",
                 _ => "Choose service type and table, then open your order.",
@@ -1232,6 +1259,7 @@ internal static class OperationalActionViews
         closeModalButton.Click += (_, _) => CloseModal();
         newOrderModal.Click += (_, _) => OpenModal("order");
         activeOrdersModal.Click += (_, _) => OpenModal("orders");
+        viewTicketModal.Click += (_, _) => OpenModal("ticket");
         editItemsModal.Click += (_, _) => OpenModal("items");
         kitchenModal.Click += (_, _) => OpenModal("kitchen");
         if (cashierCard is not null)
