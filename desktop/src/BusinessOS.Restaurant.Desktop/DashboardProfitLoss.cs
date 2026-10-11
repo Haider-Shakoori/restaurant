@@ -14,7 +14,10 @@ internal sealed record DashboardProfitLoss(
 {
     public decimal GrossProfit => Revenue - CostedFoodConsumption;
     public decimal NetOperatingProfit => GrossProfit - OperatingExpenses;
-    public bool IsComplete => UnvaluedConsumptionMovements == 0;
+    // Manual counting is an end-of-period process. Until a signed physical
+    // inventory close exists, the dashboard is a provisional operating P&L.
+    public bool IsComplete => UnvaluedConsumptionMovements == 0 &&
+        !ConsumptionMode.StartsWith("Manual", StringComparison.OrdinalIgnoreCase);
 
     public static DashboardProfitLoss Compute(
         decimal revenue,
