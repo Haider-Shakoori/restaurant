@@ -924,6 +924,7 @@ internal static class OperationalActionViews
         // Keep the live action feedback in the ticket, not at the bottom of
         // the long order-setup form.
         form.Children.Remove(status);
+        form.Children.Remove(selectionSummary);
 
         // A short, three-tab editor is easier to use than the previous
         // vertically endless POS form. Existing controls and click handlers
@@ -996,7 +997,6 @@ internal static class OperationalActionViews
         var ticketPanel = new StackPanel { Name = "PosFullscreenOrderTicket" };
         ticketPanel.Children.Add(Header("CURRENT TICKET", "Menu on the left · orders and billing one tap away."));
         // WPF cannot attach an element to two logical parents at once.
-        form.Children.Remove(selectionSummary);
         ticketPanel.Children.Add(selectionSummary);
         ticketPanel.Children.Add(currentOrderLines);
         ticketPanel.Children.Add(currentOrderTotal);
