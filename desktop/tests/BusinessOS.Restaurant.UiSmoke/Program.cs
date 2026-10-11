@@ -1101,6 +1101,17 @@ internal static class Program
         var persisted = await DesktopUiTestKitchenStatusAsync();
         Assert(persisted == "ready",
             "One-tap READY persists the correct kitchen item state");
+        var waiterChange = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            var changes = await db.Changes.AsNoTracking()
+                .Where(x => x.EntityType == "order" && x.EntityId == "ci-kot-start-order")
+                .ToArrayAsync();
+            return changes.Any(x => x.OwnerUserId == 901 &&
+                x.DataJson.Contains("\\"status\\":\\"ready\\"", StringComparison.Ordinal));
+        });
+        Assert(waiterChange,
+            "Kitchen READY publishes a waiter-scoped order/ticket snapshot for LAN mobile pickup alerts");
         Assert(FindButton(owner, "PASS EXPO") is null,
             "No unnecessary Start or Expo approval steps remain");
     }
