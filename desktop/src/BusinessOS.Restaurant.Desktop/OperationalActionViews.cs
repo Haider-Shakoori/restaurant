@@ -669,7 +669,35 @@ internal static class OperationalActionViews
             add.IsEnabled = false; // prevent accidental duplicate lines
             try
             {
-                if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open an order first.");
+                // The first menu tap can open an order automatically. For
+                // occupied tables, resume via Orders instead of creating a
+                // conflicting second order.
+                if (string.IsNullOrWhiteSpace(orderIdBox.Text))
+                {
+                    var serviceType = serviceTypeBox.SelectedItem?.ToString() ?? "dine_in";
+                    var guests = int.TryParse(guestBox.Text, out var chosenGuests) ? chosenGuests : 1;
+                    if (guests < 1 || guests > 100)
+                        throw new InvalidOperationException("Guests must be between 1 and 100.");
+                    string? tableId = null;
+                    var branchId = string.Empty;
+                    if (serviceType == "dine_in")
+                    {
+                        if (tableBox.SelectedItem is not Choice selectedTable)
+                            throw new InvalidOperationException("Choose a table before adding the first dish.");
+                        tableId = selectedTable.Id;
+                    }
+                    else
+                    {
+                        if (orderBranchBox.SelectedItem is not Choice branch)
+                            throw new InvalidOperationException("Choose a branch before adding the first dish.");
+                        branchId = branch.Id;
+                    }
+                    var refText = serviceReferenceBox.Text.Trim();
+                    orderIdBox.Text = await DesktopUiWork.RunAsync(() =>
+                        workflow.OpenOrderAsync(serviceType, tableId, branchId,
+                            string.IsNullOrWhiteSpace(refText) ? null : refText, guests));
+                    await RefreshPosStateAsync();
+                }
                 if (menuBox.SelectedItem is not MenuChoice item) throw new InvalidOperationException("Select a menu item.");
                 if (!int.TryParse(qtyBox.Text, out var qty) || qty < 1)
                     throw new InvalidOperationException("Enter a positive item quantity.");
@@ -822,7 +850,7 @@ internal static class OperationalActionViews
             var awaiting = lines.Count(x => x.Status is "pending" or "held");
             selectionSummary.Text = order is null
                 ? $"Order {orderIdBox.Text} · {lines.Length} line(s) · {awaiting} awaiting KOT"
-                : $"{order.ServiceType.Replace('_', ' ')} · {order.Status} · AFN {order.Total:N2} · " +
+                : $"{order.ServiceType.Replace('_', ' ')} · {order.GuestCount} guest(s) · {order.Status} · AFN {order.Total:N2} · " +
                   $"{lines.Length} line(s), {awaiting} awaiting KOT";
             lineBox.ItemsSource = lines;
             currentOrderLines.ItemsSource = lines;
@@ -1037,6 +1065,10 @@ internal static class OperationalActionViews
         editItemsModal.Name = "PosOpenItemOptionsModal";
         editItemsModal.ToolTip = "F6 · Item modifiers and kitchen notes";
         editItemsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var addGuestsModal = Button("+ Guests");
+        addGuestsModal.Name = "PosOpenAddGuestsModal";
+        addGuestsModal.ToolTip = "Add people to the same table and existing KOT order";
+        addGuestsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var kitchenModal = Button("KOT actions");
         kitchenModal.Name = "PosOpenKitchenModal";
         kitchenModal.ToolTip = "F7 · Kitchen changes, course firing and voids";
@@ -1060,6 +1092,7 @@ internal static class OperationalActionViews
         kitchenActions.Children.Remove(submit);
         submit.MinHeight = 40;
         quickActions.Children.Add(submit);
+        quickActions.Children.Add(addGuestsModal);
         kitchenModal.MinHeight = 40;
         quickActions.Children.Add(kitchenModal);
         if (cashierCard is not null) quickActions.Children.Add(billingModal);
@@ -1190,10 +1223,30 @@ internal static class OperationalActionViews
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Padding = new Thickness(22, 0, 22, 12),
         };
+        var guestsPanel = new StackPanel { Margin = new Thickness(8, 4, 8, 12) };
+        guestsPanel.Children.Add(Header("Add guests", "Keep the same table, order and earlier KOT rounds."));
+        var guestsHint = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 10) };
+        guestsPanel.Children.Add(guestsHint);
+        guestsPanel.Children.Add(Label("Additional guests arriving"));
+        var additionalGuests = new TextBox
+        {
+            Name = "PosAdditionalGuestCount", Text = "1", Height = 42,
+            Margin = new Thickness(0, 6, 0, 12),
+        };
+        guestsPanel.Children.Add(additionalGuests);
+        var guestStatus = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 5, 0, 10) };
+        var saveGuests = Button("Add guests to this table");
+        saveGuests.Name = "PosSaveAdditionalGuests";
+        saveGuests.MinHeight = 46;
+        guestsPanel.Children.Add(saveGuests);
+        guestsPanel.Children.Add(guestStatus);
+        var guestsCard = Card(guestsPanel);
+
         var modalBody = new StackPanel();
         modalBody.Children.Add(formCard);
         modalBody.Children.Add(ordersCard);
         modalBody.Children.Add(ticketCard);
+        modalBody.Children.Add(guestsCard);
         if (cashierCard is not null) modalBody.Children.Add(cashierCard);
         modalScroll.Content = modalBody;
         Grid.SetRow(modalScroll, 1);
@@ -1244,6 +1297,7 @@ internal static class OperationalActionViews
             };
             ordersCard.Visibility = section == "orders" ? Visibility.Visible : Visibility.Collapsed;
             ticketCard.Visibility = section == "ticket" ? Visibility.Visible : Visibility.Collapsed;
+            guestsCard.Visibility = section == "guests" ? Visibility.Visible : Visibility.Collapsed;
             if (cashierCard is not null)
                 cashierCard.Visibility = section == "payment" ? Visibility.Visible : Visibility.Collapsed;
             advancedOrderActions.Visibility = section == "kitchen"
@@ -1254,6 +1308,7 @@ internal static class OperationalActionViews
             {
                 "orders" => "Active orders",
                 "ticket" => "Current ticket",
+                "guests" => "Add guests",
                 "payment" => "Payments & billing",
                 "items" => "Item options & KOT",
                 "kitchen" => "Kitchen adjustments",
@@ -1263,6 +1318,7 @@ internal static class OperationalActionViews
             {
                 "orders" => "Find a ticket, resume it, or start another order.",
                 "ticket" => "Review the current dishes and total. Use Send KOT in the top toolbar.",
+                "guests" => "Add people to the occupied table; existing orders and kitchen rounds stay intact.",
                 "payment" => "One cashier · serve, bill and collect payment without changing screens.",
                 "items" => "Adjust quantity, modifiers, and kitchen notes before sending a KOT.",
                 "kitchen" => "Fire courses, void individual items, or cancel an order with an audit reason.",
@@ -1272,6 +1328,7 @@ internal static class OperationalActionViews
             {
                 "payment" => 670d,
                 "ticket" => 590d,
+                "guests" => 560d,
                 "order" => 700d,
                 "orders" => 820d,
                 "items" => 780d,
@@ -1290,6 +1347,45 @@ internal static class OperationalActionViews
         activeOrdersModal.Click += (_, _) => OpenModal("orders");
         viewTicketModal.Click += (_, _) => OpenModal("ticket");
         editItemsModal.Click += (_, _) => OpenModal("items");
+        addGuestsModal.Click += (_, _) =>
+        {
+            var order = orders.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text);
+            guestsHint.Text = order is null
+                ? "Choose an active dine-in order from Orders before adding guests."
+                : $"Current guests: {order.GuestCount}. New guests join the same order and table.";
+            additionalGuests.Text = "1";
+            guestStatus.Text = string.Empty;
+            OpenModal("guests");
+        };
+        saveGuests.Click += async (_, _) =>
+        {
+            if (!saveGuests.IsEnabled) return;
+            saveGuests.IsEnabled = false;
+            try
+            {
+                var order = orders.FirstOrDefault(x => x.ClientOrderId == orderIdBox.Text)
+                    ?? throw new InvalidOperationException("Select an active dine-in order first.");
+                if (order.ServiceType != "dine_in" || order.Status is "closed" or "cancelled" or "billed")
+                    throw new InvalidOperationException("Guests can only be added to an unbilled dine-in order.");
+                if (!int.TryParse(additionalGuests.Text, out var joining) || joining < 1)
+                    throw new InvalidOperationException("Enter a positive number of additional guests.");
+                var newTotal = checked(order.GuestCount + joining);
+                // The workflow validates actual table capacity and sends an
+                // idempotent LAN guest count mutation.
+                await DesktopUiWork.RunAsync(() =>
+                    workflow.UpdateGuestsAsync(order.ClientOrderId, newTotal));
+                await RefreshPosStateAsync();
+                guestStatus.Text = $"Updated to {newTotal} guests. New dishes will go in the next KOT round.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, guestStatus.Text);
+                CloseModal();
+            }
+            catch (Exception ex)
+            {
+                guestStatus.Text = ex.Message;
+                App.LogRecoverableException("pos-add-guests", ex);
+            }
+            finally { saveGuests.IsEnabled = true; }
+        };
         kitchenModal.Click += (_, _) => OpenModal("kitchen");
         if (cashierCard is not null)
             billingModal.Click += (_, _) => OpenModal("payment");
