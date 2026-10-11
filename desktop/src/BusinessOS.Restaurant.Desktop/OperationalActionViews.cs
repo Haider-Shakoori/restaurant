@@ -236,6 +236,8 @@ internal static class OperationalActionViews
 
         var add = Button("Add item");
         var submit = Button("Send new KOT round");
+        submit.Name = "PosSendKotButton";
+        submit.ToolTip = "F9 · Send unsent items to the kitchen";
         add.MinHeight = 44;
         submit.MinHeight = 44;
         var kitchenActions = new WrapPanel { Margin = new Thickness(0, 8, 0, 6) };
@@ -1023,19 +1025,26 @@ internal static class OperationalActionViews
         // remains available in a modal rather than occupying a permanent rail.
         var newOrderModal = Button("+ New order");
         newOrderModal.Name = "PosOpenNewOrderModal";
+        newOrderModal.ToolTip = "F2 · Open a new order";
         var activeOrdersModal = Button("Orders");
         activeOrdersModal.Name = "PosOpenActiveOrdersModal";
+        activeOrdersModal.ToolTip = "F3 · Find or resume an order";
         activeOrdersModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var viewTicketModal = Button("View ticket");
         viewTicketModal.Name = "PosOpenTicketModal";
+        viewTicketModal.ToolTip = "F4 · Inspect the current ticket";
         viewTicketModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var editItemsModal = Button("Item options");
         editItemsModal.Name = "PosOpenItemOptionsModal";
+        editItemsModal.ToolTip = "F6 · Item modifiers and kitchen notes";
         editItemsModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var kitchenModal = Button("KOT actions");
+        kitchenModal.Name = "PosOpenKitchenModal";
+        kitchenModal.ToolTip = "F7 · Kitchen changes, course firing and voids";
         kitchenModal.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var billingModal = Button("Payments");
         billingModal.Name = "PosOpenPaymentModal";
+        billingModal.ToolTip = "F8 · Payments and billing";
         billingModal.MinHeight = 42;
 
         var quickActions = new WrapPanel
