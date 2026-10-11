@@ -551,12 +551,17 @@ internal static class OperationalActionViews
                         .Where(x => x.Id == bill.Id)
                         .Select(x => x.BranchId)
                         .SingleAsync().ConfigureAwait(false);
-                    var existingSessionId = await db.CashierSessions.AsNoTracking()
+                    // SQLite cannot order DateTimeOffset in SQL; materialize
+                    // the small active-session set before sorting by time.
+                    var matchingSessions = await db.CashierSessions.AsNoTracking()
                         .Where(x => x.BranchId == branchId &&
                                     x.CashierUserId == actor.UserId &&
                                     x.Status == "open")
+                        .Select(x => new { x.Id, x.OpenedAt })
+                        .ToListAsync().ConfigureAwait(false);
+                    var existingSessionId = matchingSessions
                         .OrderByDescending(x => x.OpenedAt)
-                        .Select(x => x.Id).FirstOrDefaultAsync().ConfigureAwait(false);
+                        .Select(x => x.Id).FirstOrDefault();
                     return (BranchId: branchId, SessionId: existingSessionId);
                 });
                 // First checkout creates the signed-in cashier's shift with
