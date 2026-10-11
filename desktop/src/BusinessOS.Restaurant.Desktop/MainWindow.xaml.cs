@@ -311,9 +311,9 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             App.LogRecoverableException("switch-operator", exception);
-            MessageBox.Show(
+            DesktopGlassDialog.Notice(
                 "Could not switch operator. Your existing workspace is unchanged.",
-                "BusinessOS Restaurant", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "BusinessOS Restaurant", this);
         }
     }
 
@@ -332,12 +332,10 @@ public partial class MainWindow : Window
         {
             _initialized = false;
             App.LogRecoverableException("Main window initialization", exception);
-            MessageBox.Show(
+            DesktopGlassDialog.Notice(
                 "Restaurant Desktop could not finish loading this screen. The application will remain open.\n\n" +
                 "A diagnostic log was written under LocalAppData\\BusinessOS\\Restaurant\\logs.",
-                "BusinessOS Restaurant",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                "BusinessOS Restaurant", this);
         }
     }
 }
