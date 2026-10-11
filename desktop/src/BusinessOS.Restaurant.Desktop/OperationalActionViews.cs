@@ -405,11 +405,11 @@ internal static class OperationalActionViews
         var payRow = new WrapPanel(); payRow.Children.Add(paymentMethod); payRow.Children.Add(amountBox); var pay = Button("Post payment"); var receipt = Button("Queue receipt"); payRow.Children.Add(pay); payRow.Children.Add(receipt); cashier.Children.Add(payRow);
         cashier.Children.Add(cashierStatus);
 
-        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await workflow.OpenCashierSessionAsync(b.Id, cash); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.ServeOrderAsync(o.Id); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await workflow.CreateBillAsync(o.Id); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount"); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
-        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await workflow.CreateEqualSplitsAsync(b.Id, count); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        openSession.Click += async (_, _) => { try { if (branchBox.SelectedItem is not Choice b) throw new InvalidOperationException("Select a branch."); if (!decimal.TryParse(openingCash.Text, out var cash)) throw new InvalidOperationException("Enter opening cash."); await DesktopUiWork.RunAsync(() => workflow.OpenCashierSessionAsync(b.Id, cash)); cashierStatus.Text = "Cashier session opened. Refresh to load it."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        serve.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await DesktopUiWork.RunAsync(() => workflow.ServeOrderAsync(o.Id)); cashierStatus.Text = "Order served; recipe inventory consumption recorded."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        issue.Click += async (_, _) => { try { if (orderBox.SelectedItem is not OrderChoice o) throw new InvalidOperationException("Select an order."); await DesktopUiWork.RunAsync(() => workflow.CreateBillAsync(o.Id)); cashierStatus.Text = "Bill issued. Refresh to load it for payment."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        discount.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!decimal.TryParse(discountBox.Text, out var value)) throw new InvalidOperationException("Enter discount percent."); await DesktopUiWork.RunAsync(() => workflow.ApplyDiscountAsync(b.Id, "percent", value, "Desktop cashier discount")); cashierStatus.Text = "Discount applied."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        split.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); if (!int.TryParse(splitCountBox.Text, out var count)) throw new InvalidOperationException("Enter split count."); await DesktopUiWork.RunAsync(() => workflow.CreateEqualSplitsAsync(b.Id, count)); cashierStatus.Text = $"Bill split into {count} parts."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
         // AddPaymentAsync creates a fresh client payment ID per invocation.
         // Lock the button on successful posting until this cashier page is refreshed;
         // repeated clicks must never create a second payment intent.
@@ -427,8 +427,8 @@ internal static class OperationalActionViews
                     throw new InvalidOperationException("Select an open cashier session.");
                 if (!decimal.TryParse(amountBox.Text, out var amount) || amount <= 0)
                     throw new InvalidOperationException("Enter a positive payment amount.");
-                await workflow.AddPaymentAsync(bill.Id, session.Id, amount,
-                    paymentMethod.SelectedItem?.ToString() ?? "cash");
+                var method = paymentMethod.SelectedItem?.ToString() ?? "cash";
+                await DesktopUiWork.RunAsync(() => workflow.AddPaymentAsync(bill.Id, session.Id, amount, method));
                 posted = true;
                 cashierStatus.Text = "Payment posted. Refresh the cashier workspace before entering another payment.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
@@ -444,7 +444,7 @@ internal static class OperationalActionViews
                 if (!posted) pay.IsEnabled = true;
             }
         };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await workflow.QueueReceiptAsync(b.Id); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(b.Id)); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
 
         // Register mutation handlers after all POS search/list/cashier controls exist.
         open.Click += async (_, _) =>
@@ -471,12 +471,10 @@ internal static class OperationalActionViews
                     branchId = branch.Id;
                 }
 
-                orderIdBox.Text = await workflow.OpenOrderAsync(
-                    serviceType,
-                    tableId,
-                    branchId,
-                    string.IsNullOrWhiteSpace(serviceReferenceBox.Text) ? null : serviceReferenceBox.Text.Trim(),
-                    guests);
+                var reference = string.IsNullOrWhiteSpace(serviceReferenceBox.Text)
+                    ? null : serviceReferenceBox.Text.Trim();
+                orderIdBox.Text = await DesktopUiWork.RunAsync(() => workflow.OpenOrderAsync(
+                    serviceType, tableId, branchId, reference, guests));
 
                 await RefreshPosStateAsync();
                 status.Text = "Order opened locally. Add items, or resume it later from the active orders list.";
@@ -518,19 +516,17 @@ internal static class OperationalActionViews
                     .Select(x => x.OptionId)
                     .ToArray();
 
-                var clientLineId = await workflow.AddItemDetailedAsync(
-                    orderIdBox.Text,
-                    item.Id,
-                    qty,
-                    string.IsNullOrWhiteSpace(itemNotesBox.Text) ? null : itemNotesBox.Text.Trim(),
-                    seat,
-                    course,
-                    string.IsNullOrWhiteSpace(courseNameBox.Text) ? null : courseNameBox.Text.Trim(),
-                    heldBox.IsChecked == true,
-                    rushBox.IsChecked == true ? "rush" : "normal",
-                    string.IsNullOrWhiteSpace(allergyBox.Text) ? null : allergyBox.Text.Trim(),
-                    string.IsNullOrWhiteSpace(kitchenInstructionsBox.Text) ? null : kitchenInstructionsBox.Text.Trim(),
-                    selectedModifiers);
+                var clientOrderId = orderIdBox.Text;
+                var notes = string.IsNullOrWhiteSpace(itemNotesBox.Text) ? null : itemNotesBox.Text.Trim();
+                var courseName = string.IsNullOrWhiteSpace(courseNameBox.Text) ? null : courseNameBox.Text.Trim();
+                var held = heldBox.IsChecked == true;
+                var priority = rushBox.IsChecked == true ? "rush" : "normal";
+                var allergy = string.IsNullOrWhiteSpace(allergyBox.Text) ? null : allergyBox.Text.Trim();
+                var kitchenInstructions = string.IsNullOrWhiteSpace(kitchenInstructionsBox.Text)
+                    ? null : kitchenInstructionsBox.Text.Trim();
+                var clientLineId = await DesktopUiWork.RunAsync(() => workflow.AddItemDetailedAsync(
+                    clientOrderId, item.Id, qty, notes, seat, course, courseName, held, priority,
+                    allergy, kitchenInstructions, selectedModifiers));
 
                 await RefreshPosStateAsync();
                 lineBox.SelectedItem = orderLines.FirstOrDefault(x => x.ClientLineId == clientLineId);
@@ -556,7 +552,8 @@ internal static class OperationalActionViews
             {
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text))
                     throw new InvalidOperationException("Open an order first.");
-                await workflow.SendKotAsync(orderIdBox.Text);
+                var clientOrderId = orderIdBox.Text;
+                await DesktopUiWork.RunAsync(() => workflow.SendKotAsync(clientOrderId));
                 await RefreshPosStateAsync();
                 status.Text = "New KOT round sent. Previously sent items were not duplicated.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
@@ -579,7 +576,8 @@ internal static class OperationalActionViews
             {
                 if (string.IsNullOrWhiteSpace(orderIdBox.Text)) throw new InvalidOperationException("Open/select an order first.");
                 if (!int.TryParse(fireCourseBox.Text, out var courseNumber)) throw new InvalidOperationException("Enter a course number.");
-                await workflow.FireCourseAsync(orderIdBox.Text, courseNumber);
+                var clientOrderId = orderIdBox.Text;
+                await DesktopUiWork.RunAsync(() => workflow.FireCourseAsync(clientOrderId, courseNumber));
                 await RefreshPosStateAsync();
                 status.Text = $"Course {courseNumber} fired as a new KOT round.";
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
@@ -600,7 +598,8 @@ internal static class OperationalActionViews
                 voidLine.IsEnabled = false;
                 try
                 {
-                    await workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, voidReasonBox.Text.Trim());
+                    var reason = voidReasonBox.Text.Trim();
+                    await DesktopUiWork.RunAsync(() => workflow.VoidOrderItemAsync(line.ClientOrderId, line.ClientLineId, reason));
                     await RefreshPosStateAsync();
                 }
                 finally
@@ -626,7 +625,9 @@ internal static class OperationalActionViews
                 cancelOrder.IsEnabled = false;
                 try
                 {
-                    await workflow.CancelOrderAsync(orderIdBox.Text, voidReasonBox.Text.Trim());
+                    var clientOrderId = orderIdBox.Text;
+                    var reason = voidReasonBox.Text.Trim();
+                    await DesktopUiWork.RunAsync(() => workflow.CancelOrderAsync(clientOrderId, reason));
                     orderIdBox.Clear();
                     await RefreshPosStateAsync();
                 }
@@ -736,8 +737,10 @@ internal static class OperationalActionViews
             try
             {
                 var focused = orderIdBox.Text;
-                await using var freshDb = factory.Create();
-                var latestOrders = (await freshDb.Orders.AsNoTracking()
+                var latestData = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var freshDb = factory.Create();
+                    var latestOrders = (await freshDb.Orders.AsNoTracking()
                         .Where(x => x.Status != "closed")
                         .Select(x => new
                         {
@@ -758,6 +761,10 @@ internal static class OperationalActionViews
                             line.CreatedAtUtc,
                         }).ToListAsync())
                     .OrderBy(x => x.CreatedAtUtc).Select(x => x.Row).ToArray();
+                    return (Orders: latestOrders, Lines: latestLines);
+                });
+                var latestOrders = latestData.Orders;
+                var latestLines = latestData.Lines;
                 orders.Clear();
                 orders.AddRange(latestOrders);
                 orderLines.Clear();
