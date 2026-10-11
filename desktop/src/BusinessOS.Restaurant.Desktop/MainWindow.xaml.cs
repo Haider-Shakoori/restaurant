@@ -155,7 +155,7 @@ public partial class MainWindow : Window
         var pos = _viewModel.CurrentRoute == "pos";
         var keys = pos
             ? "F1  Shortcut guide\nF2  New order\nF3  Active orders\nF4  View ticket\nF5  Refresh POS\nF6  Item options\nF7  KOT actions\nF8  Payments\nF9  Send KOT\nF11  Full screen / restore\nCtrl+F  Search menu\nEsc  Close dialog / restore window"
-            : "F1  Shortcut guide\nF2  Start first queued item\nF3  Mark first preparing item Ready\nF4  Pass first Ready item to Expo\nF5  Refresh Kitchen board\nF11  Full screen / restore\nEsc  Restore normal window";
+            : "F1  Shortcut guide\nF2  Advance selected KOT dish (Ready / Start / Expo)\nF5  Refresh Kitchen board\nF5  Refresh Kitchen board\nF11  Full screen / restore\nEsc  Restore normal window";
         var panel = new StackPanel { Margin = new Thickness(20) };
         panel.Children.Add(new TextBlock
         {
