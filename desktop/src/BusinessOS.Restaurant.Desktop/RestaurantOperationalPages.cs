@@ -2227,38 +2227,33 @@ internal static class RestaurantOperationalPages
         workflowHelp.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         workflowPanel.Children.Add(workflowHelp);
 
+        // One-touch KOT is the restaurant's default operational process.
+        // Remove the old Preparing/Expo choices rather than making operators
+        // discover a setting before the READY button appears.
         var readyOnly = new CheckBox
         {
             Name = "SettingsReadyOnlyKot",
-            Content = "Ready-only KOT (recommended: tap READY and notify waiter)",
-            IsChecked = !workflowSettings.PreparingStageEnabled && !workflowSettings.ExpoEnabled,
+            Content = "One-touch KOT: READY alerts the waiter (always enabled)",
+            IsChecked = true,
+            IsEnabled = false,
             Margin = new Thickness(0, 10, 0, 6),
             FontWeight = FontWeights.SemiBold,
         };
-        var workflowModeHint = new TextBlock
-        {
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(18, 0, 0, 12),
-        };
-        workflowModeHint.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
         var queue = new CheckBox
         {
-            Content = "Kitchen Queue",
-            IsChecked = workflowSettings.KitchenQueueEnabled,
+            Content = "Kitchen queue", IsChecked = workflowSettings.KitchenQueueEnabled,
             Margin = new Thickness(0, 5, 0, 5),
         };
-        var preparing = new CheckBox
+        workflowPanel.Children.Add(readyOnly);
+        workflowPanel.Children.Add(new TextBlock
         {
-            Content = "Preparing stage",
-            IsChecked = workflowSettings.PreparingStageEnabled,
-            Margin = new Thickness(0, 5, 0, 5),
-        };
-        var expo = new CheckBox
-        {
-            Content = "Expo stage",
-            IsChecked = workflowSettings.ExpoEnabled,
-            Margin = new Thickness(0, 5, 0, 5),
-        };
+            Text = "New and existing KOT: QUEUED → READY → waiter pickup. No START or EXPO steps. " +
+                   "Mobile staff receive the alert after LAN/cloud synchronization.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(18, 0, 0, 12),
+        });
+        workflowPanel.Children.Add(queue);
+
         var courses = new CheckBox
         {
             Content = "Course firing",
@@ -2381,8 +2376,8 @@ internal static class RestaurantOperationalPages
                 saveWorkflow.IsEnabled = false;
                 var update = new RestaurantWorkflowSettingsUpdate(
                     queue.IsChecked == true,
-                    readyOnly.IsChecked != true && preparing.IsChecked == true,
-                    readyOnly.IsChecked != true && expo.IsChecked == true,
+                    false, // Ready-only KOT has no START action.
+                    false, // Expo is not part of the restaurant's workflow.
                     courses.IsChecked == true,
                     sound.IsChecked == true,
                     warningMinutes,
@@ -2395,7 +2390,7 @@ internal static class RestaurantOperationalPages
 
                 workflowStatus.Text =
                     $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
-                    $"KOT {(updated.PreparingStageEnabled ? (updated.ExpoEnabled ? "START → EXPO → READY" : "START → READY") : "READY-only")} · " +
+                    $"KOT READY-only · " +
                     $"Negative stock {updated.NegativeStockPolicy.ToUpperInvariant()}.";
             }
             catch (Exception ex)
