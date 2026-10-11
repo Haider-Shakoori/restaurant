@@ -136,6 +136,36 @@ internal static class RestaurantOperationalPages
             now, billRows.Select(x => (x.IssuedAt, x.Total)));
         var sales = salesTrend.Total;
 
+        // Cash received is not revenue; stock purchases are not the cost of
+        // food until consumption is recorded. A missing historical recipe
+        // unit cost must never be silently mistaken for zero.
+        var dailyProfit = await DesktopUiWork.RunAsync(async () =>
+        {
+            await using var accounting = factory.Create();
+            var since = salesTrend.BusinessDay;
+            var expenses = await accounting.Expenses.AsNoTracking()
+                .Where(x => x.ExpenseDate == since)
+                .Select(x => x.Amount).ToListAsync();
+            var cashRows = await accounting.Payments.AsNoTracking()
+                .Where(x => x.Status == "completed" || x.Status == "accepted")
+                .Select(x => new { x.ReceivedAt, x.Amount })
+                .ToListAsync();
+            var usedRows = await accounting.StockMovements.AsNoTracking()
+                .Where(x => x.MovementType == "consumption")
+                .Select(x => new { x.SourceType, x.QuantityDelta, x.UnitCost, x.OccurredAt })
+                .ToListAsync();
+            var flags = await accounting.ModuleSettings.AsNoTracking().ToListAsync();
+            var recipe = flags.FirstOrDefault(x => x.Key == "automatic_recipe_consumption_enabled")?.Value;
+            var mode = recipe is "true" or "1" ? "Recipe" : "Manual physical count";
+            return DashboardProfitLoss.Compute(
+                sales,
+                usedRows.Where(x => DateOnly.FromDateTime(x.OccurredAt.LocalDateTime) == since)
+                    .Select(x => (x.SourceType, x.QuantityDelta, x.UnitCost)),
+                expenses.Sum(), cashRows
+                    .Where(x => DateOnly.FromDateTime(x.ReceivedAt.LocalDateTime) == since)
+                    .Sum(x => x.Amount), mode);
+        });
+
         // Read-only, branch-aware inventory alerts from the same local database as
         // the Inventory screen. No synthetic zero balances for uninitialized branches.
         var stockBalances = await (
@@ -154,6 +184,23 @@ internal static class RestaurantOperationalPages
         var root = new StackPanel();
 
         root.Children.Add(DashboardQuickActions());
+
+        var netLabel = dailyProfit.IsComplete
+            ? $"AFN {dailyProfit.NetOperatingProfit:N2}"
+            : $"AFN {dailyProfit.NetOperatingProfit:N2}*";
+        root.Children.Add(DashboardPanel(
+            "Profit & Loss · Today",
+            $"Billed revenue and actual ingredient use · {dailyProfit.ConsumptionMode} costing",
+            BuildStatusRows(
+                ("Billed revenue", $"AFN {dailyProfit.Revenue:N2}"),
+                ("Ingredient consumption (valued)", $"AFN {dailyProfit.CostedFoodConsumption:N2}"),
+                ("Gross profit (valued)", $"AFN {dailyProfit.GrossProfit:N2}"),
+                ("Other expenses", $"AFN {dailyProfit.OperatingExpenses:N2}"),
+                ("Operating P&L", netLabel),
+                ("Cash collected (separate)", $"AFN {dailyProfit.CashCollected:N2}"),
+                ("Accounting basis", dailyProfit.IsComplete
+                    ? "Consumed stock, not purchased stock"
+                    : $"PROVISIONAL · {dailyProfit.UnvaluedConsumptionMovements} historical ingredient use entries lack cost"))));
 
         root.Children.Add(DashboardCards(
             ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
