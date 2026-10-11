@@ -112,76 +112,82 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> DashboardAsync(LanDiagnosticsViewModel diagnostics)
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
-
-        var now = DateTimeOffset.Now;
-        // Cancelled orders and unavailable/reserved tables are not active service.
-        var openOrders = await db.Orders.CountAsync(x =>
-            x.Status != "closed" && x.Status != "cancelled");
-        var activeTables = await (from table in db.DiningTables.AsNoTracking()
-            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
-            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
-            where table.IsActive && area.IsActive && branch.IsActive && table.Status == "occupied"
-            select table.Id).CountAsync();
-        var activeKot = await db.KitchenTickets.CountAsync(x =>
-            x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
-        // Read only bill timestamps and totals; interpret the business day in local time.
-        // The chart uses exactly the same billed totals as the headline (never sample points).
-        var billRows = await db.Bills.AsNoTracking()
-            .Select(x => new { x.IssuedAt, x.Total })
-            .ToListAsync();
-        var salesTrend = DashboardSalesTrend.Aggregate(
-            now, billRows.Select(x => (x.IssuedAt, x.Total)));
-        var sales = salesTrend.Total;
-
-        // Cash received is not revenue; stock purchases are not the cost of
-        // food until consumption is recorded. A missing historical recipe
-        // unit cost must never be silently mistaken for zero.
-        var dailyProfit = await DesktopUiWork.RunAsync(async () =>
+        var workspaceData = await DesktopUiWork.RunAsync(async () =>
         {
-            await using var accounting = factory.Create();
-            var since = salesTrend.BusinessDay;
-            var expenses = await accounting.Expenses.AsNoTracking()
-                .Where(x => x.ExpenseDate == since)
-                .Select(x => x.Amount).ToListAsync();
-            var cashRows = await accounting.Payments.AsNoTracking()
-                .Where(x => x.Status == "posted")
-                .Select(x => new { x.ReceivedAt, x.Amount })
-                .ToListAsync();
-            var usedRows = await accounting.StockMovements.AsNoTracking()
-                .Where(x => x.MovementType == "consumption")
-                .Select(x => new { x.SourceType, x.QuantityDelta, x.UnitCost, x.OccurredAt })
-                .ToListAsync();
-            var recipe = await accounting.RestaurantSettings.AsNoTracking()
-                .Where(x => x.Key == "automatic_recipe_consumption_enabled")
-                .Select(x => x.Value).FirstOrDefaultAsync();
-            var mode = recipe is null || recipe.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                recipe == "1" ? "Recipe" : "Manual physical count";
-            return DashboardProfitLoss.Compute(
-                sales,
-                usedRows.Where(x => DateOnly.FromDateTime(x.OccurredAt.LocalDateTime) == since)
-                    .Select(x => (x.SourceType, x.QuantityDelta, x.UnitCost)),
-                expenses.Sum(), cashRows
-                    .Where(x => DateOnly.FromDateTime(x.ReceivedAt.LocalDateTime) == since)
-                    .Sum(x => x.Amount), mode);
-        });
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
 
-        // Read-only, branch-aware inventory alerts from the same local database as
-        // the Inventory screen. No synthetic zero balances for uninitialized branches.
-        var stockBalances = await (
-            from balance in db.InventoryBalances.AsNoTracking()
-            join item in db.InventoryItems.AsNoTracking()
-                on balance.InventoryItemId equals item.Id
-            join branch in db.Branches.AsNoTracking()
-                on balance.BranchId equals branch.Id
-            where item.IsActive && branch.IsActive
-            select new DashboardStockBalance(
-                branch.Name, item.Name, item.BaseUnit, balance.Quantity, item.ReorderLevel))
-            .ToListAsync();
-        var stockAlerts = DashboardStockAlerts.Find(stockBalances);
-        var trackedReorderBalances = stockBalances.Count(row => row.ReorderLevel > 0m);
+            var now = DateTimeOffset.Now;
+            // Cancelled orders and unavailable/reserved tables are not active service.
+            var openOrders = await db.Orders.CountAsync(x =>
+                x.Status != "closed" && x.Status != "cancelled");
+            var activeTables = await (from table in db.DiningTables.AsNoTracking()
+                join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                where table.IsActive && area.IsActive && branch.IsActive && table.Status == "occupied"
+                select table.Id).CountAsync();
+            var activeKot = await db.KitchenTickets.CountAsync(x =>
+                x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
+            // Read only bill timestamps and totals; interpret the business day in local time.
+            // The chart uses exactly the same billed totals as the headline (never sample points).
+            var billRows = await db.Bills.AsNoTracking()
+                .Select(x => new { x.IssuedAt, x.Total })
+                .ToListAsync();
+            var salesTrend = DashboardSalesTrend.Aggregate(
+                now, billRows.Select(x => (x.IssuedAt, x.Total)));
+            var sales = salesTrend.Total;
+
+            // Cash received is not revenue; stock purchases are not the cost of
+            // food until consumption is recorded. A missing historical recipe
+            // unit cost must never be silently mistaken for zero.
+            var dailyProfit = await DesktopUiWork.RunAsync(async () =>
+            {
+                await using var accounting = factory.Create();
+                var since = salesTrend.BusinessDay;
+                var expenses = await accounting.Expenses.AsNoTracking()
+                    .Where(x => x.ExpenseDate == since)
+                    .Select(x => x.Amount).ToListAsync();
+                var cashRows = await accounting.Payments.AsNoTracking()
+                    .Where(x => x.Status == "posted")
+                    .Select(x => new { x.ReceivedAt, x.Amount })
+                    .ToListAsync();
+                var usedRows = await accounting.StockMovements.AsNoTracking()
+                    .Where(x => x.MovementType == "consumption")
+                    .Select(x => new { x.SourceType, x.QuantityDelta, x.UnitCost, x.OccurredAt })
+                    .ToListAsync();
+                var recipe = await accounting.RestaurantSettings.AsNoTracking()
+                    .Where(x => x.Key == "automatic_recipe_consumption_enabled")
+                    .Select(x => x.Value).FirstOrDefaultAsync();
+                var mode = recipe is null || recipe.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                    recipe == "1" ? "Recipe" : "Manual physical count";
+                return DashboardProfitLoss.Compute(
+                    sales,
+                    usedRows.Where(x => DateOnly.FromDateTime(x.OccurredAt.LocalDateTime) == since)
+                        .Select(x => (x.SourceType, x.QuantityDelta, x.UnitCost)),
+                    expenses.Sum(), cashRows
+                        .Where(x => DateOnly.FromDateTime(x.ReceivedAt.LocalDateTime) == since)
+                        .Sum(x => x.Amount), mode);
+            });
+
+            // Read-only, branch-aware inventory alerts from the same local database as
+            // the Inventory screen. No synthetic zero balances for uninitialized branches.
+            var stockBalances = await (
+                from balance in db.InventoryBalances.AsNoTracking()
+                join item in db.InventoryItems.AsNoTracking()
+                    on balance.InventoryItemId equals item.Id
+                join branch in db.Branches.AsNoTracking()
+                    on balance.BranchId equals branch.Id
+                where item.IsActive && branch.IsActive
+                select new DashboardStockBalance(
+                    branch.Name, item.Name, item.BaseUnit, balance.Quantity, item.ReorderLevel))
+                .ToListAsync();
+            var stockAlerts = DashboardStockAlerts.Find(stockBalances);
+            var trackedReorderBalances = stockBalances.Count(row => row.ReorderLevel > 0m);
+
+            return (now, openOrders, activeTables, activeKot, salesTrend, sales, dailyProfit, stockBalances, stockAlerts, trackedReorderBalances);
+        });
+        var (now, openOrders, activeTables, activeKot, salesTrend, sales, dailyProfit, stockBalances, stockAlerts, trackedReorderBalances) = workspaceData;
 
         var root = new StackPanel();
 
@@ -382,14 +388,20 @@ internal static class RestaurantOperationalPages
 
     private static async Task<FrameworkElement> MenuAsync(bool recipesOnly = false)
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
-        var rows = await (from item in db.MenuItems.AsNoTracking()
-                          join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into categories
-                          from category in categories.DefaultIfEmpty()
-                          orderby item.SortOrder, item.Name
-                          select new MenuRow(item.Sku ?? "", item.Name, category == null ? "Uncategorized" : category.Name, item.Price, item.Currency, item.IsAvailable)).ToListAsync();
+        var workspaceData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var rows = await (from item in db.MenuItems.AsNoTracking()
+                              join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into categories
+                              from category in categories.DefaultIfEmpty()
+                              orderby item.SortOrder, item.Name
+                              select new MenuRow(item.Sku ?? "", item.Name, category == null ? "Uncategorized" : category.Name, item.Price, item.Currency, item.IsAvailable)).ToListAsync();
+            return (factory, rows);
+        });
+        var (factory, rows) = workspaceData;
+
         var grid = GridFor(rows);
         grid.Columns.Add(Column("SKU", nameof(MenuRow.Sku), 130));
         grid.Columns.Add(Column("Item", nameof(MenuRow.Name), 260));
