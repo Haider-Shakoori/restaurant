@@ -104,6 +104,14 @@ public sealed class KitchenExecutionTests
             var factory = new LocalDatabaseFactory(root);
             var catalogStore = new OperationalSnapshotStore(factory);
             await catalogStore.ApplyAsync(Snapshot());
+            // Explicitly select staged KOT; new restaurants otherwise
+            // default to the configurable Ready-only workflow.
+            var settings = new LocalRestaurantSettingsService(factory);
+            var manager = new LocalTerminalPrincipal(
+                "manager-device", 99, "manager-99", "Kitchen Manager", "manager", "tenant-1");
+            await settings.UpdateAsync(new RestaurantWorkflowSettingsUpdate(
+                true, true, false, false, true, 10, 20, false, "block"),
+                manager);
             var kitchen = new LocalKitchenService(factory);
             var sync = new LocalSyncService(factory, catalogStore, kitchen);
             var waiter = Waiter();
@@ -148,6 +156,8 @@ public sealed class KitchenExecutionTests
                 "kitchen",
                 "tenant-1");
 
+            await Assert.ThrowsAsync<LocalSyncConflictException>(async () =>
+                await kitchen.ReadyAsync(ticketIds[0], kitchenUser, CancellationToken.None));
             await kitchen.StartAsync(ticketIds[0], kitchenUser, CancellationToken.None);
 
             await using (var db = factory.Create())
