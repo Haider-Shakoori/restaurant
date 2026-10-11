@@ -1267,14 +1267,14 @@ internal static class OperationalActionViews
     public static async Task<FrameworkElement> KitchenAsync()
     {
         var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
+        await DesktopUiWork.RunAsync(() => factory.EnsureCreatedAsync());
 
         var settingsService = new LocalRestaurantSettingsService(factory);
-        var settings = await settingsService.GetAsync();
-        var rows = await LoadKitchenBoardRowsAsync(factory);
+        var settings = await DesktopUiWork.RunAsync(() => settingsService.GetAsync());
+        var rows = await DesktopUiWork.RunAsync(() => LoadKitchenBoardRowsAsync(factory));
 
         var workflow = new DesktopRestaurantWorkflowService();
-        var principal = await workflow.CurrentPrincipalAsync();
+        var principal = await DesktopUiWork.RunAsync(() => workflow.CurrentPrincipalAsync());
         var canProduce = principal.UserRole is "owner" or "manager" or "kitchen";
         var canExpo = principal.UserRole is "owner" or "manager" or "expo";
         var canRefire = principal.UserRole is "owner" or "manager" or "kitchen";
@@ -1374,6 +1374,10 @@ internal static class OperationalActionViews
         root.Children.Add(board);
 
         var timerBindings = new List<(TextBlock Label, Border Badge, TextBlock State, DateTimeOffset QueuedAt, string Priority, string Status)>();
+        // Skip background KDS polling while a kitchen state transition is
+        // active to avoid SQLite writer/reader lock contention.
+        var kitchenWritesInProgress = 0;
+        var kitchenViewActive = true;
 
         void RefreshStationChoices()
         {
@@ -1582,7 +1586,7 @@ internal static class OperationalActionViews
             var actions = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
 
             Button? primary = null;
-            Func<Task>? primaryAction = null;
+            Func<CancellationToken, Task>? primaryAction = null;
             string? success = null;
 
             if (canProduce && (row.Status is "queued" or "active"))
@@ -1590,26 +1594,26 @@ internal static class OperationalActionViews
                 if (row.PreparingEnabled)
                 {
                     primary = Button("START");
-                    primaryAction = () => workflow.StartKitchenItemAsync(row.ItemId);
+                    primaryAction = token => workflow.StartKitchenItemAsync(row.ItemId, token);
                     success = $"{row.ItemName} started.";
                 }
                 else
                 {
                     primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
-                    primaryAction = () => workflow.MarkKitchenItemReadyAsync(row.ItemId);
+                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
                     success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
                 }
             }
             else if (canProduce && row.Status == "preparing")
             {
                 primary = Button(row.ExpoEnabled ? "SEND TO EXPO" : "READY");
-                primaryAction = () => workflow.MarkKitchenItemReadyAsync(row.ItemId);
+                primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
                 success = row.ExpoEnabled ? $"{row.ItemName} sent to Expo." : $"{row.ItemName} ready.";
             }
             else if (canExpo && row.Status == "expo")
             {
                 primary = Button("PASS EXPO");
-                primaryAction = () => workflow.PassExpoItemAsync(row.ItemId);
+                primaryAction = token => workflow.PassExpoItemAsync(row.ItemId, token);
                 success = $"{row.ItemName} passed Expo.";
             }
 
@@ -1618,19 +1622,35 @@ internal static class OperationalActionViews
                 actions.Children.Add(primary);
                 primary.Click += async (_, _) =>
                 {
+                    if (!primary.IsEnabled) return;
+                    primary.IsEnabled = false;
+                    primary.Content = "UPDATING…";
+                    statusText.Text = "Updating KOT. Other controls remain available.";
+                    kitchenWritesInProgress++;
                     try
                     {
-                        primary.IsEnabled = false;
-                        await primaryAction();
+                        await DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25));
                         statusText.Text = success ?? "Kitchen item updated.";
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
                     }
+                    catch (OperationCanceledException ex)
+                    {
+                        App.LogRecoverableException("kitchen-transition-timeout", ex);
+                        // A timed-out SQLite write could still have committed.
+                        // Do not re-enable Start/Ready until the board refreshes.
+                        primary.Content = "CHECK KOT STATUS";
+                        statusText.Text = "The kitchen update took too long. Check the KOT state after refreshing before retrying.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
+                    }
                     catch (Exception ex)
                     {
+                        App.LogRecoverableException("kitchen-transition-failed", ex);
                         primary.IsEnabled = true;
+                        primary.Content = row.PreparingEnabled ? "START / RETRY" : "RETRY";
                         statusText.Text = ex.Message;
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
                     }
+                    finally { kitchenWritesInProgress--; }
                 };
             }
 
@@ -1650,9 +1670,23 @@ internal static class OperationalActionViews
                             "Confirm kitchen recall"))
                             return;
                         recall.IsEnabled = false;
-                        await workflow.RecallKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
+                        var reason = actionReason.Text.Trim();
+                        kitchenWritesInProgress++;
+                        try
+                        {
+                            await DesktopUiWork.RunBoundedAsync(
+                                token => workflow.RecallKitchenItemAsync(row.ItemId, reason, token),
+                                TimeSpan.FromSeconds(25));
+                        }
+                        finally { kitchenWritesInProgress--; }
                         statusText.Text = $"{row.ItemName} recalled to the kitchen without reversing its prior consumption.";
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        App.LogRecoverableException("kitchen-recall-timeout", ex);
+                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
                     }
                     catch (Exception ex)
                     {
@@ -1679,9 +1713,23 @@ internal static class OperationalActionViews
                             "Confirm kitchen waste"))
                             return;
                         waste.IsEnabled = false;
-                        await workflow.RecordKitchenWasteAsync(row.ItemId, actionReason.Text.Trim());
+                        var reason = actionReason.Text.Trim();
+                        kitchenWritesInProgress++;
+                        try
+                        {
+                            await DesktopUiWork.RunBoundedAsync(
+                                token => workflow.RecordKitchenWasteAsync(row.ItemId, reason, token),
+                                TimeSpan.FromSeconds(25));
+                        }
+                        finally { kitchenWritesInProgress--; }
                         statusText.Text = $"{row.ItemName} recorded as production waste; inventory was not returned.";
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        App.LogRecoverableException("kitchen-waste-timeout", ex);
+                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
                     }
                     catch (Exception ex)
                     {
@@ -1707,9 +1755,23 @@ internal static class OperationalActionViews
                             "Confirm kitchen re-fire"))
                             return;
                         refire.IsEnabled = false;
-                        await workflow.RefireKitchenItemAsync(row.ItemId, actionReason.Text.Trim());
+                        var reason = actionReason.Text.Trim();
+                        kitchenWritesInProgress++;
+                        try
+                        {
+                            await DesktopUiWork.RunBoundedAsync(
+                                token => workflow.RefireKitchenItemAsync(row.ItemId, reason, token),
+                                TimeSpan.FromSeconds(25));
+                        }
+                        finally { kitchenWritesInProgress--; }
                         statusText.Text = $"{row.ItemName} re-fired as a new rush production event.";
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        App.LogRecoverableException("kitchen-refire-timeout", ex);
+                        statusText.Text = "KOT update timed out. Check kitchen history before attempting another action.";
+                        DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, statusText.Text);
                     }
                     catch (Exception ex)
                     {
@@ -1837,7 +1899,7 @@ internal static class OperationalActionViews
         var pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         pollTimer.Tick += async (_, _) =>
         {
-            if (refreshInProgress)
+            if (refreshInProgress || kitchenWritesInProgress > 0 || !kitchenViewActive)
             {
                 return;
             }
@@ -1845,8 +1907,15 @@ internal static class OperationalActionViews
             refreshInProgress = true;
             try
             {
-                var latestRows = await LoadKitchenBoardRowsAsync(factory);
-                var latestSettings = await settingsService.GetAsync();
+                var result = await DesktopUiWork.RunAsync(async () =>
+                {
+                    var nextRows = await LoadKitchenBoardRowsAsync(factory).ConfigureAwait(false);
+                    var nextSettings = await settingsService.GetAsync().ConfigureAwait(false);
+                    return (Rows: nextRows, Settings: nextSettings);
+                });
+                if (!kitchenViewActive) return;
+                var latestRows = result.Rows;
+                var latestSettings = result.Settings;
                 var latestSignature = KitchenBoardSignature(latestRows);
 
                 if (!string.Equals(boardSignature, latestSignature, StringComparison.Ordinal) ||
@@ -1886,6 +1955,7 @@ internal static class OperationalActionViews
         pollTimer.Start();
         root.Unloaded += (_, _) =>
         {
+            kitchenViewActive = false;
             ageTimer.Stop();
             pollTimer.Stop();
         };
