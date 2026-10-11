@@ -2466,7 +2466,8 @@ internal static class OperationalActionViews
         {
             var oldId = (selectedDish.SelectedItem as Choice)?.Id;
             var options = rows.Where(x => x.Status is "queued" or "active" or "preparing" or "expo")
-                .Where(x => canProduce && (!x.ExpoEnabled || x.Status != "expo" || canExpo))
+                .Where(x => canProduce && (!x.ExpoEnabled || x.Status != "expo" || canExpo) ||
+                            canExpo && x.ExpoEnabled && x.Status == "expo")
                 .OrderByDescending(x => x.Priority == "rush")
                 .ThenBy(x => x.QueuedAt)
                 .Select(x => new Choice(x.ItemId,
