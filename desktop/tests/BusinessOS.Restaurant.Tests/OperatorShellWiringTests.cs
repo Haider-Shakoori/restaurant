@@ -13,9 +13,9 @@ public sealed class OperatorShellWiringTests
         var app = Read("App.xaml.cs");
         Assert.Contains("session.TenantId, licenseTenant", app);
         Assert.Contains("new OperatorSignInWindow(licenseTenant", app);
-        Assert.Contains("signIn.ShowDialog()", app);
+        Assert.Contains("DesktopGlassDialog.ShowDialog(signIn)", app);
         Assert.Contains("new MainWindow(session)", app);
-        Assert.True(app.IndexOf("signIn.ShowDialog()", StringComparison.Ordinal) <
+        Assert.True(app.IndexOf("DesktopGlassDialog.ShowDialog(signIn)", StringComparison.Ordinal) <
                     app.IndexOf("new MainWindow(session)", StringComparison.Ordinal));
         Assert.Contains("ShutdownMode.OnExplicitShutdown", app);
         Assert.Contains("ShutdownMode.OnMainWindowClose", app);
