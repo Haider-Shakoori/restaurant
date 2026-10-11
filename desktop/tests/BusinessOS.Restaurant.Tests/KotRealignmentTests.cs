@@ -1771,7 +1771,7 @@ public sealed class KotRealignmentTests
     }
 
     [Fact]
-    public async Task Ready_only_setting_completes_old_staged_kot_without_start_and_notifies_waiter()
+    public async Task Direct_ready_completes_old_staged_kot_without_start_and_notifies_waiter()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -1804,11 +1804,10 @@ public sealed class KotRealignmentTests
                 Assert.True(round.PreparingEnabled && round.ExpoEnabled);
                 kitchenItemId = (await db.KitchenTicketItems.AsNoTracking().SingleAsync()).Id;
             }
-            // Changing the restaurant to simple Ready-only must not require
-            // START or Expo even for rounds created under the old staged flow.
-            await settings.UpdateAsync(staged with { PreparingStageEnabled = false, ExpoEnabled = false }, Manager());
-            await kitchen.ReadyItemAsync(kitchenItemId, Kitchen(), CancellationToken.None);
-            await kitchen.ReadyItemAsync(kitchenItemId, Kitchen(), CancellationToken.None);
+            // The cashier-facing one-touch READY can bypass old staged round
+            // flags without mutating historical settings or requiring START.
+            await kitchen.ReadyItemDirectAsync(kitchenItemId, Kitchen(), CancellationToken.None);
+            await kitchen.ReadyItemDirectAsync(kitchenItemId, Kitchen(), CancellationToken.None);
 
             await using (var db = factory.Create())
             {
