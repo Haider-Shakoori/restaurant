@@ -825,12 +825,17 @@ internal static class Program
         var button = FindNavigation(window, route)
             ?? throw new InvalidOperationException($"Navigation button '{route}' not found.");
         var previousPage = vm.CurrentPage;
+        var alreadyDisplayed = vm.CurrentRoute == route && previousPage is not null;
         await WaitUntilAsync(() => button.Command?.CanExecute(button.CommandParameter) == true,
             $"'{route}' navigation command becomes available");
         Click(button);
         await WaitUntilAsync(() => vm.HasWorkspaceError ||
             (vm.CurrentRoute == route && vm.CurrentPage is not null &&
-             !ReferenceEquals(previousPage, vm.CurrentPage)), $"click-to-navigate '{route}'");
+             (alreadyDisplayed || !ReferenceEquals(previousPage, vm.CurrentPage))),
+            $"click-to-navigate '{route}'");
+        if (alreadyDisplayed)
+            Assert(ReferenceEquals(previousPage, vm.CurrentPage),
+                $"Re-selecting {route} keeps the existing page without an expensive rebuild");
 
         Assert(!vm.HasWorkspaceError, $"Navigation '{route}' renders without errors: {vm.WorkspaceErrorMessage}");
         Assert(vm.CurrentRoute == route && vm.CurrentPage is not null,
