@@ -1960,7 +1960,7 @@ internal static class RestaurantOperationalPages
         var devicesPage = Stack();
 
         var workflow = new DesktopRestaurantWorkflowService();
-        var workflowSettings = await workflow.RestaurantSettingsAsync();
+        var workflowSettings = await DesktopUiWork.RunAsync(() => workflow.RestaurantSettingsAsync());
 
         var workflowPanel = new StackPanel();
         workflowPanel.Children.Add(new TextBlock
@@ -2095,17 +2095,19 @@ internal static class RestaurantOperationalPages
                     throw new InvalidOperationException("Enter a valid late threshold.");
 
                 saveWorkflow.IsEnabled = false;
-                var updated = await workflow.UpdateRestaurantSettingsAsync(
-                    new RestaurantWorkflowSettingsUpdate(
-                        queue.IsChecked == true,
-                        preparing.IsChecked == true,
-                        expo.IsChecked == true,
-                        courses.IsChecked == true,
-                        sound.IsChecked == true,
-                        warningMinutes,
-                        lateMinutes,
-                        managerVoid.IsChecked == true,
-                        negativeStockPolicy.SelectedItem?.ToString() ?? "block"));
+                var update = new RestaurantWorkflowSettingsUpdate(
+                    queue.IsChecked == true,
+                    preparing.IsChecked == true,
+                    expo.IsChecked == true,
+                    courses.IsChecked == true,
+                    sound.IsChecked == true,
+                    warningMinutes,
+                    lateMinutes,
+                    managerVoid.IsChecked == true,
+                    negativeStockPolicy.SelectedItem?.ToString() ?? "block");
+                workflowStatus.Text = "Saving restaurant workflow settings…";
+                var updated = await DesktopUiWork.RunAsync(() =>
+                    workflow.UpdateRestaurantSettingsAsync(update));
 
                 workflowStatus.Text =
                     $"Saved. Queue {(updated.KitchenQueueEnabled ? "ON" : "OFF")} · " +
@@ -2544,7 +2546,9 @@ internal static class RestaurantOperationalPages
             retry.IsEnabled = false;
             try
             {
-                await workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt);
+                message.Text = "Requeueing the existing print document…";
+                await DesktopUiWork.RunAsync(() =>
+                    workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt));
                 retryItems.Remove(selected);
                 message.Text = "The existing print document was requeued and audited. " +
                                "No new order, kitchen production or payment record was created.";
