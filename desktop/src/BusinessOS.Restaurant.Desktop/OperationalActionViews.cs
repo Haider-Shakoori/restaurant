@@ -2201,7 +2201,7 @@ internal static class OperationalActionViews
                 primary = Button("READY");
                 primary.Name = "KitchenReadyItemButton";
                 primary.ToolTip = "F2 · Mark this dish ready and alert the assigned waiter";
-                primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
+                primaryAction = token => workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token);
                 success = $"{row.ItemName} is READY. Waiter pickup alert will appear on the mobile device after sync.";
             }
 
@@ -2461,7 +2461,7 @@ internal static class OperationalActionViews
         (string Label, Func<CancellationToken, Task>? Action, string Success) KitchenNextStep(KitchenItemCard row)
         {
             // Single operational action, independent of legacy kitchen round flags.
-            return ("READY", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
+            return ("READY", token => workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token),
                 $"{row.ItemName} ready. Waiter pickup alert available after LAN/mobile sync.");
         }
 
