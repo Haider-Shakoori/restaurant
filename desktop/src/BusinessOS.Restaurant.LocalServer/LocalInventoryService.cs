@@ -886,7 +886,7 @@ public sealed class LocalInventoryService
                 kitchenItem.Id,
                 $"production-consumption:{kitchenItem.Id}:{item.Id}",
                 reservation.OrderItemId,
-                null,
+                valuation.AverageUnitCost,
                 "Recipe consumption committed for kitchen production.",
                 cancellationToken);
 
