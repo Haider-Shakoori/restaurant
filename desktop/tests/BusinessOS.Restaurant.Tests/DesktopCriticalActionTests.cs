@@ -75,7 +75,7 @@ public sealed class DesktopCriticalActionTests
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
 
         Assert.Contains("ConfirmOperationalChange(string message, string title)", views);
-        Assert.Contains("MessageBoxButton.YesNo", views);
+        Assert.Contains("DesktopGlassDialog.Confirm(message, title)", views);
         foreach (var title in new[] {
             "Confirm order line void", "Confirm order cancellation",
             "Confirm kitchen recall", "Confirm kitchen waste", "Confirm kitchen re-fire",
