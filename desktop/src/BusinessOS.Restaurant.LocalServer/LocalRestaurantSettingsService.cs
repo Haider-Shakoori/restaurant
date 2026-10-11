@@ -16,13 +16,11 @@ public sealed record RestaurantWorkflowSettings(
     bool RequireManagerApprovalForPostKotVoid,
     string NegativeStockPolicy)
 {
-    // All new and historical local tickets use a single READY action.
-    // Legacy Preparing/Expo flags are retained for history, not kitchen controls.
-    public bool ReadyOnlyKotEnabled => true;
+    public bool ReadyOnlyKotEnabled => !PreparingStageEnabled && !ExpoEnabled;
 
     public static RestaurantWorkflowSettings Defaults { get; } = new(
         KitchenQueueEnabled: true,
-        PreparingStageEnabled: false,
+        PreparingStageEnabled: true,
         ExpoEnabled: false,
         CoursesEnabled: false,
         KotSoundEnabled: true,
@@ -142,8 +140,8 @@ public sealed class LocalRestaurantSettingsService
         var defaults = RestaurantWorkflowSettings.Defaults;
         return new RestaurantWorkflowSettings(
             Bool(values, KitchenQueueEnabledKey, defaults.KitchenQueueEnabled),
-            false, // Remove Start, including when an older DB setting was enabled.
-            false, // Remove Expo; READY directly alerts the assigned waiter.
+            Bool(values, PreparingStageEnabledKey, defaults.PreparingStageEnabled),
+            Bool(values, ExpoEnabledKey, defaults.ExpoEnabled),
             Bool(values, CoursesEnabledKey, defaults.CoursesEnabled),
             Bool(values, KotSoundEnabledKey, defaults.KotSoundEnabled),
             Int(values, KitchenWarningMinutesKey, defaults.KitchenWarningMinutes, 1, 240),
@@ -176,6 +174,10 @@ public sealed class LocalRestaurantSettingsService
                 "Kitchen late minutes must be at least the warning threshold and no more than 480.");
         }
 
+        if (update.ExpoEnabled && !update.PreparingStageEnabled)
+            throw new LocalSyncConflictException("invalid_payload",
+                "Enable the Preparing stage before enabling Expo.");
+
         var negativeStockPolicy = NormalizeStockPolicy(update.NegativeStockPolicy);
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
@@ -184,10 +186,8 @@ public sealed class LocalRestaurantSettingsService
 
         var now = DateTimeOffset.UtcNow;
         await UpsertAsync(db, KitchenQueueEnabledKey, update.KitchenQueueEnabled ? "true" : "false", now, cancellationToken);
-        // Canonicalize older installations that used multi-step KOT.
-        // The kitchen no longer has Start / Preparing / Expo states.
-        await UpsertAsync(db, PreparingStageEnabledKey, "false", now, cancellationToken);
-        await UpsertAsync(db, ExpoEnabledKey, "false", now, cancellationToken);
+        await UpsertAsync(db, PreparingStageEnabledKey, update.PreparingStageEnabled ? "true" : "false", now, cancellationToken);
+        await UpsertAsync(db, ExpoEnabledKey, update.ExpoEnabled ? "true" : "false", now, cancellationToken);
         await UpsertAsync(db, CoursesEnabledKey, update.CoursesEnabled ? "true" : "false", now, cancellationToken);
         await UpsertAsync(db, KotSoundEnabledKey, update.KotSoundEnabled ? "true" : "false", now, cancellationToken);
         await UpsertAsync(db, KitchenWarningMinutesKey, update.KitchenWarningMinutes.ToString(CultureInfo.InvariantCulture), now, cancellationToken);
