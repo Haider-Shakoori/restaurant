@@ -62,7 +62,7 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("readyOnly.IsChecked != true && preparing.IsChecked == true", view);
         Assert.Contains("readyOnly.IsChecked != true && expo.IsChecked == true", view);
         Assert.Contains("public bool ReadyOnlyKotEnabled", service);
-        Assert.Contains("PreparingStageEnabled: false", service);
+        Assert.Contains("PreparingStageEnabled: true", service);
         Assert.Contains("round.PreparingEnabled", kitchen);
         Assert.Contains("transferToExpo", kitchen);
         Assert.Contains("next_step = transferToExpo ? \"expo\" : \"waiter_pickup\"", kitchen);
