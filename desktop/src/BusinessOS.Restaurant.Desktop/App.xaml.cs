@@ -64,7 +64,7 @@ public partial class App : System.Windows.Application
         if (!licenseStatus.IsValid)
         {
             var activation = new ActivationWindow(licensing);
-            var activated = activation.ShowDialog();
+            var activated = DesktopGlassDialog.ShowDialog(activation);
 
             if (activated != true)
             {
@@ -119,7 +119,7 @@ public partial class App : System.Windows.Application
         {
             var configured = await new ConnectionSettingsStore().LoadAsync();
             var signIn = new OperatorSignInWindow(licenseTenant, configured?.TenantBaseUrl);
-            if (signIn.ShowDialog() != true || signIn.SignedInSession is null)
+            if (DesktopGlassDialog.ShowDialog(signIn) != true || signIn.SignedInSession is null)
             {
                 Shutdown();
                 return;
