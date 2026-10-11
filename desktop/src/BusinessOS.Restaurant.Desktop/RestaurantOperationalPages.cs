@@ -933,6 +933,8 @@ internal static class RestaurantOperationalPages
             return (factory, rows);
         });
         var (factory, rows) = workspaceData;
+        var modules = await DesktopUiWork.RunAsync(() =>
+            new LocalRestaurantSettingsService(factory).GetModulesAsync());
 
         var grid = GridFor(rows);
         grid.Columns.Add(Column("SKU", nameof(InventoryRow.Sku), 120));
@@ -946,6 +948,10 @@ internal static class RestaurantOperationalPages
         panel.Margin = new Thickness(4);
         panel.Children.Add(Card("Inventory overview",
             "Search ingredients, review local quantities and costs, and record audited changes. All quantities are stored in each ingredient's base unit."));
+        panel.Children.Add(Card("Ingredient costing mode",
+            modules.AutomaticRecipeConsumptionEnabled
+                ? "Recipe mode: kitchen production automatically consumes recipe ingredients. Physical counts cannot be booked as additional food cost."
+                : "Manual mode: KOT does not deduct ingredients. Count physical stock after service to record actual usage and food cost. Purchases remain stock assets until consumed."));
 
         var lowStockCount = rows.Count(x => x.ReorderLevel > 0 && x.Quantity <= x.ReorderLevel);
         var summaryCards = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
@@ -1225,6 +1231,184 @@ internal static class RestaurantOperationalPages
         adjustStock.MinWidth = 0;
         adjustStock.Margin = new Thickness(0, 0, 10, 8);
         actions.Children.Add(adjustStock);
+        var countRemaining = new Button
+        {
+            Name = "InventoryCountRemainingStock",
+            Content = "Count Remaining Stock · Record Consumption",
+            Height = 38, MinWidth = 270,
+            Margin = new Thickness(0, 0, 10, 8),
+            Visibility = modules.AutomaticRecipeConsumptionEnabled
+                ? Visibility.Collapsed : Visibility.Visible,
+            ToolTip = "Manual mode: enter the actual remaining quantity. The difference becomes audited food cost.",
+        };
+        countRemaining.Click += async (_, _) =>
+        {
+            countRemaining.IsEnabled = false;
+            try
+            {
+                var info = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var db = factory.Create();
+                    var branches = await db.Branches.AsNoTracking()
+                        .Where(x => x.IsActive).OrderBy(x => x.Name).ToArrayAsync();
+                    var ingredients = await db.InventoryItems.AsNoTracking()
+                        .Where(x => x.IsActive).OrderBy(x => x.Name).ToArrayAsync();
+                    var balances = await db.InventoryBalances.AsNoTracking()
+                        .Select(x => new { x.BranchId, x.InventoryItemId, x.Quantity }).ToArrayAsync();
+                    var valuations = await db.InventoryValuations.AsNoTracking()
+                        .Select(x => new { x.BranchId, x.InventoryItemId, x.AverageUnitCost }).ToArrayAsync();
+                    return (Branches: branches, Ingredients: ingredients,
+                        Balances: balances, Valuations: valuations);
+                });
+                var dialog = new Window
+                {
+                    Title = "Count Remaining Stock · Manual Consumption",
+                    Name = "ManualConsumptionDialog",
+                    Width = 580, Height = 610, MinWidth = 450, MinHeight = 480,
+                    Owner = System.Windows.Application.Current?.MainWindow,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    ResizeMode = ResizeMode.CanResize,
+                };
+                var content = Stack();
+                content.Margin = new Thickness(22);
+                content.Children.Add(Card("Physical ingredient count",
+                    "Enter what remains in storage. Only the difference from current book stock is recognized as ingredient consumption, at its existing average cost."));
+                var branch = new ComboBox
+                {
+                    Name = "ManualCountBranch", ItemsSource = info.Branches,
+                    DisplayMemberPath = "Name", SelectedIndex = info.Branches.Length > 0 ? 0 : -1,
+                    Height = 38,
+                };
+                var ingredient = new ComboBox
+                {
+                    Name = "ManualCountIngredient", ItemsSource = info.Ingredients,
+                    DisplayMemberPath = "Name", SelectedIndex = info.Ingredients.Length > 0 ? 0 : -1,
+                    Height = 38,
+                };
+                var count = new TextBox { Name = "ManualCountRemaining", Text = "0", Height = 38 };
+                var reason = new TextBox
+                {
+                    Text = "End-of-service physical ingredient count", Height = 38,
+                };
+                var preview = new TextBlock
+                {
+                    Name = "ManualCountPreview", TextWrapping = TextWrapping.Wrap,
+                    FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 10, 0, 12),
+                };
+                void RefreshCountPreview()
+                {
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        ingredient.SelectedItem is not LocalInventoryItem selectedItem) return;
+                    var onHand = info.Balances.FirstOrDefault(x => x.BranchId == selectedBranch.Id &&
+                        x.InventoryItemId == selectedItem.Id)?.Quantity ?? 0m;
+                    var unitCost = info.Valuations.FirstOrDefault(x => x.BranchId == selectedBranch.Id &&
+                        x.InventoryItemId == selectedItem.Id)?.AverageUnitCost ?? 0m;
+                    if (!decimal.TryParse(count.Text, out var remaining) || remaining < 0 || remaining > onHand)
+                    {
+                        preview.Text = $"Book stock: {onHand:N3} {selectedItem.BaseUnit}. Enter a physical balance from 0 through {onHand:N3}.";
+                        return;
+                    }
+                    var consumed = onHand - remaining;
+                    preview.Text = $"Book stock: {onHand:N3} {selectedItem.BaseUnit}  →  " +
+                        $"Physical: {remaining:N3} {selectedItem.BaseUnit}  →  " +
+                        $"Consumed: {consumed:N3} {selectedItem.BaseUnit}  ·  " +
+                        $"Estimated food cost: AFN {consumed * unitCost:N2}";
+                }
+                foreach (var entry in new (string Text, FrameworkElement Field)[]
+                {
+                    ("Branch", branch), ("Ingredient", ingredient),
+                    ("Physical quantity remaining (in the ingredient base unit)", count),
+                    ("Reason / count period", reason),
+                })
+                {
+                    content.Children.Add(Label(entry.Text));
+                    content.Children.Add(entry.Field);
+                }
+                content.Children.Add(preview);
+                branch.SelectionChanged += (_, _) => RefreshCountPreview();
+                ingredient.SelectionChanged += (_, _) => RefreshCountPreview();
+                count.TextChanged += (_, _) => RefreshCountPreview();
+                RefreshCountPreview();
+                var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                var save = new Button { Name = "ManualCountSave", Content = "Confirm consumption", Height = 44 };
+                var countId = Guid.CreateVersion7().ToString("N");
+                save.Click += async (_, _) =>
+                {
+                    if (!save.IsEnabled) return;
+                    if (branch.SelectedItem is not LocalBranch selectedBranch ||
+                        ingredient.SelectedItem is not LocalInventoryItem selectedItem ||
+                        !decimal.TryParse(count.Text, out var remaining) ||
+                        remaining < 0 || string.IsNullOrWhiteSpace(reason.Text))
+                    {
+                        error.Text = "Select branch/ingredient, a non-negative quantity and a reason.";
+                        return;
+                    }
+                    var book = info.Balances.FirstOrDefault(x => x.BranchId == selectedBranch.Id &&
+                        x.InventoryItemId == selectedItem.Id)?.Quantity ?? 0m;
+                    if (remaining >= book)
+                    {
+                        error.Text = "Enter a quantity below the book balance. To increase stock, use Adjust Stock.";
+                        return;
+                    }
+                    if (!DesktopGlassDialog.Confirm(
+                        $"Record {book - remaining:N3} {selectedItem.BaseUnit} of {selectedItem.Name} as consumed? This posts food cost and cannot be undone by editing this count.",
+                        "Confirm audited physical count", dialog)) return;
+                    var branchId = selectedBranch.Id;
+                    var itemId = selectedItem.Id;
+                    var explanation = reason.Text.Trim();
+                    save.IsEnabled = false;
+                    save.Content = "Recording consumption…";
+                    error.Text = "Updating local inventory and food-cost ledger…";
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                    try
+                    {
+                        await DesktopUiWork.RunBoundedAsync(async token =>
+                        {
+                            var actor = await new DesktopRestaurantWorkflowService()
+                                .CurrentPrincipalAsync(token).ConfigureAwait(false);
+                            await new LocalInventoryService(factory).RecordManualConsumptionAsync(
+                                branchId, itemId, remaining, countId, explanation, actor, token)
+                                .ConfigureAwait(false);
+                        }, TimeSpan.FromSeconds(25));
+                        dialog.DialogResult = true;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        App.LogRecoverableException("manual-inventory-count-timeout", ex);
+                        error.Text = "Result uncertain: close this form and review stock movements before attempting another count. Do not double-record consumption.";
+                        save.Content = "Verify stock before retry";
+                    }
+                    catch (Exception ex)
+                    {
+                        App.LogRecoverableException("manual-inventory-count", ex);
+                        error.Text = ex.Message;
+                        save.Content = "Confirm consumption";
+                        save.IsEnabled = true;
+                    }
+                };
+                content.Children.Add(save);
+                content.Children.Add(error);
+                dialog.Content = new ScrollViewer
+                {
+                    Content = content,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                };
+                if (DesktopGlassDialog.ShowDialog(dialog) == true)
+                {
+                    DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success,
+                        "Actual ingredient consumption recorded. Food cost and stock ledger updated.");
+                    if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                        await vm.RefreshCommand.ExecuteAsync(null);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.LogRecoverableException("manual-inventory-dialog", ex);
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
+            finally { countRemaining.IsEnabled = true; }
+        };
+        actions.Children.Add(countRemaining);
         panel.Children.Add(actions);
 
         var filters = new WrapPanel
