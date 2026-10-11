@@ -252,15 +252,23 @@ internal sealed class StandaloneCatalogWindow : Window
         };
         if (existingDishes.Length > 0) dishChoice.SelectedIndex = 0;
         var editDishSave = Action("Save dish changes");
-        editDishSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        editDishSave.Click += async (_, _) =>
         {
-            if (dishChoice.SelectedItem is not LocalMenuItem dish)
-                throw new InvalidOperationException("Select a dish first.");
-            if (!decimal.TryParse(editPrice.Text, NumberStyles.Number, CultureInfo.CurrentCulture, out var value))
-                throw new ArgumentException("Enter a valid AFN price.");
-            await _catalog.UpdateDishAsync(dish.Id, editDishName.Text, value,
-                dishAvailable.IsChecked == true, editSku.Text, _actorRole);
-        });
+            var selected = dishChoice.SelectedItem as LocalMenuItem;
+            var amountText = editPrice.Text;
+            var name = editDishName.Text;
+            var isAvailable = dishAvailable.IsChecked == true;
+            var code = editSku.Text;
+            await UpdateLocalAsync(async () =>
+            {
+                if (selected is null)
+                    throw new InvalidOperationException("Select a dish first.");
+                if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.CurrentCulture, out var value))
+                    throw new ArgumentException("Enter a valid AFN price.");
+                await _catalog.UpdateDishAsync(selected.Id, name, value,
+                    isAvailable, code, _actorRole);
+            });
+        };
         var dishEditRow = new WrapPanel();
         foreach (var control in new FrameworkElement[]
             { dishChoice, editDishName, editPrice, editSku, dishAvailable, editDishSave })
@@ -283,15 +291,22 @@ internal sealed class StandaloneCatalogWindow : Window
         };
         if (tables.Length > 0) tableChoice.SelectedIndex = 0;
         var editTableSave = Action("Save table changes");
-        editTableSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        editTableSave.Click += async (_, _) =>
         {
-            if (tableChoice.SelectedItem is not LocalDiningTable table)
-                throw new InvalidOperationException("Select a table first.");
-            if (!int.TryParse(editSeats.Text, out var seats))
-                throw new ArgumentException("Enter a valid seat count.");
-            await _catalog.UpdateTableAsync(table.Id, editTableName.Text, seats,
-                tableActive.IsChecked == true, _actorRole);
-        });
+            var selected = tableChoice.SelectedItem as LocalDiningTable;
+            var name = editTableName.Text;
+            var seatsText = editSeats.Text;
+            var enabled = tableActive.IsChecked == true;
+            await UpdateLocalAsync(async () =>
+            {
+                if (selected is null)
+                    throw new InvalidOperationException("Select a table first.");
+                if (!int.TryParse(seatsText, out var seats))
+                    throw new ArgumentException("Enter a valid seat count.");
+                await _catalog.UpdateTableAsync(selected.Id, name, seats,
+                    enabled, _actorRole);
+            });
+        };
         var tableEditRow = new WrapPanel();
         foreach (var control in new FrameworkElement[]
             { tableChoice, editTableName, editSeats, tableActive, editTableSave })
@@ -313,13 +328,18 @@ internal sealed class StandaloneCatalogWindow : Window
         };
         if (categories.Length > 0) categoryEditChoice.SelectedIndex = 0;
         var categoryEditSave = Action("Save category");
-        categoryEditSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        categoryEditSave.Click += async (_, _) =>
         {
-            if (categoryEditChoice.SelectedItem is not LocalMenuCategory selected)
-                throw new InvalidOperationException("Select a category first.");
-            await _catalog.UpdateCategoryAsync(selected.Id, editCategoryName.Text,
-                categoryActive.IsChecked == true, _actorRole);
-        });
+            var selected = categoryEditChoice.SelectedItem as LocalMenuCategory;
+            var name = editCategoryName.Text;
+            var enabled = categoryActive.IsChecked == true;
+            await UpdateLocalAsync(async () =>
+            {
+                if (selected is null)
+                    throw new InvalidOperationException("Select a category first.");
+                await _catalog.UpdateCategoryAsync(selected.Id, name, enabled, _actorRole);
+            });
+        };
         var categoryEditRow = new WrapPanel();
         foreach (var control in new FrameworkElement[]
             { categoryEditChoice, editCategoryName, categoryActive, categoryEditSave })
@@ -334,13 +354,19 @@ internal sealed class StandaloneCatalogWindow : Window
         var stationCode = Field("Station code"); stationCode.Width = 125;
         var stationName = Field("Station name");
         var saveStation = Action("Add station");
-        saveStation.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        saveStation.Click += async (_, _) =>
         {
-            if (routeBranch.SelectedItem is not LocalBranch branch)
-                throw new InvalidOperationException("Create a branch first.");
-            await _catalog.UpsertKitchenStationAsync(null, branch.Id, stationCode.Text,
-                stationName.Text, _actorRole);
-        });
+            var selected = routeBranch.SelectedItem as LocalBranch;
+            var code = stationCode.Text;
+            var name = stationName.Text;
+            await UpdateLocalAsync(async () =>
+            {
+                if (selected is null)
+                    throw new InvalidOperationException("Create a branch first.");
+                await _catalog.UpsertKitchenStationAsync(null, selected.Id, code,
+                    name, _actorRole);
+            });
+        };
         var stationRow = new WrapPanel();
         foreach (var control in new FrameworkElement[]
             { routeBranch, stationCode, stationName, saveStation })
@@ -363,14 +389,18 @@ internal sealed class StandaloneCatalogWindow : Window
         if (existingDishes.Length > 0) routeDish.SelectedIndex = 0;
         if (branches.Length > 0) routeBranchChoice.SelectedIndex = 0;
         var routeSave = Action("Route dish to kitchen");
-        routeSave.Click += async (_, _) => await UpdateLocalAsync(async () =>
+        routeSave.Click += async (_, _) =>
         {
-            if (routeDish.SelectedItem is not LocalMenuItem dish ||
-                routeBranchChoice.SelectedItem is not LocalBranch branch ||
-                routeStationChoice.SelectedItem is not LocalKitchenStation station)
-                throw new InvalidOperationException("Select a dish, branch and kitchen station.");
-            await _catalog.RouteDishToStationAsync(dish.Id, branch.Id, station.Id, _actorRole);
-        });
+            var dish = routeDish.SelectedItem as LocalMenuItem;
+            var branch = routeBranchChoice.SelectedItem as LocalBranch;
+            var station = routeStationChoice.SelectedItem as LocalKitchenStation;
+            await UpdateLocalAsync(async () =>
+            {
+                if (dish is null || branch is null || station is null)
+                    throw new InvalidOperationException("Select a dish, branch and kitchen station.");
+                await _catalog.RouteDishToStationAsync(dish.Id, branch.Id, station.Id, _actorRole);
+            });
+        };
         var routeRow = new WrapPanel();
         foreach (var control in new FrameworkElement[]
             { routeDish, routeBranchChoice, routeStationChoice, routeSave })
@@ -385,27 +415,48 @@ internal sealed class StandaloneCatalogWindow : Window
 
     private async Task UpdateLocalAsync(Func<Task> action)
     {
+        if (_saving) return;
+        _saving = true;
+        _content.IsEnabled = false;
+        _status.Text = "Saving local changes…";
         try
         {
-            await action();
+            await DesktopUiWork.RunAsync(action);
             await RebuildAsync();
             _status.Text = "Saved locally. Existing orders, KOT and accounting history are unchanged.";
         }
         catch (Exception error) { _status.Text = error.Message; }
+        finally
+        {
+            _content.IsEnabled = true;
+            _saving = false;
+        }
     }
 
     private async Task SaveAsync(Func<RestaurantDbContext, Task> action)
     {
+        if (_saving) return;
+        _saving = true;
+        _content.IsEnabled = false;
+        _status.Text = "Saving local changes…";
         try
         {
-            await _factory.EnsureCreatedAsync();
-            await using var db = _factory.Create();
-            await action(db);
-            await db.SaveChangesAsync();
+            await DesktopUiWork.RunAsync(async () =>
+            {
+                await _factory.EnsureCreatedAsync().ConfigureAwait(false);
+                await using var db = _factory.Create();
+                await action(db).ConfigureAwait(false);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            });
             await RebuildAsync();
             _status.Text = "Saved to standalone SQLite. No web synchronization performed.";
         }
         catch (Exception error) { _status.Text = error.Message; }
+        finally
+        {
+            _content.IsEnabled = true;
+            _saving = false;
+        }
     }
 
     private static void Require(bool valid, string message)
