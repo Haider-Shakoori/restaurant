@@ -30,7 +30,9 @@ public sealed class KitchenBoardPresentationTests
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
 
-        Assert.DoesNotContain("workflow.StartKitchenItemAsync(", source);
+        Assert.Contains("workflow.StartKitchenItemAsync(", source);
+        Assert.Contains("row.PreparingEnabled", source);
+        Assert.Contains("row.ExpoEnabled", source);
         Assert.Contains("KotTopReadyButton", source);
         Assert.Contains("KotTopActionToolbar", source);
         Assert.Contains("KotIndependentContentScroll", source);
@@ -43,6 +45,27 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("DesktopUiWork.RunAsync(async () =>", source);
         Assert.Contains("pollTimer.Start();", source);
         Assert.Contains("ageTimer.Start();", source);
+    }
+
+    [Fact]
+    public void Ready_only_kot_is_an_explicit_settings_switch_with_per_round_stage_choices()
+    {
+        var root = RepositoryRoot();
+        var view = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.LocalServer", "LocalRestaurantSettingsService.cs"));
+        var kitchen = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.LocalServer", "LocalKitchenService.cs"));
+
+        Assert.Contains("SettingsReadyOnlyKot", view);
+        Assert.Contains("readyOnly.IsChecked != true && preparing.IsChecked == true", view);
+        Assert.Contains("readyOnly.IsChecked != true && expo.IsChecked == true", view);
+        Assert.Contains("public bool ReadyOnlyKotEnabled", service);
+        Assert.Contains("PreparingStageEnabled: false", service);
+        Assert.Contains("round.PreparingEnabled", kitchen);
+        Assert.Contains("transferToExpo", kitchen);
+        Assert.Contains("next_step = transferToExpo ? \"expo\" : \"waiter_pickup\"", kitchen);
     }
 
     [Fact]
