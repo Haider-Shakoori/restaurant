@@ -21,74 +21,83 @@ internal static class OperationalActionViews
 
     public static async Task<FrameworkElement> PosAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
+        // Materialize all SQLite query results on a background thread before
+        // constructing any WPF controls. SQLite async providers may block
+        // synchronously while waiting for locks.
+        var pageData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
 
-        var tables = await (from table in db.DiningTables.AsNoTracking()
-                            join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
-                            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
-                            where table.IsActive && area.IsActive && branch.IsActive &&
-                                  table.Status == "available"
-                            orderby area.SortOrder, table.Name
-                            select new Choice(table.Id, $"{branch.Name} · {area.Name} · {table.Name} ({table.Code})")).ToListAsync();
-        var menu = await (
-            from item in db.MenuItems.AsNoTracking()
-            join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into groups
-            from category in groups.DefaultIfEmpty()
-            where item.IsAvailable
-            orderby item.SortOrder, item.Name
-            select new MenuChoice(item.Id, item.Name, item.Price,
-                category == null ? "Uncategorized" : category.Name, item.ImageUrl)).ToListAsync();
-        var modifierChoices = await (
-            from link in db.MenuItemModifierGroups.AsNoTracking()
-            join modifierGroup in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals modifierGroup.Id
-            join option in db.ModifierOptions.AsNoTracking() on modifierGroup.Id equals option.ModifierGroupId
-            where modifierGroup.IsActive && option.IsActive
-            orderby link.SortOrder, modifierGroup.SortOrder, option.SortOrder, option.Name
-            select new ModifierChoice(
-                link.MenuItemId,
-                option.Id,
-                $"{modifierGroup.Name}: {option.Name}",
-                option.PriceDelta))
-            .ToListAsync();
-        var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
-                .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
+            var tables = await (from table in db.DiningTables.AsNoTracking()
+                                join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                                join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                                where table.IsActive && area.IsActive && branch.IsActive &&
+                                      table.Status == "available"
+                                orderby area.SortOrder, table.Name
+                                select new Choice(table.Id, $"{branch.Name} · {area.Name} · {table.Name} ({table.Code})")).ToListAsync();
+            var menu = await (
+                from item in db.MenuItems.AsNoTracking()
+                join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into groups
+                from category in groups.DefaultIfEmpty()
+                where item.IsAvailable
+                orderby item.SortOrder, item.Name
+                select new MenuChoice(item.Id, item.Name, item.Price,
+                    category == null ? "Uncategorized" : category.Name, item.ImageUrl)).ToListAsync();
+            var modifierChoices = await (
+                from link in db.MenuItemModifierGroups.AsNoTracking()
+                join modifierGroup in db.ModifierGroups.AsNoTracking() on link.ModifierGroupId equals modifierGroup.Id
+                join option in db.ModifierOptions.AsNoTracking() on modifierGroup.Id equals option.ModifierGroupId
+                where modifierGroup.IsActive && option.IsActive
+                orderby link.SortOrder, modifierGroup.SortOrder, option.SortOrder, option.Name
+                select new ModifierChoice(
+                    link.MenuItemId,
+                    option.Id,
+                    $"{modifierGroup.Name}: {option.Name}",
+                    option.PriceDelta))
+                .ToListAsync();
+            var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
+                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
+                    .ToListAsync())
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Take(100)
+                .Select(x => x.Row)
+                .ToList();
+            var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+                .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
+            var sessions = (await db.CashierSessions.AsNoTracking().Where(x => x.Status == "open")
+                    .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
+                    .ToListAsync())
+                .OrderByDescending(x => x.OpenedAt)
+                .ToList();
+            var bills = (await db.Bills.AsNoTracking().Where(x => x.Status == "open")
+                    .Select(x => new { Row = new BillChoice(x.Id, x.OrderId, x.BillNumber, x.Total, x.PaidAmount, x.BalanceDue), x.IssuedAt })
+                    .ToListAsync())
+                .OrderByDescending(x => x.IssuedAt)
+                .Select(x => x.Row)
+                .ToList();
+            // SQLite cannot translate ORDER BY on DateTimeOffset; sort the projected rows in memory.
+            var orderLines = (await (
+                from line in db.OrderItems.AsNoTracking()
+                join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
+                where order.Status != "closed" && order.Status != "cancelled" &&
+                      line.Status != "voided" && line.Status != "cancelled"
+                select new
+                {
+                    Row = new OrderLineChoice(
+                        order.ClientOrderId, line.ClientLineId, line.ItemName,
+                        line.Quantity, line.Status, line.RoundNumber),
+                    line.CreatedAtUtc,
+                })
                 .ToListAsync())
-            .OrderByDescending(x => x.UpdatedAtUtc)
-            .Take(100)
-            .Select(x => x.Row)
-            .ToList();
-        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
-            .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
-        var sessions = (await db.CashierSessions.AsNoTracking().Where(x => x.Status == "open")
-                .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
-                .ToListAsync())
-            .OrderByDescending(x => x.OpenedAt)
-            .ToList();
-        var bills = (await db.Bills.AsNoTracking().Where(x => x.Status == "open")
-                .Select(x => new { Row = new BillChoice(x.Id, x.OrderId, x.BillNumber, x.Total, x.PaidAmount, x.BalanceDue), x.IssuedAt })
-                .ToListAsync())
-            .OrderByDescending(x => x.IssuedAt)
-            .Select(x => x.Row)
-            .ToList();
-        // SQLite cannot translate ORDER BY on DateTimeOffset; sort the projected rows in memory.
-        var orderLines = (await (
-            from line in db.OrderItems.AsNoTracking()
-            join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
-            where order.Status != "closed" && order.Status != "cancelled" &&
-                  line.Status != "voided" && line.Status != "cancelled"
-            select new
-            {
-                Row = new OrderLineChoice(
-                    order.ClientOrderId, line.ClientLineId, line.ItemName,
-                    line.Quantity, line.Status, line.RoundNumber),
-                line.CreatedAtUtc,
-            })
-            .ToListAsync())
-            .OrderBy(x => x.CreatedAtUtc)
-            .Select(x => x.Row)
-            .ToList();
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => x.Row)
+                .ToList();
+
+            return (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines);
+        });
+        var (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines) = pageData;
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -888,82 +897,91 @@ internal static class OperationalActionViews
 
     public static async Task<FrameworkElement> TablesAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
+        // Materialize all SQLite query results on a background thread before
+        // constructing any WPF controls. SQLite async providers may block
+        // synchronously while waiting for locks.
+        var pageData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
 
-        var rows = await (from table in db.DiningTables.AsNoTracking()
-                          join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
-                          join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
-                          where table.IsActive && area.IsActive && branch.IsActive
-                          orderby branch.Name, area.SortOrder, table.Name
-                          select new TableChoice(table.Id, branch.Name + " · " + area.Name,
-                              table.Code, table.Name, table.Capacity, table.Status))
-            .ToListAsync();
+            var rows = await (from table in db.DiningTables.AsNoTracking()
+                              join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                              join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                              where table.IsActive && area.IsActive && branch.IsActive
+                              orderby branch.Name, area.SortOrder, table.Name
+                              select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                                  table.Code, table.Name, table.Capacity, table.Status))
+                .ToListAsync();
 
-        var activeOrders = (await (
-            from order in db.Orders.AsNoTracking()
-            join table in db.DiningTables.AsNoTracking() on order.DiningTableId equals table.Id
-            where order.ServiceType == "dine_in" &&
-                  order.Status != "closed" &&
-                  order.Status != "cancelled" &&
-                  order.Status != "billed"
-            select new
-            {
-                Row = new TableOrderChoice(
-                    order.Id, order.ClientOrderId, table.Id, table.Name,
-                    order.Status, order.Total),
-                order.UpdatedAtUtc,
-            })
-            .ToListAsync())
-            .OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => x.Row)
-            .ToList();
+            var activeOrders = (await (
+                from order in db.Orders.AsNoTracking()
+                join table in db.DiningTables.AsNoTracking() on order.DiningTableId equals table.Id
+                where order.ServiceType == "dine_in" &&
+                      order.Status != "closed" &&
+                      order.Status != "cancelled" &&
+                      order.Status != "billed"
+                select new
+                {
+                    Row = new TableOrderChoice(
+                        order.Id, order.ClientOrderId, table.Id, table.Name,
+                        order.Status, order.Total),
+                    order.UpdatedAtUtc,
+                })
+                .ToListAsync())
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => x.Row)
+                .ToList();
 
-        var unsentLines = (await (
-            from line in db.OrderItems.AsNoTracking()
-            join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
-            where order.ServiceType == "dine_in" &&
-                  line.KotRoundId == null &&
-                  (line.Status == "pending" || line.Status == "held")
-            select new
-            {
-                Row = new TableSplitLineChoice(
-                    order.Id, line.Id, line.ItemName, line.Quantity, line.Status),
-                line.CreatedAtUtc,
-            })
-            .ToListAsync())
-            .OrderBy(x => x.CreatedAtUtc)
-            .Select(x => x.Row)
-            .ToList();
+            var unsentLines = (await (
+                from line in db.OrderItems.AsNoTracking()
+                join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
+                where order.ServiceType == "dine_in" &&
+                      line.KotRoundId == null &&
+                      (line.Status == "pending" || line.Status == "held")
+                select new
+                {
+                    Row = new TableSplitLineChoice(
+                        order.Id, line.Id, line.ItemName, line.Quantity, line.Status),
+                    line.CreatedAtUtc,
+                })
+                .ToListAsync())
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => x.Row)
+                .ToList();
 
-        // Include billed orders on table cards: paid-in-part tables must
-        // never appear ownerless or available before final settlement.
-        var allFloorOrders = (await (
-            from order in db.Orders.AsNoTracking()
-            where order.ServiceType == "dine_in" &&
-                  order.Status != "closed" && order.Status != "cancelled"
-            select new
-            {
-                Row = new TableOrderChoice(order.Id, order.ClientOrderId,
-                    order.DiningTableId, "", order.Status, order.Total),
-                order.UpdatedAtUtc,
-            }).ToListAsync())
-            .OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => x.Row).ToArray();
+            // Include billed orders on table cards: paid-in-part tables must
+            // never appear ownerless or available before final settlement.
+            var allFloorOrders = (await (
+                from order in db.Orders.AsNoTracking()
+                where order.ServiceType == "dine_in" &&
+                      order.Status != "closed" && order.Status != "cancelled"
+                select new
+                {
+                    Row = new TableOrderChoice(order.Id, order.ClientOrderId,
+                        order.DiningTableId, "", order.Status, order.Total),
+                    order.UpdatedAtUtc,
+                }).ToListAsync())
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => x.Row).ToArray();
 
-        var availableTables = rows
-            .Where(x => x.Status == "available")
-            .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
-            .ToList();
+            var availableTables = rows
+                .Where(x => x.Status == "available")
+                .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
+                .ToList();
 
-        var areas = await (from area in db.DiningAreas.AsNoTracking()
-            join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
-            where area.IsActive && branch.IsActive
-            orderby area.SortOrder, area.Name
-            select area).ToListAsync();
-        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive)
-            .OrderBy(x => x.Name).ToListAsync();
+            var areas = await (from area in db.DiningAreas.AsNoTracking()
+                join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                where area.IsActive && branch.IsActive
+                orderby area.SortOrder, area.Name
+                select area).ToListAsync();
+            var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive)
+                .OrderBy(x => x.Name).ToListAsync();
+
+            return (rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches);
+        });
+        var (rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches) = pageData;
 
         var workflow = new DesktopRestaurantWorkflowService();
         // The translucent surface belongs to the whole floor workspace, not
@@ -1977,20 +1995,29 @@ internal static class OperationalActionViews
 
     public static async Task<FrameworkElement> ClosingAsync()
     {
-        var factory = new LocalDatabaseFactory();
-        await factory.EnsureCreatedAsync();
-        await using var db = factory.Create();
+        // Materialize all SQLite query results on a background thread before
+        // constructing any WPF controls. SQLite async providers may block
+        // synchronously while waiting for locks.
+        var pageData = await DesktopUiWork.RunAsync(async () =>
+        {
+            var factory = new LocalDatabaseFactory();
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
 
-        var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
-            .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
-        var sessions = (await db.CashierSessions.AsNoTracking()
-                .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
-                .ToListAsync())
-            .OrderByDescending(x => x.OpenedAt)
-            .Take(50)
-            .ToList();
-        var closings = await db.DailyClosings.AsNoTracking().OrderByDescending(x => x.BusinessDate).Take(30)
-            .Select(x => new ClosingChoice(x.Id, x.BusinessDate, x.Status, x.FinalizedAt)).ToListAsync();
+            var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name)
+                .Select(x => new Choice(x.Id, x.Name)).ToListAsync();
+            var sessions = (await db.CashierSessions.AsNoTracking()
+                    .Select(x => new CashierSessionChoice(x.Id, x.CashierName, x.Status, x.OpeningCash, x.ExpectedCash, x.DeclaredCash, x.CashVariance, x.OpenedAt))
+                    .ToListAsync())
+                .OrderByDescending(x => x.OpenedAt)
+                .Take(50)
+                .ToList();
+            var closings = await db.DailyClosings.AsNoTracking().OrderByDescending(x => x.BusinessDate).Take(30)
+                .Select(x => new ClosingChoice(x.Id, x.BusinessDate, x.Status, x.FinalizedAt)).ToListAsync();
+
+            return (branches, sessions, closings);
+        });
+        var (branches, sessions, closings) = pageData;
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new StackPanel();
