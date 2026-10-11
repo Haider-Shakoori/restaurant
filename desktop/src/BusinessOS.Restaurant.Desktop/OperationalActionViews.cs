@@ -2533,7 +2533,7 @@ internal static class OperationalActionViews
         {
             var selected = rows.FirstOrDefault(x => x.ItemId == (selectedDish.SelectedItem as Choice)?.Id);
             markReady.Content = selected is null ? "READY" : KitchenNextStep(selected).Label;
-            markReady.IsEnabled = selected is not null && canProduce &&
+            markReady.IsEnabled = selected is not null &&
                 KitchenNextStep(selected).Action is not null;
         };
         stationFilter.SelectionChanged += (_, _) => RenderBoard();
