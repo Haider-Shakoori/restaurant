@@ -414,8 +414,15 @@ public sealed class LocalKitchenService
         }
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        if (items.Length > 0 && !round.ExpoEnabled)
+        {
+            var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+            AddChange(db, "order", order.Id, order.WaiterId,
+                await BasicOrderSnapshotAsync(db, order, cancellationToken));
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -450,7 +457,7 @@ public sealed class LocalKitchenService
         // Notify the assigned waiter even when only one item of a larger KOT
         // is ready and the aggregate order stays "submitted". Mobile/LAN
         // pickup alerts derive their state from the kitchen_tickets snapshot.
-        if (!wasReady)
+        if (!wasReady && item.Status == "ready")
         {
             var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
             AddChange(db, "order", order.Id, order.WaiterId,
@@ -498,6 +505,7 @@ public sealed class LocalKitchenService
 
         var now = DateTimeOffset.UtcNow;
         item.Status = "ready";
+        item.ReadyAt ??= now;
         var orderItem = await db.OrderItems
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
         orderItem.Status = "ready";
@@ -514,8 +522,12 @@ public sealed class LocalKitchenService
             new { ticket_id = ticket.Id, order_item_id = item.OrderItemId, round_number = ticket.RoundNumber });
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId,
+            await BasicOrderSnapshotAsync(db, order, cancellationToken));
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -1208,16 +1220,20 @@ public sealed class LocalKitchenService
                 $"Kitchen item cannot move from {item.Status} to ready.");
         }
 
-        // Simplified restaurant KOT: a single READY action is valid directly
-        // from the queued/active state, even for historical rounds originally
-        // configured with Preparing or Expo stages.
+        // Each submitted KOT round snapshots its workflow at dispatch, so
+        // changing Settings only affects NEW rounds. Staged rounds require
+        // START; optional Expo requires an Expo pass before waiter pickup.
+        if (round.PreparingEnabled && item.Status is "queued" or "active")
+            throw new LocalSyncConflictException("order_state_conflict",
+                "Start preparation before marking this staged KOT ready.");
         if (item.Status is not ("queued" or "active" or "preparing" or "expo"))
             throw new LocalSyncConflictException("order_state_conflict",
                 $"Kitchen item cannot move from {item.Status} to ready.");
 
         var now = DateTimeOffset.UtcNow;
-        item.Status = "ready";
-        item.ReadyAt ??= now;
+        var transferToExpo = round.ExpoEnabled && item.Status == "preparing";
+        item.Status = transferToExpo ? "expo" : "ready";
+        if (!transferToExpo) item.ReadyAt ??= now;
 
         var orderItem = await db.OrderItems
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
@@ -1243,6 +1259,7 @@ public sealed class LocalKitchenService
                 order_item_id = item.OrderItemId,
                 round_number = ticket.RoundNumber,
                 expo_enabled = round.ExpoEnabled,
+                next_step = transferToExpo ? "expo" : "waiter_pickup",
             });
     }
 
