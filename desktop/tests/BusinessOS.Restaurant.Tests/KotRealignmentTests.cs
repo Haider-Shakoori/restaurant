@@ -1831,6 +1831,47 @@ public sealed class KotRealignmentTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task Late_guests_one_to_four_share_existing_table_and_kot_rounds()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog, new LocalKitchenService(factory));
+            var opened = await PushOneAsync(sync, Waiter(), "OPEN-GUESTS",
+                "order.open", new { client_order_id = "ORDER-GUESTS",
+                    dining_table_id = "table-1", guest_count = 1 });
+            Assert.Equal("accepted", opened.GetProperty("status").GetString());
+            await PushOneAsync(sync, Waiter(), "ITEM-GUESTS", "order.item.add", new
+            {
+                client_order_id = "ORDER-GUESTS",
+                client_line_id = "LINE-GUESTS",
+                menu_item_id = "item-grill",
+                quantity = 1,
+            });
+            await PushOneAsync(sync, Waiter(), "SEND-GUESTS", "order.kot.send",
+                new { client_order_id = "ORDER-GUESTS" });
+
+            var updated = await PushOneAsync(sync, Waiter(), "THREE-ARRIVE",
+                "order.guests.update", new { client_order_id = "ORDER-GUESTS", guest_count = 4 });
+            Assert.Equal("accepted", updated.GetProperty("status").GetString());
+            var beyondCapacity = await PushOneAsync(sync, Waiter(), "FIVE-ARRIVE",
+                "order.guests.update", new { client_order_id = "ORDER-GUESTS", guest_count = 5 });
+            Assert.NotEqual("accepted", beyondCapacity.GetProperty("status").GetString());
+
+            await using var db = factory.Create();
+            var order = await db.Orders.AsNoTracking().SingleAsync();
+            Assert.Equal(4, order.GuestCount);
+            Assert.Equal("table-1", order.DiningTableId);
+            Assert.Single(await db.KotRounds.AsNoTracking().ToArrayAsync());
+            Assert.Single(await db.KitchenTicketItems.AsNoTracking().ToArrayAsync());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static Task OpenAsync(LocalSyncService sync) =>
         PushOneAsync(sync, Waiter(), "OPEN", "order.open", new
         {
