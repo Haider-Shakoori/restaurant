@@ -35,7 +35,8 @@ public sealed class PrinterRecoveryPolicyTests
             "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
         Assert.Contains("await PrinterQueueRecoveryPanelAsync(workflow)", pages);
         Assert.Contains("MessageBoxButton.YesNo", pages);
-        Assert.Contains("await workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt)", pages);
+        Assert.Contains("DesktopUiWork.RunAsync(() =>", pages);
+        Assert.Contains("workflow.RequeuePrintJobAsync(selected.Id, selected.Receipt)", pages);
     }
 
     private static string RepositoryRoot()
