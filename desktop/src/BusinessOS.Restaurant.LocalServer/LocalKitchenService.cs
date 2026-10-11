@@ -1249,7 +1249,7 @@ public sealed class LocalKitchenService
             db,
             actor,
             "kitchen",
-            "kitchen.item_ready",
+            transferToExpo ? "kitchen.item_to_expo" : "kitchen.item_ready",
             null,
             "kitchen_ticket_item",
             item.Id,
