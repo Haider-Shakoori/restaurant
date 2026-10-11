@@ -417,7 +417,9 @@ public sealed class LocalKitchenService
         await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
-        if (items.Length > 0 && !round.ExpoEnabled)
+        if (items.Length > 0 &&
+            (!round.ExpoEnabled || (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
+                .ReadyOnlyKotEnabled))
         {
             var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
             AddChange(db, "order", order.Id, order.WaiterId,
@@ -1220,10 +1222,13 @@ public sealed class LocalKitchenService
                 $"Kitchen item cannot move from {item.Status} to ready.");
         }
 
-        // Each submitted KOT round snapshots its workflow at dispatch, so
-        // changing Settings only affects NEW rounds. Staged rounds require
-        // START; optional Expo requires an Expo pass before waiter pickup.
-        if (round.PreparingEnabled && item.Status is "queued" or "active")
+        // For ready-only restaurants, use the current simplified kitchen mode
+        // even for older queued KOT rounds that captured Preparing / Expo.
+        // Preserve the round's history, but don't force an obsolete START
+        // before a waiter can receive the pickup notification.
+        var readyOnly = (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
+            .ReadyOnlyKotEnabled;
+        if (!readyOnly && round.PreparingEnabled && item.Status is "queued" or "active")
             throw new LocalSyncConflictException("order_state_conflict",
                 "Start preparation before marking this staged KOT ready.");
         if (item.Status is not ("queued" or "active" or "preparing" or "expo"))
@@ -1231,7 +1236,7 @@ public sealed class LocalKitchenService
                 $"Kitchen item cannot move from {item.Status} to ready.");
 
         var now = DateTimeOffset.UtcNow;
-        var transferToExpo = round.ExpoEnabled && item.Status == "preparing";
+        var transferToExpo = !readyOnly && round.ExpoEnabled && item.Status == "preparing";
         item.Status = transferToExpo ? "expo" : "ready";
         if (!transferToExpo) item.ReadyAt ??= now;
 
