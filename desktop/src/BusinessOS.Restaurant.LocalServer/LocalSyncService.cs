@@ -243,6 +243,7 @@ public sealed class LocalSyncService
             result = mutation.Operation switch
             {
                 "order.open" => await OpenOrderAsync(db, principal, mutation, cancellationToken),
+                "order.guests.update" => await UpdateGuestsAsync(db, principal, mutation, cancellationToken),
                 "order.item.add" => await AddOrderItemAsync(db, principal, mutation, cancellationToken),
                 "order.submit" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
                 "order.kot.send" => await SubmitOrderAsync(db, principal, mutation, cancellationToken),
@@ -454,6 +455,51 @@ public sealed class LocalSyncService
         }
 
         return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
+    }
+
+    // Late arrivals stay on the same occupied table and order. This does
+    // not create KOT tickets, reset sent rounds or alter existing payments.
+    private async Task<Dictionary<string, object?>> UpdateGuestsAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+        var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
+        var count = RequiredInt(mutation.Payload, "guest_count");
+        if (count is < 1 or > 100)
+            throw new LocalSyncConflictException("invalid_payload", "Guest count must be 1–100.");
+
+        var order = await db.Orders.SingleOrDefaultAsync(
+            x => x.ClientOrderId == clientOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Open order not found.");
+        AuthorizeOrder(principal, order);
+        if (order.ServiceType != "dine_in" || order.Status is "billed" or "closed" or "cancelled")
+            throw new LocalSyncConflictException("order_state_conflict",
+                "Guests can only be changed on an active dine-in order before billing.");
+
+        var table = await db.DiningTables.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == order.DiningTableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("dependency_missing", "Order table missing.");
+        if (count > table.Capacity)
+            throw new LocalSyncConflictException("invalid_payload",
+                $"Table capacity is {table.Capacity}; choose a bigger table before adding more guests.");
+
+        var previous = order.GuestCount;
+        if (previous != count)
+        {
+            order.GuestCount = count;
+            order.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
+            AddChange(db, "order", order.Id, order.WaiterId, snapshot);
+            LocalOperationsControlService.AddAudit(db, principal,
+                "orders", "order.guests_updated", order.BranchId, "order", order.Id,
+                new { client_order_id = clientOrderId, old_guest_count = previous, new_guest_count = count });
+        }
+
+        return Accepted(mutation, "order", order.Id, clientOrderId,
+            await OrderSnapshotAsync(db, order, cancellationToken));
     }
 
     private async Task<Dictionary<string, object?>> AddOrderItemAsync(
