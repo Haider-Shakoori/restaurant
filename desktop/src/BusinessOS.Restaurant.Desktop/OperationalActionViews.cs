@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Media;
 using System.Text.Json;
 using System.Windows;
@@ -20,6 +21,7 @@ internal static class OperationalActionViews
 
     public static async Task<FrameworkElement> PosAsync()
     {
+        var navigationClock = Stopwatch.StartNew();
         // Materialize all SQLite query results on a background thread before
         // constructing any WPF controls. SQLite async providers may block
         // synchronously while waiting for locks.
@@ -76,11 +78,15 @@ internal static class OperationalActionViews
                 .OrderByDescending(x => x.IssuedAt)
                 .Select(x => x.Row)
                 .ToList();
+            // The visible Orders list is capped at 100. Do not load the item
+            // history for every old unclosed order when POS first opens.
+            var visibleOrderIds = orders.Select(x => x.Id).ToArray();
             // SQLite cannot translate ORDER BY on DateTimeOffset; sort the projected rows in memory.
             var orderLines = (await (
                 from line in db.OrderItems.AsNoTracking()
                 join order in db.Orders.AsNoTracking() on line.OrderId equals order.Id
-                where order.Status != "closed" && order.Status != "cancelled" &&
+                where visibleOrderIds.Contains(order.Id) &&
+                      order.Status != "closed" && order.Status != "cancelled" &&
                       line.Status != "voided" && line.Status != "cancelled"
                 select new
                 {
@@ -97,6 +103,7 @@ internal static class OperationalActionViews
             return (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines);
         });
         var (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines) = pageData;
+        Trace.WriteLine($"[Restaurant] POS SQLite: {navigationClock.ElapsedMilliseconds} ms; menu={menu.Count}, activeOrders={orders.Count}, lines={orderLines.Count}");
 
         var workflow = new DesktopRestaurantWorkflowService();
         var root = new Grid();
@@ -1450,6 +1457,7 @@ internal static class OperationalActionViews
         startOrderFromList.Click += (_, _) => OpenModal("order");
         // Escape must dismiss an open modal, not leave full-screen POS.
         posHost.Tag = (Func<bool>)CloseModal;
+        Trace.WriteLine($"[Restaurant] POS view constructed: {navigationClock.ElapsedMilliseconds} ms");
         return posHost;
     }
 
