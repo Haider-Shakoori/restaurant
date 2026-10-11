@@ -48,18 +48,55 @@ internal static class RestaurantPhotoPosCatalog
         // hitting WindowsSessionStore for every tile each time the page opens.
         var tenantOriginTask = Task.Run(async () =>
             (await new WindowsSessionStore().LoadAsync().ConfigureAwait(false))?.TenantBaseUrl);
-        var tileControls = new List<(PhotoPosItem Item, Button Tile)>();
+        const int BatchSize = 48;
+        var limit = BatchSize;
+        var rendered = new Dictionary<string, Button>(StringComparer.Ordinal);
+        var showMore = new Button
+        {
+            Name = "PosPhotoLoadMore",
+            Content = "Load more dishes",
+            MinHeight = 40,
+            Margin = new Thickness(0, 10, 0, 5),
+        };
+        showMore.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var showing = new TextBlock
+        {
+            Name = "PosPhotoResultsCount",
+            Margin = new Thickness(4, 8, 4, 0),
+        };
+        showing.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
         void Filter()
         {
             var text = search.Text.Trim();
-            foreach (var (item, tile) in tileControls)
-                tile.Visibility = (activeCategory == "All items" ||
-                    string.Equals(item.Category, activeCategory, StringComparison.OrdinalIgnoreCase)) &&
-                    (item.Name.Contains(text, StringComparison.OrdinalIgnoreCase) ||
-                     item.Category.Contains(text, StringComparison.OrdinalIgnoreCase))
-                    ? Visibility.Visible : Visibility.Collapsed;
+            var matching = items.Where(item =>
+                (activeCategory == "All items" ||
+                 string.Equals(item.Category, activeCategory, StringComparison.OrdinalIgnoreCase)) &&
+                (item.Name.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                 item.Category.Contains(text, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            // WPF WrapPanel is not virtualized. Materialize only the first
+            // page of tiles, then add more as the operator requests them.
+            // Filtering still searches ALL products, including those not yet
+            // represented by UI controls.
+            cards.Children.Clear();
+            foreach (var item in matching.Take(limit))
+            {
+                if (!rendered.TryGetValue(item.Id, out var tile))
+                {
+                    tile = CreateTile(item);
+                    rendered[item.Id] = tile;
+                }
+                cards.Children.Add(tile);
+            }
+            showing.Text = $"Showing {Math.Min(limit, matching.Count)} of {matching.Count} dishes";
+            showMore.Visibility = matching.Count > limit ? Visibility.Visible : Visibility.Collapsed;
         }
+        showMore.Click += (_, _) =>
+        {
+            limit += BatchSize;
+            Filter();
+        };
 
         foreach (var category in new[] { "All items" }
             .Concat(items.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase)))
@@ -70,13 +107,14 @@ internal static class RestaurantPhotoPosCatalog
             filter.Click += (_, _) =>
             {
                 activeCategory = category;
+                limit = BatchSize;
                 Filter();
             };
             categoryFilters.Children.Add(filter);
         }
         root.Children.Add(categoryFilters);
 
-        foreach (var item in items)
+        Button CreateTile(PhotoPosItem item)
         {
             var stack = new StackPanel();
             var imageFrame = new Grid { Height = 104, Background = new SolidColorBrush(Color.FromRgb(232, 238, 244)) };
@@ -88,8 +126,11 @@ internal static class RestaurantPhotoPosCatalog
             {
                 var image = new Image { Stretch = Stretch.UniformToFill, Visibility = Visibility.Collapsed };
                 imageFrame.Children.Add(image);
+                var loading = false;
                 image.Loaded += async (_, _) =>
                 {
+                    if (loading || image.Source is not null) return;
+                    loading = true;
                     try
                     {
                         var origin = await tenantOriginTask;
@@ -122,6 +163,7 @@ internal static class RestaurantPhotoPosCatalog
                     {
                         // Missing internet or corrupt image: a usable dish tile remains.
                     }
+                    finally { loading = false; }
                 };
             }
             stack.Children.Add(imageFrame);
@@ -145,11 +187,17 @@ internal static class RestaurantPhotoPosCatalog
                 Margin = new Thickness(0, 0, 9, 9),
                 ToolTip = $"Select {item.Name} · AFN {item.Price:N2}" };
             tile.Click += (_, _) => onSelect(item);
-            cards.Children.Add(tile);
-            tileControls.Add((item, tile));
+            return tile;
         }
-        search.TextChanged += (_, _) => Filter();
+        search.TextChanged += (_, _) =>
+        {
+            limit = BatchSize;
+            Filter();
+        };
+        Filter();
+        root.Children.Add(showing);
         root.Children.Add(cards);
+        root.Children.Add(showMore);
 
         if (items.Count == 0)
         {
