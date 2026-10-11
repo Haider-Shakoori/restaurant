@@ -2196,42 +2196,13 @@ internal static class OperationalActionViews
             Func<CancellationToken, Task>? primaryAction = null;
             string? success = null;
 
-            if ((canProduce || canExpo && row.ExpoEnabled && row.Status == "expo") &&
-                (row.Status is "queued" or "active" or "preparing" or "expo"))
+            if (canProduce && row.Status is "queued" or "active" or "preparing" or "expo")
             {
-                if (settings.ReadyOnlyKotEnabled)
-                {
-                    primary = Button("READY");
-                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                    success = $"{row.ItemName} is READY. The waiter gets a pickup update through LAN/mobile sync.";
-                }
-                else if (row.PreparingEnabled && row.Status is "queued" or "active")
-                {
-                    primary = Button("START");
-                    primaryAction = token => workflow.StartKitchenItemAsync(row.ItemId, token);
-                    success = $"{row.ItemName} started preparation.";
-                }
-                else if (row.ExpoEnabled && row.Status == "preparing")
-                {
-                    primary = Button("TO EXPO");
-                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                    success = $"{row.ItemName} sent to Expo. Pickup is not yet ready.";
-                }
-                else if (row.ExpoEnabled && row.Status == "expo")
-                {
-                    if (canExpo)
-                    {
-                        primary = Button("PASS EXPO");
-                        primaryAction = token => workflow.PassExpoItemAsync(row.ItemId, token);
-                        success = $"{row.ItemName} READY — waiter receives pickup update after sync.";
-                    }
-                }
-                else
-                {
-                    primary = Button("READY");
-                    primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
-                    success = $"{row.ItemName} READY — waiter receives pickup update after sync.";
-                }
+                primary = Button("READY");
+                primary.Name = "KitchenReadyItemButton";
+                primary.ToolTip = "F2 · Mark this dish ready and alert the assigned waiter";
+                primaryAction = token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token);
+                success = $"{row.ItemName} is READY. Waiter pickup alert will appear on the mobile device after sync.";
             }
 
             if (primary is not null && primaryAction is not null)
@@ -2489,28 +2460,16 @@ internal static class OperationalActionViews
 
         (string Label, Func<CancellationToken, Task>? Action, string Success) KitchenNextStep(KitchenItemCard row)
         {
-            if (settings.ReadyOnlyKotEnabled)
-                return ("READY", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
-                    $"{row.ItemName} ready. Waiter notified through mobile/LAN synchronization.");
-            if (row.PreparingEnabled && row.Status is "queued" or "active")
-                return ("START", token => workflow.StartKitchenItemAsync(row.ItemId, token),
-                    $"{row.ItemName} started.");
-            if (row.ExpoEnabled && row.Status == "preparing")
-                return ("TO EXPO", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
-                    $"{row.ItemName} moved to Expo. No waiter alert yet.");
-            if (row.ExpoEnabled && row.Status == "expo")
-                return ("PASS EXPO", canExpo ? token => workflow.PassExpoItemAsync(row.ItemId, token) : null,
-                    $"{row.ItemName} ready for waiter pickup.");
+            // Single operational action, independent of legacy kitchen round flags.
             return ("READY", token => workflow.MarkKitchenItemReadyAsync(row.ItemId, token),
-                $"{row.ItemName} ready for waiter pickup.");
+                $"{row.ItemName} ready. Waiter pickup alert available after LAN/mobile sync.");
         }
 
         void RefreshSelectedDishes()
         {
             var oldId = (selectedDish.SelectedItem as Choice)?.Id;
             var options = rows.Where(x => x.Status is "queued" or "active" or "preparing" or "expo")
-                .Where(x => canProduce && (!x.ExpoEnabled || x.Status != "expo" || canExpo) ||
-                            canExpo && x.ExpoEnabled && x.Status == "expo")
+                .Where(x => canProduce)
                 .OrderByDescending(x => x.Priority == "rush")
                 .ThenBy(x => x.QueuedAt)
                 .Select(x => new Choice(x.ItemId,
