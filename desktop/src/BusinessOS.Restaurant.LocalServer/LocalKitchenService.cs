@@ -430,10 +430,26 @@ public sealed class LocalKitchenService
         return snapshot;
     }
 
-    public async Task<object> ReadyItemAsync(
+    public Task<object> ReadyItemAsync(
         string ticketItemId,
         LocalTerminalPrincipal actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        ReadyItemInternalAsync(ticketItemId, actor, cancellationToken, directReady: false);
+
+    // Desktop one-tap READY. Preserve optional staged APIs and old KOT
+    // history, but let a kitchen operator directly mark queued dishes
+    // ready for waiter pickup even when an old round captured START/EXPO.
+    public Task<object> ReadyItemDirectAsync(
+        string ticketItemId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken) =>
+        ReadyItemInternalAsync(ticketItemId, actor, cancellationToken, directReady: true);
+
+    private async Task<object> ReadyItemInternalAsync(
+        string ticketItemId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken,
+        bool directReady)
     {
         EnsureKitchenRole(actor);
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
@@ -447,7 +463,8 @@ public sealed class LocalKitchenService
         var round = await RequireRoundAsync(db, ticket, cancellationToken);
 
         var wasReady = item.Status == "ready";
-        await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken);
+        await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken,
+            forceReady: directReady);
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         // TicketSnapshotAsync materializes AsNoTracking() records. Flush the
         // updated kitchen item within the same transaction before reading
@@ -1205,7 +1222,8 @@ public sealed class LocalKitchenService
         LocalKotRound round,
         string itemId,
         LocalTerminalPrincipal actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forceReady = false)
     {
         var item = await db.KitchenTicketItems
             .SingleAsync(value => value.Id == itemId, cancellationToken);
@@ -1226,7 +1244,8 @@ public sealed class LocalKitchenService
         // even for older queued KOT rounds that captured Preparing / Expo.
         // Preserve the round's history, but don't force an obsolete START
         // before a waiter can receive the pickup notification.
-        var readyOnly = (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
+        var readyOnly = forceReady ||
+            (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
             .ReadyOnlyKotEnabled;
         if (!readyOnly && round.PreparingEnabled && item.Status is "queued" or "active")
             throw new LocalSyncConflictException("order_state_conflict",
