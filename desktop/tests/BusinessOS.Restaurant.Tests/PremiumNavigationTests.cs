@@ -107,7 +107,8 @@ public sealed class PremiumNavigationTests
         var navigate = source.Split("private async Task NavigateAsync(string? key)", StringSplitOptions.None)[1];
         Assert.Contains("var requestId = _pageRequests.Begin();", refresh);
         Assert.Contains("var requestId = _pageRequests.Begin();", navigate);
-        Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", refresh);
+        Assert.Contains("_pageRequests.IsCurrent(requestId) && CurrentRoute == route", refresh);
+        Assert.Contains("if (_pageRequests.IsCurrent(requestId))", refresh);
         Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", navigate);
         Assert.Contains("_pageRequests.IsCurrent(requestId) && CurrentRoute == route", refresh);
         Assert.True(refresh.IndexOf("_pageRequests.Begin()", StringComparison.Ordinal) <
