@@ -248,7 +248,9 @@ public sealed class KitchenExecutionTests
                 Assert.Equal("expo", (await db.Orders.AsNoTracking().SingleAsync()).Status);
                 Assert.DoesNotContain(await db.Changes.AsNoTracking()
                     .Where(x => x.EntityType == "order").ToArrayAsync(),
-                    x => (x.DataJson?.Contains("\\"ready\\"", StringComparison.OrdinalIgnoreCase) ?? false));
+                    x => x.DataJson is not null &&
+                         JsonDocument.Parse(x.DataJson).RootElement.GetProperty("status")
+                             .GetString() == "ready");
             }
 
             await kitchen.PassExpoItemAsync(itemId, manager, CancellationToken.None);
@@ -260,7 +262,9 @@ public sealed class KitchenExecutionTests
                 Assert.Equal("ready", order.Status);
                 Assert.Contains(await db.Changes.AsNoTracking()
                     .Where(x => x.EntityType == "order" && x.OwnerUserId == 1).ToArrayAsync(),
-                    x => (x.DataJson?.Contains("\\"ready\\"", StringComparison.OrdinalIgnoreCase) ?? false));
+                    x => x.DataJson is not null &&
+                         JsonDocument.Parse(x.DataJson).RootElement.GetProperty("status")
+                             .GetString() == "ready");
             }
         }
         finally { Directory.Delete(root, recursive: true); }
