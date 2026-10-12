@@ -1,5 +1,6 @@
 import '../core/api/mobile_api_client.dart';
 import '../core/connection/connection_resolver.dart';
+import '../core/notifications/restaurant_local_notifications.dart';
 import '../core/notifications/restaurant_push_notifications.dart';
 import '../core/security/offline_lease_verifier.dart';
 import '../core/security/secure_credential_store.dart';
@@ -21,6 +22,7 @@ class AppDependencies {
     required this.syncCoordinator,
     required this.orders,
     required this.pushNotifications,
+    required this.localNotifications,
   });
 
   final LocalDatabase database;
@@ -33,6 +35,10 @@ class AppDependencies {
   final SyncCoordinator syncCoordinator;
   final OfflineOrderRepository orders;
   final RestaurantPushNotifications pushNotifications;
+
+  /// On-device ready-for-pickup reminders. Works over the restaurant LAN with
+  /// no internet; backs up the in-app banner when the waiter is on another app.
+  final RestaurantLocalNotifications localNotifications;
 
   static Future<AppDependencies> create() async {
     final database = await LocalDatabase.open();
@@ -59,6 +65,7 @@ class AppDependencies {
       api: api,
       currentSession: credentials.readSession,
     );
+    final localNotifications = RestaurantLocalNotifications();
     final orders = OfflineOrderRepository(
       database: database,
       credentials: credentials,
@@ -76,6 +83,7 @@ class AppDependencies {
       syncCoordinator: syncCoordinator,
       orders: orders,
       pushNotifications: pushNotifications,
+      localNotifications: localNotifications,
     );
   }
 }

@@ -35,6 +35,7 @@ class _WaiterAppState extends State<WaiterApp> {
 
     if (session != null) {
       await widget.dependencies.pushNotifications.initialize();
+      await widget.dependencies.localNotifications.initialize();
       unawaited(widget.dependencies.pushNotifications.registerAfterLogin());
       widget.dependencies.syncCoordinator.start();
       unawaited(widget.dependencies.syncCoordinator.syncNow());
