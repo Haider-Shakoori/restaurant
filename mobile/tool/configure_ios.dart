@@ -21,6 +21,11 @@ void main() {
     return;
   }
 
+  // The home-screen label and app name must be Restaurant, regardless of
+  // the generated Flutter/Xcode project name or iOS bundle identifier.
+  _setString(plist, 'CFBundleDisplayName', 'Restaurant');
+  _setString(plist, 'CFBundleName', 'Restaurant');
+
   _setString(
     plist,
     'NSCameraUsageDescription',
@@ -54,6 +59,8 @@ void main() {
     true,
   );
 
+  _verify(plist, 'CFBundleDisplayName', 'Restaurant');
+  _verify(plist, 'CFBundleName', 'Restaurant');
   _verify(
     plist,
     'NSCameraUsageDescription',
