@@ -25,6 +25,7 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
     public DbSet<LocalRestaurantSetting> RestaurantSettings => Set<LocalRestaurantSetting>();
     public DbSet<LocalKotRound> KotRounds => Set<LocalKotRound>();
     public DbSet<LocalKotCounter> KotCounters => Set<LocalKotCounter>();
+    public DbSet<LocalOrderCounter> OrderCounters => Set<LocalOrderCounter>();
     public DbSet<LocalKitchenTicket> KitchenTickets => Set<LocalKitchenTicket>();
     public DbSet<LocalKitchenTicketItem> KitchenTicketItems => Set<LocalKitchenTicketItem>();
     public DbSet<LocalKitchenPrinterBinding> KitchenPrinterBindings => Set<LocalKitchenPrinterBinding>();
@@ -221,6 +222,12 @@ public sealed class RestaurantDbContext(DbContextOptions<RestaurantDbContext> op
         modelBuilder.Entity<LocalKotCounter>(entity =>
         {
             entity.ToTable("kot_counters");
+            entity.HasKey(value => new { value.BranchId, value.BusinessDate });
+        });
+
+        modelBuilder.Entity<LocalOrderCounter>(entity =>
+        {
+            entity.ToTable("order_counters");
             entity.HasKey(value => new { value.BranchId, value.BusinessDate });
         });
 

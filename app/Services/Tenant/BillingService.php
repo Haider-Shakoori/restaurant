@@ -283,7 +283,20 @@ class BillingService
             'closed_at' => now(),
         ]);
 
-        $table?->update(['status' => DiningTable::STATUS_AVAILABLE]);
+        if ($table !== null) {
+            // Only free the table when no other active order still needs it.
+            $otherActiveOrder = Order::query()
+                ->where('dining_table_id', $table->id)
+                ->whereKeyNot($order->id)
+                ->whereIn('status', Order::ACTIVE_STATUSES)
+                ->exists();
+
+            $table->update([
+                'status' => $otherActiveOrder
+                    ? DiningTable::STATUS_OCCUPIED
+                    : DiningTable::STATUS_AVAILABLE,
+            ]);
+        }
 
         $this->billEvent($bill, $actor, 'bill.paid', [
             'paid_amount' => $bill->fresh()->paid_amount,

@@ -51,4 +51,38 @@ public sealed class DashboardSalesTrendTests
 
         Assert.Equal(55m, sales.HourlyTotals[12]); // 08:00 UTC is 12:30 in Kabul
     }
+
+    [Fact]
+    public void Midnight_boundary_keeps_todays_cards_on_the_local_day()
+    {
+        // 20:00 UTC is 00:30 Kabul on the NEXT local day: the prior local day's
+        // receipts must not leak into today's cards.
+        var asOf = new DateTimeOffset(2026, 10, 8, 20, 0, 0, TimeSpan.Zero);
+        var sales = DashboardSalesTrend.Aggregate(asOf, new[]
+        {
+            (new DateTimeOffset(2026, 10, 8, 19, 0, 0, TimeSpan.Zero), 400m), // 23:30 Kabul Oct 8
+            (new DateTimeOffset(2026, 10, 8, 19, 45, 0, TimeSpan.Zero), 125m), // 00:15 Kabul Oct 9
+        }, Kabul);
+
+        Assert.Equal(new DateOnly(2026, 10, 9), sales.BusinessDay);
+        Assert.Equal(125m, sales.Total);
+    }
+
+    [Fact]
+    public void Historical_receipts_never_affect_todays_totals()
+    {
+        // The dashboard reads only the recent query window; even when an older
+        // bill is supplied, the local-day filter keeps historical money out of
+        // today's figures while historical reports keep their own date ranges.
+        var asOf = new DateTimeOffset(2026, 10, 8, 12, 0, 0, TimeSpan.Zero);
+        var sales = DashboardSalesTrend.Aggregate(asOf, new[]
+        {
+            (asOf.AddDays(-30), 9_999m),
+            (asOf.AddHours(-49), 5_000m),
+            (asOf.AddHours(-2), 80m),
+        }, Kabul);
+
+        Assert.Equal(new DateOnly(2026, 10, 8), sales.BusinessDay);
+        Assert.Equal(80m, sales.Total);
+    }
 }

@@ -49,7 +49,7 @@ class RestaurantSettingsService
         return $values;
     }
 
-    public function put(array $values, ?string $branchId = null): array
+    public function put(array $values, ?string $branchId = null, ?int $actorUserId = null): array
     {
         foreach ($values as $key => $value) {
             if (! array_key_exists($key, self::DEFAULTS)) {
@@ -63,6 +63,7 @@ class RestaurantSettingsService
                 ],
                 [
                     'value' => $this->serialize($value),
+                    'updated_by_user_id' => $actorUserId,
                 ],
             );
         }

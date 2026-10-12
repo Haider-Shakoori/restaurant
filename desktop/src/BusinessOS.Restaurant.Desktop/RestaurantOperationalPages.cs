@@ -131,7 +131,11 @@ internal static class RestaurantOperationalPages
                 x.Status == "queued" || x.Status == "active" || x.Status == "preparing" || x.Status == "ready");
             // Read only bill timestamps and totals; interpret the business day in local time.
             // The chart uses exactly the same billed totals as the headline (never sample points).
-            var billRows = await db.Bills.AsNoTracking()
+            // Only the recent business-day window is read so growing history cannot slow the
+            // dashboard; the business day itself is still resolved in local time below.
+            var trendWindowStartUtc = now.ToUniversalTime().AddHours(-48);
+            var billRows = await OperationalWindowQueries.BillsSince(db, trendWindowStartUtc)
+                .AsNoTracking()
                 .Select(x => new { x.IssuedAt, x.Total })
                 .ToListAsync();
             var salesTrend = DashboardSalesTrend.Aggregate(
@@ -145,15 +149,16 @@ internal static class RestaurantOperationalPages
             {
                 await using var accounting = factory.Create();
                 var since = salesTrend.BusinessDay;
+                var profitWindowStartUtc = now.ToUniversalTime().AddHours(-48);
                 var expenses = await accounting.Expenses.AsNoTracking()
                     .Where(x => x.ExpenseDate == since)
                     .Select(x => x.Amount).ToListAsync();
-                var cashRows = await accounting.Payments.AsNoTracking()
-                    .Where(x => x.Status == "posted")
+                var cashRows = await OperationalWindowQueries.PostedPaymentsSince(accounting, profitWindowStartUtc)
+                    .AsNoTracking()
                     .Select(x => new { x.ReceivedAt, x.Amount })
                     .ToListAsync();
-                var usedRows = await accounting.StockMovements.AsNoTracking()
-                    .Where(x => x.MovementType == "consumption")
+                var usedRows = await OperationalWindowQueries.ConsumptionMovementsSince(accounting, profitWindowStartUtc)
+                    .AsNoTracking()
                     .Select(x => new { x.SourceType, x.QuantityDelta, x.UnitCost, x.OccurredAt })
                     .ToListAsync();
                 var recipe = await accounting.RestaurantSettings.AsNoTracking()
@@ -189,79 +194,92 @@ internal static class RestaurantOperationalPages
         });
         var (now, openOrders, activeTables, activeKot, salesTrend, sales, dailyProfit, stockBalances, stockAlerts, trackedReorderBalances) = workspaceData;
 
+        // Local-first license snapshot: the dashboard must render subscription
+        // state without internet, exactly like the offline ordering tablets
+        // that talk to this workstation over the restaurant LAN.
+        var activationSnapshot = (await new BusinessOS.Restaurant.Licensing.WindowsActivationStore()
+            .LoadAsync())?.Snapshot;
+        var planName = activationSnapshot?.PlanName ?? "Not activated";
+        var subscriptionEndsAt = activationSnapshot?.SubscriptionEndsAt;
+        var offlineValidUntil = activationSnapshot?.OfflineValidUntil;
+        var daysRemaining = subscriptionEndsAt is null
+            ? (int?)null
+            : Math.Max(0, (int)Math.Ceiling((subscriptionEndsAt.Value - now).TotalDays));
+
         var root = new StackPanel();
+
+        // Hero band: today's headline plus live workstation status pills.
+        root.Children.Add(DashboardHero(now, sales, openOrders, activeTables, activeKot,
+            diagnostics, daysRemaining, planName));
 
         root.Children.Add(DashboardQuickActions());
 
         var netLabel = dailyProfit.IsComplete
             ? $"AFN {dailyProfit.NetOperatingProfit:N2}"
             : $"AFN {dailyProfit.NetOperatingProfit:N2}*";
-        root.Children.Add(DashboardPanel(
-            "Profit & Loss · Today",
-            $"Billed revenue and actual ingredient use · {dailyProfit.ConsumptionMode} costing",
-            BuildStatusRows(
-                ("Billed revenue", $"AFN {dailyProfit.Revenue:N2}"),
-                ("Ingredient consumption (valued)", $"AFN {dailyProfit.CostedFoodConsumption:N2}"),
-                ("Gross profit (valued)", $"AFN {dailyProfit.GrossProfit:N2}"),
-                ("Other expenses", $"AFN {dailyProfit.OperatingExpenses:N2}"),
-                ("Operating P&L", netLabel),
-                ("Cash collected (separate)", $"AFN {dailyProfit.CashCollected:N2}"),
-                ("Accounting basis", dailyProfit.IsComplete
-                    ? "Consumed stock, not purchased stock"
-                    : dailyProfit.ConsumptionMode.StartsWith("Manual", StringComparison.OrdinalIgnoreCase)
-                        ? $"PROVISIONAL · depends on completed physical stock counts; {dailyProfit.UnvaluedConsumptionMovements} unvalued entries"
-                        : $"PROVISIONAL · {dailyProfit.UnvaluedConsumptionMovements} historical ingredient use entries lack cost"))));
-
+        var positive = Color.FromRgb(34, 160, 94);
+        var negative = Color.FromRgb(220, 70, 70);
         root.Children.Add(DashboardCards(
             ("▥", "TOTAL SALES TODAY", $"AFN {sales:N2}", "Restaurant sales today", Color.FromRgb(34, 197, 94)),
             ("▣", "OPEN ORDERS", openOrders.ToString(), "Orders currently in progress", Color.FromRgb(14, 165, 233)),
             ("▦", "ACTIVE TABLES", activeTables.ToString(), "Occupied dining tables", Color.FromRgb(245, 158, 11)),
-            ("☷", "KITCHEN / KOT", activeKot.ToString(), "Active production tickets", Color.FromRgb(236, 72, 153)),
-            ("◉", "NETWORK MODE", diagnostics.NetworkMode, "Current sync route", Color.FromRgb(124, 58, 237))));
+            ("☷", "KITCHEN / KOT", activeKot.ToString(), "Active production tickets", Color.FromRgb(236, 72, 153))));
 
-        var overviewGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
-        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star) });
-        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        overviewGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        // Sales trend next to the subscription rail. The rail reads the signed
+        // local lease so the dashboard stays complete while offline.
+        var mainGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
+        mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2.2, GridUnitType.Star) });
+        mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        mainGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var operations = DashboardPanel(
             "Restaurant Overview",
             $"Hourly billed sales · {salesTrend.BusinessDay:dd MMM yyyy} (local time)",
             BuildOperationsOverview(sales, openOrders, activeTables, activeKot, salesTrend, now.Hour));
         Grid.SetColumn(operations, 0);
-        overviewGrid.Children.Add(operations);
+        mainGrid.Children.Add(operations);
 
-        var right = new StackPanel();
-        right.Children.Add(DashboardPanel(
-            "License & Connectivity",
-            diagnostics.LeaseStatus,
-            BuildStatusRows(
-                ("Network", diagnostics.NetworkMode),
-                ("Waiter devices", diagnostics.TerminalSummary),
-                ("Local-first", "Available"))));
-        right.Children.Add(DashboardPanel(
-            "Quick Status",
-            "Today at a glance",
-            BuildStatusRows(
-                ("Orders", openOrders.ToString()),
-                ("Tables", activeTables.ToString()),
-                ("Kitchen", activeKot.ToString()))));
-        Grid.SetColumn(right, 2);
-        overviewGrid.Children.Add(right);
+        var rail = new StackPanel();
+        rail.Children.Add(BuildSubscriptionPanel(
+            planName, subscriptionEndsAt, offlineValidUntil, daysRemaining,
+            diagnostics.TerminalSummary));
+        rail.Children.Add(DashboardPanel(
+            "Live Operations",
+            "Desktop, LAN and offline health",
+            new TextBlock
+            {
+                Text = diagnostics.StatusMessage,
+                TextWrapping = TextWrapping.Wrap,
+                FontSize = 12.5,
+                Margin = new Thickness(2, 2, 2, 2),
+            }));
+        Grid.SetColumn(rail, 2);
+        mainGrid.Children.Add(rail);
 
         // Keep the detail column useful even on 1024 px cashier displays.
-        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        overviewGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.SizeChanged += (_, _) =>
         {
-            var narrow = root.ActualWidth < 920;
-            overviewGrid.ColumnDefinitions[0].Width = new GridLength(narrow ? 1 : 3, GridUnitType.Star);
-            overviewGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
-            overviewGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(right, narrow ? 0 : 2);
-            Grid.SetRow(right, narrow ? 1 : 0);
+            var narrow = root.ActualWidth < 980;
+            mainGrid.ColumnDefinitions[0].Width = new GridLength(narrow ? 1 : 2.2, GridUnitType.Star);
+            mainGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            mainGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(rail, narrow ? 0 : 2);
+            Grid.SetRow(rail, narrow ? 1 : 0);
         };
-        root.Children.Add(overviewGrid);
+        root.Children.Add(mainGrid);
+
+        root.Children.Add(DashboardPanel("Profit & Loss · Today",
+            $"{dailyProfit.ConsumptionMode} · Actual recorded consumption; purchases remain inventory. " +
+            (dailyProfit.IsComplete ? "" : $"Provisional · {dailyProfit.UnvaluedConsumptionMovements} unvalued entries."),
+            DashboardCards(
+                ("+", "BILLED REVENUE", $"AFN {dailyProfit.Revenue:N2}", "Billed sales", positive),
+                ("−", "MATERIAL USAGE", $"AFN {dailyProfit.CostedFoodConsumption:N2}", "Recorded consumption", negative),
+                ("▥", "GROSS PROFIT", $"AFN {dailyProfit.GrossProfit:N2}", "Revenue less material usage", dailyProfit.GrossProfit >= 0 ? positive : negative),
+                ("−", "EXPENSES", $"AFN {dailyProfit.OperatingExpenses:N2}", "Operating expenses", negative),
+                (dailyProfit.NetOperatingProfit >= 0 ? "↑" : "↓", dailyProfit.NetOperatingProfit >= 0 ? "OPERATING PROFIT" : "OPERATING LOSS", netLabel, "After materials and expenses", dailyProfit.NetOperatingProfit >= 0 ? positive : negative),
+                ("▣", "CASH COLLECTED", $"AFN {dailyProfit.CashCollected:N2}", "Separate from profit", positive))));
 
         var lowerGrid = new Grid { Margin = new Thickness(0, 0, 0, 14) };
         lowerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -308,16 +326,6 @@ internal static class RestaurantOperationalPages
                 ? $"{stockAlerts.Count} branch ingredient balance(s) at or below reorder level"
                 : "Active branch inventory thresholds",
             BuildStockAlertSummary(stockAlerts, stockBalances.Count, trackedReorderBalances)));
-        root.Children.Add(DashboardPanel(
-            "Live Operations",
-            "Desktop, LAN and offline health",
-            new TextBlock
-            {
-                Text = diagnostics.StatusMessage,
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 12.5,
-                Margin = new Thickness(2, 2, 2, 2),
-            }));
 
         return Scroll(root);
     }
@@ -946,9 +954,10 @@ internal static class RestaurantOperationalPages
                                   balance == null ? 0m : balance.Quantity, item.ReorderLevel,
                                   valuation == null ? 0m : valuation.AverageUnitCost,
                                   valuation == null ? 0m : valuation.Value)).ToListAsync();
-            return (factory, rows);
+            var history = await BuildConsumptionHistoryAsync(db);
+            return (factory, rows, history);
         });
-        var (factory, rows) = workspaceData;
+        var (factory, rows, history) = workspaceData;
         var modules = await DesktopUiWork.RunAsync(() =>
             new LocalRestaurantSettingsService(factory).GetModulesAsync());
 
@@ -1250,7 +1259,7 @@ internal static class RestaurantOperationalPages
         var countRemaining = new Button
         {
             Name = "InventoryCountRemainingStock",
-            Content = "Count Remaining Stock · Record Consumption",
+            Content = "Record Consumption / Remaining Stock",
             Height = 38, MinWidth = 270,
             Margin = new Thickness(0, 0, 10, 8),
             Visibility = modules.AutomaticRecipeConsumptionEnabled
@@ -1278,17 +1287,17 @@ internal static class RestaurantOperationalPages
                 });
                 var dialog = new Window
                 {
-                    Title = "Count Remaining Stock · Manual Consumption",
+                    Title = "Manual Inventory Consumption",
                     Name = "ManualConsumptionDialog",
-                    Width = 580, Height = 610, MinWidth = 450, MinHeight = 480,
+                    Width = 580, Height = 690, MinWidth = 450, MinHeight = 540,
                     Owner = System.Windows.Application.Current?.MainWindow,
                     WindowStartupLocation = WindowStartupLocation.CenterOwner,
                     ResizeMode = ResizeMode.CanResize,
                 };
                 var content = Stack();
                 content.Margin = new Thickness(22);
-                content.Children.Add(Card("Physical ingredient count",
-                    "Enter what remains in storage. Only the difference from current book stock is recognized as ingredient consumption, at its existing average cost."));
+                content.Children.Add(Card("Manual ingredient consumption",
+                    "Select a raw material and enter the quantity used, or count the remaining stock. Cost uses the current average valuation. Every record is audited and feeds profit reports. For positive corrections use Adjust Stock."));
                 var branch = new ComboBox
                 {
                     Name = "ManualCountBranch", ItemsSource = info.Branches,
@@ -1302,9 +1311,25 @@ internal static class RestaurantOperationalPages
                     Height = 38,
                 };
                 var count = new TextBox { Name = "ManualCountRemaining", Text = "0", Height = 38 };
-                var reason = new TextBox
+                var mode = new ComboBox { ItemsSource = new[] { "Consumed quantity", "Remaining stock" }, SelectedIndex = 0, Height = 38 };
+                var reason = new ComboBox
                 {
-                    Text = "End-of-service physical ingredient count", Height = 38,
+                    Name = "ManualConsumptionReason",
+                    ItemsSource = new[]
+                    {
+                        "Kitchen Consumption", "Wastage", "Spoilage",
+                        "Damage", "Stock Correction", "Other",
+                    },
+                    SelectedIndex = 0,
+                    Height = 38,
+                };
+                var notes = new TextBox
+                {
+                    Name = "ManualConsumptionNotes",
+                    Height = 58,
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    ToolTip = "Optional notes stored on the audited consumption record",
                 };
                 var preview = new TextBlock
                 {
@@ -1324,7 +1349,8 @@ internal static class RestaurantOperationalPages
                         preview.Text = $"Book stock: {onHand:N3} {selectedItem.BaseUnit}. Enter a physical balance from 0 through {onHand:N3}.";
                         return;
                     }
-                    var consumed = onHand - remaining;
+                    var consumed = mode.SelectedIndex == 0 ? remaining : onHand - remaining;
+                    remaining = onHand - consumed;
                     preview.Text = $"Book stock: {onHand:N3} {selectedItem.BaseUnit}  →  " +
                         $"Physical: {remaining:N3} {selectedItem.BaseUnit}  →  " +
                         $"Consumed: {consumed:N3} {selectedItem.BaseUnit}  ·  " +
@@ -1333,8 +1359,10 @@ internal static class RestaurantOperationalPages
                 foreach (var entry in new (string Text, FrameworkElement Field)[]
                 {
                     ("Branch", branch), ("Ingredient", ingredient),
-                    ("Physical quantity remaining (in the ingredient base unit)", count),
-                    ("Reason / count period", reason),
+                    ("Entry mode", mode),
+                    ("Quantity (ingredient base unit)", count),
+                    ("Reason", reason),
+                    ("Notes (optional)", notes),
                 })
                 {
                     content.Children.Add(new TextBlock
@@ -1348,11 +1376,43 @@ internal static class RestaurantOperationalPages
                 content.Children.Add(preview);
                 branch.SelectionChanged += (_, _) => RefreshCountPreview();
                 ingredient.SelectionChanged += (_, _) => RefreshCountPreview();
+                mode.SelectionChanged += (_, _) => RefreshCountPreview();
                 count.TextChanged += (_, _) => RefreshCountPreview();
                 RefreshCountPreview();
                 var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
                 var save = new Button { Name = "ManualCountSave", Content = "Confirm consumption", Height = 44 };
+                var markFinished = new Button
+                {
+                    Name = "ManualCountMarkFinished",
+                    Content = "Mark remaining as fully consumed",
+                    Height = 38,
+                    Margin = new Thickness(0, 0, 0, 8),
+                };
+                markFinished.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+                var finishRequested = false;
                 var countId = Guid.CreateVersion7().ToString("N");
+                markFinished.Click += (_, _) =>
+                {
+                    if (branch.SelectedItem is not LocalBranch finishedBranch ||
+                        ingredient.SelectedItem is not LocalInventoryItem finishedItem)
+                    {
+                        error.Text = "Select a branch and ingredient before marking the stock as finished.";
+                        return;
+                    }
+                    var bookBalance = info.Balances.FirstOrDefault(x => x.BranchId == finishedBranch.Id &&
+                        x.InventoryItemId == finishedItem.Id)?.Quantity ?? 0m;
+                    if (bookBalance <= 0m)
+                    {
+                        error.Text = "This ingredient already has no remaining stock.";
+                        return;
+                    }
+                    error.Text = "";
+                    mode.SelectedIndex = 1;
+                    count.Text = "0";
+                    finishRequested = true;
+                    RefreshCountPreview();
+                    save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                };
                 save.Click += async (_, _) =>
                 {
                     if (!save.IsEnabled) return;
@@ -1361,24 +1421,35 @@ internal static class RestaurantOperationalPages
                         !decimal.TryParse(count.Text, out var remaining) ||
                         remaining < 0 || string.IsNullOrWhiteSpace(reason.Text))
                     {
+                        finishRequested = false;
                         error.Text = "Select branch/ingredient, a non-negative quantity and a reason.";
                         return;
                     }
                     var book = info.Balances.FirstOrDefault(x => x.BranchId == selectedBranch.Id &&
                         x.InventoryItemId == selectedItem.Id)?.Quantity ?? 0m;
-                    if (remaining >= book)
+                    var consumedQuantity = mode.SelectedIndex == 0;
+                    var consumed = consumedQuantity ? remaining : book - remaining;
+                    if (consumed <= 0 || consumed > book)
                     {
+                        finishRequested = false;
                         error.Text = "Enter a quantity below the book balance. To increase stock, use Adjust Stock.";
                         return;
                     }
+                    var isFinishing = finishRequested;
+                    finishRequested = false;
                     if (!DesktopGlassDialog.Confirm(
-                        $"Record {book - remaining:N3} {selectedItem.BaseUnit} of {selectedItem.Name} as consumed? This posts food cost and cannot be undone by editing this count.",
-                        "Confirm audited physical count", dialog)) return;
+                        isFinishing
+                            ? $"Mark all remaining {consumed:N3} {selectedItem.BaseUnit} of {selectedItem.Name} as fully consumed? " +
+                              "This records the full remaining stock as food cost."
+                            : $"Record {consumed:N3} {selectedItem.BaseUnit} of {selectedItem.Name} as consumed? " +
+                              "This posts food cost and cannot be undone by editing this count.",
+                        isFinishing ? "Confirm fully consumed" : "Confirm audited consumption", dialog)) return;
                     var branchId = selectedBranch.Id;
                     var itemId = selectedItem.Id;
                     var explanation = reason.Text.Trim();
+                    var noteText = notes.Text.Trim();
                     save.IsEnabled = false;
-                    save.Content = "Recording consumption…";
+                    save.Content = isFinishing ? "Marking fully consumed…" : "Recording consumption…";
                     error.Text = "Updating local inventory and food-cost ledger…";
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                     try
@@ -1388,7 +1459,8 @@ internal static class RestaurantOperationalPages
                             var actor = await new DesktopRestaurantWorkflowService()
                                 .CurrentPrincipalAsync(token).ConfigureAwait(false);
                             await new LocalInventoryService(factory).RecordManualConsumptionAsync(
-                                branchId, itemId, remaining, countId, explanation, actor, token)
+                                branchId, itemId, remaining, countId, explanation, actor, token, consumedQuantity,
+                                string.IsNullOrWhiteSpace(noteText) ? null : noteText)
                                 .ConfigureAwait(false);
                         }, TimeSpan.FromSeconds(25));
                         dialog.DialogResult = true;
@@ -1407,6 +1479,7 @@ internal static class RestaurantOperationalPages
                         save.IsEnabled = true;
                     }
                 };
+                content.Children.Add(markFinished);
                 content.Children.Add(save);
                 content.Children.Add(error);
                 dialog.Content = new ScrollViewer
@@ -1490,7 +1563,138 @@ internal static class RestaurantOperationalPages
         table.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
         table.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         panel.Children.Add(table);
+
+        // Auditable consumption history: every deduction (automatic recipe or
+        // manual count) keeps material, reason, responsible staff and applied cost.
+        var historySearch = SearchInput("Search consumption history", 280);
+        var historyMaterial = FilterSelect(history.Select(x => x.Material)
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Prepend("All materials").ToArray());
+        var historyReason = FilterSelect(history.Select(x => x.Reason)
+            .Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Prepend("All reasons").ToArray());
+        var historyStaff = FilterSelect(history.Select(x => x.User)
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Prepend("All staff").ToArray());
+        var historyFrom = new DatePicker { Height = 34, Margin = new Thickness(0, 4, 8, 4), ToolTip = "Consumed from date" };
+        var historyTo = new DatePicker { Height = 34, Margin = new Thickness(0, 4, 8, 4), ToolTip = "Consumed to date" };
+        System.Windows.Automation.AutomationProperties.SetName(historyFrom, "Consumption history from date");
+        System.Windows.Automation.AutomationProperties.SetName(historyTo, "Consumption history to date");
+        panel.Children.Add(SectionTitle("Consumption history"));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Each recorded deduction shows the quantity, previous and resulting stock, reason, responsible staff member and the applied inventory cost.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 6),
+        });
+        panel.Children.Add(TableToolbar(historySearch, historyMaterial, historyReason, historyStaff, historyFrom, historyTo));
+        var historyGrid = GridFor(history);
+        historyGrid.Name = "ConsumptionHistoryGrid";
+        historyGrid.MinHeight = 220;
+        historyGrid.MaxHeight = 430;
+        historyGrid.Columns.Add(Column("Date", nameof(ConsumptionRow.When), 150));
+        historyGrid.Columns.Add(Column("Material", nameof(ConsumptionRow.Material), 180));
+        historyGrid.Columns.Add(Column("Qty", nameof(ConsumptionRow.Quantity), 90));
+        historyGrid.Columns.Add(Column("Unit", nameof(ConsumptionRow.Unit), 70));
+        historyGrid.Columns.Add(Column("Stock before", nameof(ConsumptionRow.StockBefore), 105));
+        historyGrid.Columns.Add(Column("Stock after", nameof(ConsumptionRow.StockAfter), 105));
+        historyGrid.Columns.Add(Column("Reason", nameof(ConsumptionRow.Reason), 150));
+        historyGrid.Columns.Add(Column("Notes", nameof(ConsumptionRow.Notes), 220));
+        historyGrid.Columns.Add(Column("Staff", nameof(ConsumptionRow.User), 150));
+        historyGrid.Columns.Add(Column("Cost AFN", nameof(ConsumptionRow.Value), 105));
+        var refreshHistory = FilterGrid(historyGrid, row => row is ConsumptionRow entry &&
+            (historySearch.Text.Length == 0 ||
+             entry.Material.Contains(historySearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             entry.User.Contains(historySearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             entry.Notes.Contains(historySearch.Text.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+            (historyMaterial.SelectedIndex <= 0 || entry.Material == (string)historyMaterial.SelectedItem!) &&
+            (historyReason.SelectedIndex <= 0 || entry.Reason.Contains((string)historyReason.SelectedItem!, StringComparison.OrdinalIgnoreCase)) &&
+            (historyStaff.SelectedIndex <= 0 || entry.User == (string)historyStaff.SelectedItem!) &&
+            (historyFrom.SelectedDate is null || entry.When.LocalDateTime.Date >= historyFrom.SelectedDate.Value.Date) &&
+            (historyTo.SelectedDate is null || entry.When.LocalDateTime.Date <= historyTo.SelectedDate.Value.Date));
+        historySearch.TextChanged += (_, _) => refreshHistory();
+        historyMaterial.SelectionChanged += (_, _) => refreshHistory();
+        historyReason.SelectionChanged += (_, _) => refreshHistory();
+        historyStaff.SelectionChanged += (_, _) => refreshHistory();
+        historyFrom.SelectedDateChanged += (_, _) => refreshHistory();
+        historyTo.SelectedDateChanged += (_, _) => refreshHistory();
+        if (history.Count == 0)
+            panel.Children.Add(EmptyState("No consumption recorded yet. Recipe mode adds deductions automatically; manual mode records them from Record Consumption."));
+        var historyTable = new Border
+        {
+            CornerRadius = new CornerRadius(16),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(12),
+            Margin = new Thickness(0, 0, 0, 12),
+            Child = historyGrid,
+        };
+        historyTable.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        historyTable.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        panel.Children.Add(historyTable);
         return Scroll(WorkspaceFrostedSurface.Wrap(panel));
+    }
+
+    /// <summary>
+    /// Consumption ledger rows with running stock reconstruction: the newest
+    /// balance is authoritative and older positions are derived backwards so
+    /// every row shows the stock before and after that movement.
+    /// </summary>
+    private static async Task<List<ConsumptionRow>> BuildConsumptionHistoryAsync(RestaurantDbContext db)
+    {
+        // Reconstruct at most the last year of ledger history so the table stays
+        // fast on long-running restaurants; running stock stays exact because the
+        // newest balance anchors the backwards reconstruction.
+        var historyWindowStartUtc = DateTimeOffset.UtcNow.AddDays(-365).ToUniversalTime();
+        var movements = await OperationalWindowQueries.ConsumptionMovementsSince(db, historyWindowStartUtc)
+            .AsNoTracking()
+            .Select(x => new { x.BranchId, x.InventoryItemId, x.QuantityDelta, x.UnitCost, x.Notes, x.OccurredAt, x.ActorUserId })
+            .ToListAsync();
+        if (movements.Count == 0)
+            return [];
+
+        var items = await db.InventoryItems.AsNoTracking()
+            .Select(x => new { x.Id, x.Name, x.BaseUnit }).ToListAsync();
+        var staff = await db.StaffUsers.AsNoTracking()
+            .Select(x => new { x.Id, x.Name }).ToListAsync();
+        var balances = await db.InventoryBalances.AsNoTracking()
+            .Select(x => new { x.BranchId, x.InventoryItemId, x.Quantity }).ToListAsync();
+
+        var rows = new List<ConsumptionRow>();
+        foreach (var group in movements.GroupBy(x => new { x.BranchId, x.InventoryItemId }))
+        {
+            var item = items.FirstOrDefault(x => x.Id == group.Key.InventoryItemId);
+            if (item is null) continue;
+
+            var running = balances.FirstOrDefault(x => x.BranchId == group.Key.BranchId &&
+                x.InventoryItemId == group.Key.InventoryItemId)?.Quantity ?? 0m;
+            foreach (var movement in group.OrderByDescending(x => x.OccurredAt))
+            {
+                var after = running;
+                var before = after - movement.QuantityDelta;
+                running = before;
+                rows.Add(new ConsumptionRow(
+                    movement.OccurredAt,
+                    item.Name,
+                    Math.Abs(movement.QuantityDelta),
+                    item.BaseUnit,
+                    before,
+                    after,
+                    ConsumptionReason(movement.Notes),
+                    movement.Notes ?? "",
+                    staff.FirstOrDefault(x => x.Id == movement.ActorUserId)?.Name ?? ("User " + movement.ActorUserId),
+                    Math.Abs(movement.QuantityDelta) * (movement.UnitCost ?? 0m)));
+            }
+        }
+
+        return rows.OrderByDescending(x => x.When).Take(500).ToList();
+    }
+
+    private static string ConsumptionReason(string? notes)
+    {
+        if (string.IsNullOrWhiteSpace(notes)) return "Unspecified";
+        var separator = notes.IndexOf('—');
+        var reason = separator > 0 ? notes[..separator] : notes;
+        return reason.Trim();
     }
 
     private static async Task<FrameworkElement> PurchasesAsync()
@@ -1522,12 +1726,24 @@ internal static class RestaurantOperationalPages
         var (factory, orders, suppliers, receipts) = workspaceData;
 
         var panel = Stack();
-        panel.Children.Add(Card("Restaurant procurement", "Supplier → purchase order → goods receipt → stock movement. Receiving stock updates the local restaurant inventory."));
+        panel.Children.Add(PageHeader("Purchases & Suppliers",
+            "Supplier → purchase order → goods receipt → stock movement. Receiving stock updates the local restaurant inventory."));
+        panel.Children.Add(SectionTitle("Suppliers"));
+        var supplierSearch = SearchInput("Search suppliers");
+        panel.Children.Add(TableToolbar(supplierSearch));
         var supplierGrid = GridFor(suppliers); supplierGrid.MinHeight = 180;
         supplierGrid.Columns.Add(Column("Code", nameof(SupplierRow.Code), 110)); supplierGrid.Columns.Add(Column("Supplier", nameof(SupplierRow.Name), 220));
         supplierGrid.Columns.Add(Column("Phone", nameof(SupplierRow.Phone), 150)); supplierGrid.Columns.Add(Column("Email", nameof(SupplierRow.Email), 220));
         panel.Children.Add(supplierGrid);
-        var addSupplier = new Button { Content = "+ Add Supplier", Height = 38, MinWidth = 150, Margin = new Thickness(0, 10, 0, 6) };
+        if (suppliers.Count == 0)
+            panel.Children.Add(EmptyState("No active suppliers yet. Add a supplier to start purchasing."));
+        var refreshSuppliers = FilterGrid(supplierGrid, row => row is SupplierRow supplier &&
+            (supplierSearch.Text.Length == 0 ||
+             supplier.Name.Contains(supplierSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             supplier.Code.Contains(supplierSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase)));
+        supplierSearch.TextChanged += (_, _) => refreshSuppliers();
+        var addSupplier = new Button { Content = "+ Add Supplier", Height = 38, MinWidth = 160, Margin = new Thickness(0, 6, 8, 8) };
+        UseSecondaryStyle(addSupplier);
         addSupplier.Click += (_, _) =>
         {
             var dialog = new Window { Title = "Add Supplier", Width = 445, Height = 410, WindowStartupLocation = WindowStartupLocation.CenterOwner };
@@ -1750,7 +1966,8 @@ internal static class RestaurantOperationalPages
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Purchase received and inventory updated. Refresh Purchases to see it.");
         };
         panel.Children.Add(purchaseButton);
-        var receivePending = new Button { Content = "Receive Outstanding PO", Height = 36, MinWidth = 205, Margin = new Thickness(0, 2, 0, 8) };
+        var receivePending = new Button { Content = "Receive Outstanding PO", Height = 38, MinWidth = 205, Margin = new Thickness(0, 0, 8, 8) };
+        UseSecondaryStyle(receivePending);
         receivePending.Click += async (_, _) =>
         {
             await using var lookup = factory.Create();
@@ -1846,12 +2063,25 @@ internal static class RestaurantOperationalPages
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, "Outstanding purchase received. Refresh Purchases and Inventory.");
         };
         panel.Children.Add(receivePending);
-        panel.Children.Add(new TextBlock { Text = "Purchase orders", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        panel.Children.Add(SectionTitle("Purchase orders"));
+        var orderSearch = SearchInput("Search purchase orders");
+        var orderStatus = FilterSelect("All statuses", "ordered", "partially_received", "received", "cancelled");
+        panel.Children.Add(TableToolbar(orderSearch, orderStatus));
         var grid = GridFor(orders); grid.MinHeight = 230;
         grid.Columns.Add(Column("PO", nameof(PurchaseRow.Number), 190)); grid.Columns.Add(Column("Supplier", nameof(PurchaseRow.Supplier), 220));
         grid.Columns.Add(Column("Status", nameof(PurchaseRow.Status), 120)); grid.Columns.Add(Column("Estimated AFN", nameof(PurchaseRow.Total), 140));
         grid.Columns.Add(Column("Ordered", nameof(PurchaseRow.OrderedAt), 190)); grid.Columns.Add(Column("Completed", nameof(PurchaseRow.CompletedAt), 190));
         panel.Children.Add(grid);
+        if (orders.Count == 0)
+            panel.Children.Add(EmptyState("No purchase orders yet. Use New Purchase & Receive to record the first stock purchase."));
+        var refreshOrders = FilterGrid(grid, row => row is PurchaseRow purchase &&
+            (orderSearch.Text.Length == 0 ||
+             purchase.Number.Contains(orderSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             purchase.Supplier.Contains(orderSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+            (orderStatus.SelectedIndex <= 0 ||
+             string.Equals(purchase.Status, orderStatus.SelectedItem?.ToString(), StringComparison.OrdinalIgnoreCase)));
+        orderSearch.TextChanged += (_, _) => refreshOrders();
+        orderStatus.SelectionChanged += (_, _) => refreshOrders();
         // Receipt records remain in the database for auditing and stock
         // reconciliation, but are not a second mandatory operator workflow.
         var historyToggle = new Button
@@ -1861,8 +2091,9 @@ internal static class RestaurantOperationalPages
             Height = 36,
             Margin = new Thickness(0, 12, 0, 8),
         };
+        UseSecondaryStyle(historyToggle);
         var receiptHistory = new StackPanel { Visibility = Visibility.Collapsed };
-        receiptHistory.Children.Add(new TextBlock { Text = "Goods receipts", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,20,0,10) });
+        receiptHistory.Children.Add(SectionTitle("Goods receipts", topMargin: 0));
         var receiptGrid = GridFor(receipts); receiptGrid.MinHeight = 200;
         receiptGrid.Columns.Add(Column("GRN", nameof(ReceiptRow.Number), 210)); receiptGrid.Columns.Add(Column("Status", nameof(ReceiptRow.Status), 120));
         receiptGrid.Columns.Add(Column("Received", nameof(ReceiptRow.ReceivedAt), 200)); receiptGrid.Columns.Add(Column("Purchase order ID", nameof(ReceiptRow.PurchaseOrderId), 280));
@@ -1981,7 +2212,8 @@ internal static class RestaurantOperationalPages
         var (factory, branches, rows) = workspaceData;
 
         var panel = Stack();
-        panel.Children.Add(Card("Restaurant expenses", "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
+        panel.Children.Add(PageHeader("Expenses",
+            "Record local operating expenses in AFN. Every entry is audited and queued for cloud reconciliation without blocking offline restaurant operations."));
 
         var createExpense = new Button
         {
@@ -1993,6 +2225,12 @@ internal static class RestaurantOperationalPages
         };
         panel.Children.Add(createExpense);
 
+        panel.Children.Add(SectionTitle("Expense ledger"));
+        var expenseSearch = SearchInput("Search expenses");
+        var expenseFilter = FilterSelect(new[] { "All categories" }
+            .Concat(rows.Select(row => row.Category).Distinct().OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            .ToArray());
+        panel.Children.Add(TableToolbar(expenseSearch, expenseFilter));
         var grid = GridFor(rows);
         grid.Columns.Add(Column("Date", nameof(ExpenseRow.Date), 120));
         grid.Columns.Add(Column("Branch", nameof(ExpenseRow.Branch), 160));
@@ -2002,6 +2240,17 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Method", nameof(ExpenseRow.Method), 130));
         grid.Columns.Add(Column("Reference", nameof(ExpenseRow.Reference), 180));
         panel.Children.Add(grid);
+        if (rows.Count == 0)
+            panel.Children.Add(EmptyState("No expenses recorded yet. Use Create Expense to record the first operating cost."));
+        var refreshExpenses = FilterGrid(grid, row => row is ExpenseRow expense &&
+            (expenseSearch.Text.Length == 0 ||
+             expense.Description.Contains(expenseSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             expense.Category.Contains(expenseSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             expense.Branch.Contains(expenseSearch.Text.Trim(), StringComparison.OrdinalIgnoreCase)) &&
+            (expenseFilter.SelectedIndex <= 0 ||
+             string.Equals(expense.Category, expenseFilter.SelectedItem?.ToString(), StringComparison.OrdinalIgnoreCase)));
+        expenseSearch.TextChanged += (_, _) => refreshExpenses();
+        expenseFilter.SelectionChanged += (_, _) => refreshExpenses();
 
         var workflow = new DesktopRestaurantWorkflowService();
         createExpense.Click += async (_, _) =>
@@ -2065,6 +2314,7 @@ internal static class RestaurantOperationalPages
             content.Children.Add(feedback);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var cancel = new Button { Content = "Cancel", MinWidth = 100, Height = 36, Margin = new Thickness(0, 0, 8, 0) };
+            UseSecondaryStyle(cancel);
             var save = new Button { Content = "Save Expense", MinWidth = 135, Height = 36 };
             cancel.Click += (_, _) => dialog.Close();
             save.Click += async (_, _) =>
@@ -2431,7 +2681,8 @@ internal static class RestaurantOperationalPages
             Margin = new Thickness(0, 8, 0, 12), TextWrapping = TextWrapping.Wrap,
         });
         var refreshMode = new Button { Content = "Refresh signed desktop mode (requires Internet)",
-            MinHeight = 38, Margin = new Thickness(0, 0, 0, 8) };
+            MinHeight = 38, MinWidth = 340, HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 0, 0, 8) };
         var modeStatus = new TextBlock { TextWrapping = TextWrapping.Wrap };
         modePanel.Children.Add(refreshMode);
         if (standalone)
@@ -2439,7 +2690,8 @@ internal static class RestaurantOperationalPages
             var importRenewal = new Button
             {
                 Content = "Import signed offline renewal (.json)",
-                MinHeight = 38, Margin = new Thickness(0, 0, 0, 8),
+                MinHeight = 38, MinWidth = 340, HorizontalAlignment = HorizontalAlignment.Left,
+                Margin = new Thickness(0, 0, 0, 8),
             };
             importRenewal.Click += async (_, _) =>
             {
@@ -2489,16 +2741,47 @@ internal static class RestaurantOperationalPages
         networkPage.Children.Add(SettingsSection("Licensed desktop operating mode",
             "Configured centrally under Platform → Restaurant → License & Devices. A signed offline renewal file can be imported on an already activated standalone terminal. Changing operating modes still requires a deliberate online refresh.", modePanel));
 
-        networkPage.Children.Add(Cards(
-            ("LAN STATUS", diagnostics.NetworkMode),
-            ("WAITER DEVICES", diagnostics.TerminalSummary),
-            ("MOBILE ALLOWANCE", diagnostics.MobileAllowance),
-            ("OFFLINE LEASE", diagnostics.LeaseStatus),
-            ("CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts")));
+        networkPage.Children.Add(DashboardMetrics(16,
+            ("●", "LAN STATUS", diagnostics.NetworkMode, "local server + cloud route", Color.FromRgb(22, 155, 98)),
+            ("▣", "WAITER DEVICES", diagnostics.TerminalSummary, "paired phones and tablets", Color.FromRgb(249, 115, 22)),
+            ("♙", "MOBILE ALLOWANCE", diagnostics.MobileAllowance, "of the signed device limit", Color.FromRgb(100, 116, 139)),
+            ("⏱", "OFFLINE LEASE", diagnostics.LeaseStatus, "signed offline window", Color.FromRgb(180, 83, 9)),
+            ("☁", "CLOUD QUEUE", $"{diagnostics.PendingCloudMutations} pending · {diagnostics.OpenCloudConflicts} conflicts",
+                "mutations awaiting sync",
+                diagnostics.OpenCloudConflicts > 0 ? Color.FromRgb(185, 28, 28) : Color.FromRgb(22, 163, 74))));
 
-        networkPage.Children.Add(Card(
+        var networkInfo = new StackPanel();
+        var networkStatus = new TextBlock
+        {
+            Text = diagnostics.StatusMessage,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        networkStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        networkInfo.Children.Add(networkStatus);
+        var networkCloud = new TextBlock
+        {
+            Text = diagnostics.CloudStatus,
+            FontSize = 12.5,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 6, 0, 0),
+        };
+        networkCloud.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        networkInfo.Children.Add(networkCloud);
+        var networkNote = new TextBlock
+        {
+            Text = "Waiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid.",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+        networkNote.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        networkInfo.Children.Add(networkNote);
+        networkPage.Children.Add(SettingsSection(
             "Local restaurant network",
-            $"{diagnostics.StatusMessage}\n\nCloud: {diagnostics.CloudStatus}\n\nWaiter phones and tablets connect directly to this Windows desktop over the restaurant LAN/Wi-Fi. Internet is not required for normal table ordering, KOT, kitchen or cashier operations while the signed offline lease is valid."));
+            "Connection health for this terminal and its waiter devices.",
+            networkInfo));
 
         var pairing = new TextBox
         {
@@ -2530,7 +2813,9 @@ internal static class RestaurantOperationalPages
             "Scan this QR from the waiter app to configure both LAN and cloud routes. Automatic mode prefers LAN, falls back to cloud when LAN is unavailable, queues offline changes when neither route is reachable, and returns to LAN automatically.",
             pairingPanel));
 
-        var refresh = new Button { Content = "Refresh status", MinWidth = 130, Height = 38, Margin = new Thickness(0, 0, 10, 10) };
+        var refresh = new Button { Content = "Refresh status", MinWidth = 150, Height = 38,
+            HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 10, 10) };
+        refresh.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         refresh.SetBinding(Button.CommandProperty, new Binding(nameof(LanDiagnosticsViewModel.RefreshCommand)));
         networkPage.Children.Add(refresh);
 
@@ -2948,8 +3233,8 @@ internal static class RestaurantOperationalPages
         border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         border.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            BlurRadius = 24,
-            ShadowDepth = 5,
+            BlurRadius = 12,
+            ShadowDepth = 2,
             Opacity = 0.12,
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
@@ -3008,72 +3293,82 @@ internal static class RestaurantOperationalPages
         return wrap;
     }
 
-    private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail, Color Accent)[] values)
+    private static Border DashboardCards(params (string Icon, string Label, string Value, string Detail, Color Accent)[] values) =>
+        DashboardMetrics(21, values);
+
+    private static Border DashboardMetrics(double valueFontSize, params (string Icon, string Label, string Value, string Detail, Color Accent)[] values)
     {
-        var wrap = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var value in values)
-            wrap.Children.Add(DashboardCard(value.Icon, value.Label, value.Value, value.Detail, value.Accent));
+        // One unified KPI strip with evenly divided segments reads better than
+        // separate cards that stretch into sparse banners on wide screens.
+        var grid = new Grid();
+        for (var index = 0; index < values.Length; index++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var value = values[index];
+            var host = new Border
+            {
+                Padding = new Thickness(16, 14, 16, 14),
+                BorderThickness = new Thickness(index == 0 ? 0 : 1, 0, 0, 0),
+                Child = DashboardMetric(value.Icon, value.Label, value.Value, value.Detail, value.Accent, valueFontSize),
+            };
+            if (index > 0)
+            {
+                host.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
+            }
+            Grid.SetColumn(host, index);
+            grid.Children.Add(host);
+        }
 
         var container = new Border
         {
-            Child = wrap,
+            Child = grid,
+            CornerRadius = new CornerRadius(16),
+            BorderThickness = new Thickness(1),
             Margin = new Thickness(0, 0, 0, 10),
         };
-        container.SizeChanged += (_, _) =>
+        container.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        container.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        container.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            var available = container.ActualWidth;
-            if (available <= 0 || !double.IsFinite(available)) return;
-
-            // KPI cards fill each row rather than clipping at lower resolutions.
-            var columns = Math.Clamp((int)((available + 10) / 245), 1, values.Length);
-            var cardWidth = Math.Max(164, Math.Floor(available / columns) - 10);
-            foreach (var card in wrap.Children.OfType<Border>())
-                card.Width = cardWidth;
+            BlurRadius = 8,
+            ShadowDepth = 2,
+            Opacity = 0.10,
+            Color = Color.FromRgb(20, 38, 61),
         };
         return container;
     }
 
-    private static Border DashboardCard(string icon, string title, string value, string detail, Color accent)
+    private static StackPanel DashboardMetric(string icon, string label, string value, string detail, Color accent, double valueFontSize = 21)
     {
         var accentBrush = new SolidColorBrush(accent);
-        var soft = Color.FromArgb(52, accent.R, accent.G, accent.B);
-        var softBrush = new SolidColorBrush(soft);
 
-        var iconText = new TextBlock
+        var labelRow = new StackPanel { Orientation = Orientation.Horizontal };
+        labelRow.Children.Add(new TextBlock
         {
             Text = icon,
-            Foreground = Brushes.White,
-            FontSize = 24,
+            Foreground = accentBrush,
+            FontSize = 13,
             FontWeight = FontWeights.Bold,
-            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        var iconSurface = new Border
+            Margin = new Thickness(0, 0, 6, 0),
+        });
+        labelRow.Children.Add(new TextBlock
         {
-            Width = 58,
-            Height = 58,
-            CornerRadius = new CornerRadius(15),
-            Background = accentBrush,
-            Child = iconText,
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-
-        var titleText = new TextBlock
-        {
-            Text = title,
-            FontSize = 11,
+            Text = label,
+            FontSize = 10.5,
             FontWeight = FontWeights.SemiBold,
-        };
-        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            Foreground = accentBrush,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
 
         var valueText = new TextBlock
         {
             Text = value,
-            FontSize = 22,
+            FontSize = valueFontSize,
             FontWeight = FontWeights.Bold,
-            Margin = new Thickness(0, 4, 0, 0),
-            TextWrapping = TextWrapping.NoWrap,
+            Margin = new Thickness(0, 5, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         valueText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
@@ -3081,78 +3376,17 @@ internal static class RestaurantOperationalPages
         var detailText = new TextBlock
         {
             Text = detail,
-            FontSize = 10.5,
-            Margin = new Thickness(0, 4, 0, 0),
-            TextTrimming = TextTrimming.CharacterEllipsis,
+            FontSize = 10,
+            Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
         };
         detailText.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
 
-        var copy = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-        copy.Children.Add(titleText);
-        copy.Children.Add(valueText);
-        copy.Children.Add(detailText);
-
-        var content = new Grid { Margin = new Thickness(14, 13, 14, 13) };
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        content.Children.Add(iconSurface);
-        Grid.SetColumn(copy, 1);
-        content.Children.Add(copy);
-
-        var decoration = new Canvas
-        {
-            IsHitTestVisible = false,
-            Opacity = 0.72,
-            ClipToBounds = true,
-        };
-        var waveOne = new Ellipse
-        {
-            Width = 165,
-            Height = 72,
-            Fill = softBrush,
-            Stroke = new SolidColorBrush(Color.FromArgb(70, accent.R, accent.G, accent.B)),
-            StrokeThickness = 1.2,
-        };
-        Canvas.SetRight(waveOne, -34);
-        Canvas.SetBottom(waveOne, -29);
-        decoration.Children.Add(waveOne);
-
-        var waveTwo = new Ellipse
-        {
-            Width = 132,
-            Height = 56,
-            Fill = Brushes.Transparent,
-            Stroke = new SolidColorBrush(Color.FromArgb(90, accent.R, accent.G, accent.B)),
-            StrokeThickness = 1.1,
-        };
-        Canvas.SetRight(waveTwo, -10);
-        Canvas.SetBottom(waveTwo, -30);
-        decoration.Children.Add(waveTwo);
-
-        var layer = new Grid();
-        layer.Children.Add(decoration);
-        layer.Children.Add(content);
-
-        var border = new Border
-        {
-            CornerRadius = new CornerRadius(18),
-            Margin = new Thickness(0, 0, 10, 10),
-            Width = 238,
-            Height = 112,
-            BorderThickness = new Thickness(1),
-            ClipToBounds = true,
-            Child = layer,
-        };
-        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
-        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
-        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
-        {
-            BlurRadius = 18,
-            ShadowDepth = 3,
-            Opacity = 0.12,
-            Color = Color.FromRgb(20, 38, 61),
-        };
-        return border;
+        var stack = new StackPanel();
+        stack.Children.Add(labelRow);
+        stack.Children.Add(valueText);
+        stack.Children.Add(detailText);
+        return stack;
     }
 
     private static UIElement BuildStockAlertSummary(
@@ -3224,6 +3458,208 @@ internal static class RestaurantOperationalPages
         return stack;
     }
 
+    /// <summary>
+    /// Dashboard hero: today's headline numbers on a brand gradient with the
+    /// live workstation pills (sync route, LAN tablets, subscription) that
+    /// staff glance at between rushes. Fixed colours keep it identical in the
+    /// Classic and Glass themes, and it renders fully offline.
+    /// </summary>
+    private static Border DashboardHero(
+        DateTimeOffset now,
+        decimal sales,
+        int openOrders,
+        int activeTables,
+        int activeKot,
+        LanDiagnosticsViewModel diagnostics,
+        int? daysRemaining,
+        string planName)
+    {
+        var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        left.Children.Add(new TextBlock
+        {
+            Text = now.ToString("dddd, dd MMMM yyyy · HH:mm"),
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromArgb(205, 255, 255, 255)),
+        });
+        left.Children.Add(new TextBlock
+        {
+            Text = $"AFN {sales:N0} billed today",
+            FontSize = 30,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+            Margin = new Thickness(0, 6, 0, 4),
+            TextWrapping = TextWrapping.Wrap,
+        });
+        left.Children.Add(new TextBlock
+        {
+            Text = $"{openOrders} open order(s) · {activeTables} table(s) seated · {activeKot} kitchen ticket(s) in production",
+            FontSize = 12.5,
+            Foreground = new SolidColorBrush(Color.FromArgb(215, 255, 255, 255)),
+            TextWrapping = TextWrapping.Wrap,
+        });
+
+        var pills = new WrapPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = 560,
+            Margin = new Thickness(18, 10, 0, 0),
+        };
+        pills.Children.Add(HeroPill("◉", diagnostics.NetworkMode,
+            "Local network and cloud sync route"));
+        pills.Children.Add(HeroPill("▣", diagnostics.TerminalSummary,
+            "Tablet and LAN devices paired with this local restaurant host"));
+        pills.Children.Add(HeroPill("◆", daysRemaining switch
+        {
+            null => "No subscription",
+            0 => "Subscription expired",
+            1 => "1 day left",
+            _ => $"{daysRemaining} days left",
+        }, $"{planName} · renew from the tenant portal before expiry"));
+
+        var layout = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(pills, Dock.Right);
+        layout.Children.Add(pills);
+        layout.Children.Add(left);
+
+        var hero = new Border
+        {
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(22, 18, 22, 18),
+            Margin = new Thickness(0, 0, 0, 14),
+            Child = layout,
+            Background = new LinearGradientBrush(
+                new GradientStopCollection
+                {
+                    new GradientStop(Color.FromRgb(15, 42, 74), 0),
+                    new GradientStop(Color.FromRgb(29, 95, 168), 1),
+                },
+                new Point(0, 0), new Point(1, 1)),
+            Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                BlurRadius = 12,
+                ShadowDepth = 3,
+                Opacity = 0.18,
+                Color = Color.FromRgb(15, 42, 74),
+            },
+        };
+        return hero;
+    }
+
+    private static Border HeroPill(string icon, string value, string tooltip) => new()
+    {
+        Background = new SolidColorBrush(Color.FromArgb(40, 255, 255, 255)),
+        BorderBrush = new SolidColorBrush(Color.FromArgb(70, 255, 255, 255)),
+        BorderThickness = new Thickness(1),
+        CornerRadius = new CornerRadius(999),
+        Padding = new Thickness(12, 7, 14, 7),
+        Margin = new Thickness(0, 0, 8, 8),
+        ToolTip = tooltip,
+        Child = new TextBlock
+        {
+            Text = $"{icon}  {value}",
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brushes.White,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        },
+    };
+
+    /// <summary>
+    /// Subscription &amp; license section: remaining time on the signed lease
+    /// with a fixed 90-day scale bar, the exact expiry dates and the LAN device
+    /// count. Everything is read from the local activation snapshot, so it is
+    /// accurate with or without internet (local-network / offline first).
+    /// </summary>
+    private static Border BuildSubscriptionPanel(
+        string planName,
+        DateTimeOffset? subscriptionEndsAt,
+        DateTimeOffset? offlineValidUntil,
+        int? daysRemaining,
+        string deviceSummary)
+    {
+        var accent = daysRemaining switch
+        {
+            null => Color.FromRgb(100, 116, 139),
+            0 => Color.FromRgb(220, 70, 70),
+            <= 7 => Color.FromRgb(220, 70, 70),
+            <= 30 => Color.FromRgb(245, 158, 11),
+            _ => Color.FromRgb(34, 160, 94),
+        };
+        var status = daysRemaining switch
+        {
+            null => "No active subscription on this workstation.",
+            0 => "Expired — activate this device or import an offline renewal file.",
+            <= 7 => "Expiring soon — renew to keep ordering, kitchen and tablet devices running.",
+            <= 30 => "Renewal is coming up.",
+            _ => "Subscription is active and this workstation is fully licensed.",
+        };
+
+        var stack = new StackPanel();
+        var figureRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Bottom };
+        figureRow.Children.Add(new TextBlock
+        {
+            Text = daysRemaining?.ToString() ?? "—",
+            FontSize = 46,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(accent),
+        });
+        figureRow.Children.Add(new TextBlock
+        {
+            Text = daysRemaining == 1 ? "day left" : "days left",
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(8, 0, 0, 9),
+            VerticalAlignment = VerticalAlignment.Bottom,
+        });
+        stack.Children.Add(figureRow);
+
+        // Fixed 90-day scale: the fill shrinks as the license window is used,
+        // so the bar means the same thing after every renewal.
+        var remainingShare = Math.Clamp((daysRemaining ?? 0) / 90.0, 0, 1);
+        var bar = new Grid { Height = 8, Margin = new Thickness(0, 8, 0, 6) };
+        bar.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(Math.Max(remainingShare, 0.001), GridUnitType.Star),
+        });
+        bar.ColumnDefinitions.Add(new ColumnDefinition
+        {
+            Width = new GridLength(Math.Max(1 - remainingShare, 0.001), GridUnitType.Star),
+        });
+        var fill = new Border { CornerRadius = new CornerRadius(4), Background = new SolidColorBrush(accent) };
+        var track = new Border { CornerRadius = new CornerRadius(4) };
+        track.SetResourceReference(Border.BackgroundProperty, "BorderBrush");
+        Grid.SetColumn(fill, 0);
+        Grid.SetColumn(track, 1);
+        bar.Children.Add(fill);
+        bar.Children.Add(track);
+        stack.Children.Add(bar);
+
+        var statusText = new TextBlock
+        {
+            Text = status,
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 8),
+        };
+        statusText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        stack.Children.Add(statusText);
+
+        stack.Children.Add(BuildStatusRows(
+            ("Plan", planName),
+            ("Valid until", subscriptionEndsAt?.ToString("dd MMM yyyy") ?? "Not activated"),
+            ("Offline lease", offlineValidUntil?.ToString("dd MMM yyyy HH:mm") ?? "—"),
+            ("Tablets & LAN", deviceSummary)));
+
+        var panel = DashboardPanel(
+            "Subscription & License",
+            "Remaining time on this workstation's signed license",
+            stack);
+        panel.Name = "DashboardSubscriptionSection";
+        return panel;
+    }
+
     private static Border DashboardPanel(string title, string subtitle, UIElement content)
     {
         var titleText = new TextBlock
@@ -3259,8 +3695,8 @@ internal static class RestaurantOperationalPages
         border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         border.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            BlurRadius = 18,
-            ShadowDepth = 3,
+            BlurRadius = 8,
+            ShadowDepth = 2,
             Opacity = 0.10,
             Color = Color.FromRgb(20, 38, 61),
         };
@@ -3542,12 +3978,110 @@ internal static class RestaurantOperationalPages
         border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         border.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            BlurRadius = 18,
-            ShadowDepth = 4,
+            BlurRadius = 8,
+            ShadowDepth = 2,
             Opacity = 0.10,
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
         return border;
+    }
+
+    // Shared page chrome for operational list workspaces (Purchases, Expenses).
+    // Reuses the existing Card surface so radius, border and shadow stay aligned.
+    private static Border PageHeader(string title, string subtitle)
+    {
+        var titleText = new TextBlock { Text = title, FontSize = 22, FontWeight = FontWeights.Bold };
+        titleText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        var subtitleText = new TextBlock
+        {
+            Text = subtitle,
+            FontSize = 12.5,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 5, 0, 0),
+        };
+        subtitleText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        var panel = new StackPanel();
+        panel.Children.Add(titleText);
+        panel.Children.Add(subtitleText);
+
+        var border = new Border
+        {
+            Child = panel,
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(18),
+            Margin = new Thickness(0, 0, 0, 14),
+            BorderThickness = new Thickness(1),
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+        border.Effect = new System.Windows.Media.Effects.DropShadowEffect
+        {
+            BlurRadius = 8,
+            ShadowDepth = 2,
+            Opacity = 0.10,
+            Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
+        };
+        return border;
+    }
+
+    private static TextBlock SectionTitle(string text, double topMargin = 20)
+    {
+        var title = new TextBlock
+        {
+            Text = text,
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, topMargin, 0, 10),
+        };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        return title;
+    }
+
+    private static TextBox SearchInput(string automationName, double width = 260)
+    {
+        var box = new TextBox { Width = width, Height = 34, Margin = new Thickness(0, 4, 8, 4) };
+        System.Windows.Automation.AutomationProperties.SetName(box, automationName);
+        box.ToolTip = automationName;
+        return box;
+    }
+
+    private static ComboBox FilterSelect(params string[] options) => new()
+    {
+        ItemsSource = options,
+        SelectedIndex = 0,
+        MinWidth = 160,
+        Height = 34,
+        Margin = new Thickness(0, 4, 8, 4),
+    };
+
+    private static WrapPanel TableToolbar(params UIElement[] elements)
+    {
+        var row = new WrapPanel { Margin = new Thickness(0, 2, 0, 6) };
+        foreach (var element in elements) row.Children.Add(element);
+        return row;
+    }
+
+    private static TextBlock EmptyState(string message)
+    {
+        var text = new TextBlock
+        {
+            Text = message,
+            FontSize = 12.5,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(2, 2, 2, 12),
+        };
+        text.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+        return text;
+    }
+
+    private static void UseSecondaryStyle(Button button) =>
+        button.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+
+    private static Action FilterGrid(DataGrid grid, Func<object, bool> predicate)
+    {
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(grid.ItemsSource);
+        view.Filter = value => predicate(value);
+        return view.Refresh;
     }
 
     private static FrameworkElement Section(string title, string subtitle, UIElement content)
@@ -3589,6 +4123,18 @@ internal static class RestaurantOperationalPages
     private sealed record PrinterIssueChoice(string Id, bool Receipt, string Display);
 
     private sealed record InventoryRow(string Sku, string Name, string BaseUnit, string PurchaseUnit, decimal Quantity, decimal ReorderLevel, decimal AverageCost, decimal StockValue);
+
+    private sealed record ConsumptionRow(
+        DateTimeOffset When,
+        string Material,
+        decimal Quantity,
+        string Unit,
+        decimal StockBefore,
+        decimal StockAfter,
+        string Reason,
+        string Notes,
+        string User,
+        decimal Value);
     private sealed record PurchaseRow(string Number, string Supplier, string Status, decimal Total, DateTimeOffset OrderedAt, DateTimeOffset? CompletedAt);
     private sealed record SupplierRow(string Code, string Name, string? Phone, string? Email);
     private sealed record ReceiptRow(string Number, string Status, DateTimeOffset ReceivedAt, string PurchaseOrderId);

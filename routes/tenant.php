@@ -52,6 +52,7 @@ use App\Http\Controllers\Tenant\SyncPullController;
 use App\Http\Controllers\Tenant\SyncPushController;
 use App\Http\Controllers\Tenant\TenantAuthController;
 use App\Http\Controllers\Tenant\TenantDesktopManagementController;
+use App\Http\Controllers\Tenant\TenantDesktopRolesController;
 use App\Http\Controllers\Tenant\TenantDesktopUsersController;
 use App\Http\Controllers\Tenant\TenantDeviceController;
 use App\Http\Controllers\Tenant\TenantPortalController;
@@ -154,13 +155,18 @@ Route::middleware(['web', ...$tenantMiddleware, 'tenant.web.guard'])->group(func
                     ->name('tenant.web.devices.revoke');
                 Route::post('/settings/restaurant', [RestaurantSettingsController::class, 'update'])
                     ->name('tenant.web.settings.restaurant.update');
-                Route::post('/settings/modules', [RestaurantModulesController::class, 'update'])->name('tenant.web.settings.modules.update');
+                Route::post('/settings/modules', [RestaurantModulesController::class, 'update'])
+                    ->middleware('tenant.permission:inventory.settings')
+                    ->name('tenant.web.settings.modules.update');
 
                 Route::post('/setup/branch', [TenantPortalSetupController::class, 'branch']);
                 Route::post('/setup/area', [TenantPortalSetupController::class, 'area']);
                 Route::post('/setup/station', [TenantPortalSetupController::class, 'station']);
-                Route::post('/setup/user', [TenantPortalSetupController::class, 'user']);
-                Route::patch('/users/{user}', [TenantPortalSetupController::class, 'updateUser'])->name('tenant.web.users.update');
+                Route::post('/setup/user', [TenantPortalSetupController::class, 'user'])
+                    ->middleware('tenant.permission:users.create');
+                Route::patch('/users/{user}', [TenantPortalSetupController::class, 'updateUser'])
+                    ->middleware('tenant.permission:users.edit')
+                    ->name('tenant.web.users.update');
             });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
@@ -217,7 +223,9 @@ Route::middleware($tenantMiddleware)
                 ->name('tenant.api.bootstrap');
 
             Route::get('/desktop/modules', [RestaurantModulesController::class, 'show'])->name('tenant.api.desktop.modules.show');
-            Route::middleware('tenant.role:owner,admin')->post('/desktop/modules', [RestaurantModulesController::class, 'update'])->name('tenant.api.desktop.modules.update');
+            Route::middleware('tenant.role:owner,admin')->post('/desktop/modules', [RestaurantModulesController::class, 'update'])
+                ->middleware('tenant.permission:inventory.settings')
+                ->name('tenant.api.desktop.modules.update');
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
                 Route::get('/desktop/management', [TenantDesktopManagementController::class, 'index']);
@@ -236,10 +244,23 @@ Route::middleware($tenantMiddleware)
 
             // Staff identity is cloud-owned: Windows Desktop uses authenticated API calls,
             // never writes passwords or roles to its local SQLite projection.
+            // Permission middleware denies by default; owner/admin hold the defaults.
             Route::middleware('tenant.role:owner,admin')->group(function (): void {
-                Route::get('/desktop/users', [TenantDesktopUsersController::class, 'index']);
-                Route::post('/desktop/users', [TenantDesktopUsersController::class, 'store']);
-                Route::patch('/desktop/users/{user}', [TenantDesktopUsersController::class, 'update']);
+                Route::middleware('tenant.permission:users.view')
+                    ->get('/desktop/users', [TenantDesktopUsersController::class, 'index']);
+                Route::middleware('tenant.permission:users.create')
+                    ->post('/desktop/users', [TenantDesktopUsersController::class, 'store']);
+                Route::middleware('tenant.permission:users.edit')
+                    ->patch('/desktop/users/{user}', [TenantDesktopUsersController::class, 'update']);
+
+                Route::middleware('tenant.permission:roles.manage')->group(function (): void {
+                    Route::get('/desktop/roles', [TenantDesktopRolesController::class, 'index']);
+                    Route::post('/desktop/roles', [TenantDesktopRolesController::class, 'store']);
+                    Route::get('/desktop/roles/{role}', [TenantDesktopRolesController::class, 'show']);
+                    Route::patch('/desktop/roles/{role}', [TenantDesktopRolesController::class, 'update']);
+                    Route::delete('/desktop/roles/{role}', [TenantDesktopRolesController::class, 'destroy']);
+                    Route::get('/desktop/permissions', [TenantDesktopRolesController::class, 'permissions']);
+                });
             });
 
             Route::middleware('tenant.role:owner,admin,manager')->group(function (): void {
@@ -397,16 +418,20 @@ Route::middleware($tenantMiddleware)
 
             Route::middleware('tenant.role:owner,admin,manager,inventory')->group(function (): void {
                 Route::get('/inventory/items', [InventoryItemController::class, 'index'])
-                    ->name('tenant.api.inventory.items.index')->middleware('restaurant.module:inventory');
+                    ->name('tenant.api.inventory.items.index')
+                    ->middleware(['restaurant.module:inventory', 'tenant.permission:inventory.view']);
 
                 Route::post('/inventory/items', [InventoryItemController::class, 'store'])
-                    ->name('tenant.api.inventory.items.store')->middleware('restaurant.module:inventory');
+                    ->name('tenant.api.inventory.items.store')
+                    ->middleware(['restaurant.module:inventory', 'tenant.permission:inventory.stock-add']);
 
                 Route::post('/inventory/items/{inventoryItem}/adjustments', [InventoryItemController::class, 'adjust'])
-                    ->name('tenant.api.inventory.items.adjust')->middleware('restaurant.module:inventory');
+                    ->name('tenant.api.inventory.items.adjust')
+                    ->middleware(['restaurant.module:inventory', 'tenant.permission:inventory.adjustments']);
 
                 Route::get('/inventory/movements', [StockMovementController::class, 'index'])
-                    ->name('tenant.api.inventory.movements.index')->middleware('restaurant.module:inventory');
+                    ->name('tenant.api.inventory.movements.index')
+                    ->middleware(['restaurant.module:inventory', 'tenant.permission:inventory.view']);
 
                 Route::get('/suppliers', [SupplierController::class, 'index'])
                     ->name('tenant.api.suppliers.index')->middleware('restaurant.module:inventory');

@@ -183,7 +183,9 @@ public sealed class LocalKitchenService
                 RoundNumber = round.RoundNumber,
                 KitchenStationId = station.Id,
                 SubmittedByUserId = actor.UserId,
-                TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}",
+                // The human KOT number repeats each business day, so the unique
+                // internal ticket number carries the business date as well.
+                TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}-{round.BusinessDate:yyyyMMdd}",
                 KotNumber = round.KotNumber,
                 Priority = priority,
                 Status = initialStatus,
@@ -917,7 +919,7 @@ public sealed class LocalKitchenService
             RoundNumber = round.RoundNumber,
             KitchenStationId = station.Id,
             SubmittedByUserId = actor.UserId,
-            TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}",
+            TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}-{round.BusinessDate:yyyyMMdd}",
             KotNumber = round.KotNumber,
             Priority = "rush",
             Status = initialStatus,

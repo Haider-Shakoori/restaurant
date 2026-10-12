@@ -12,6 +12,7 @@ use App\Models\MenuItem;
 use App\Models\RestaurantBranch;
 use App\Models\Supplier;
 use App\Models\TenantUser;
+use App\Services\Tenant\TenantRoleService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +22,9 @@ use Illuminate\Validation\ValidationException;
 
 class TenantPortalSetupController extends Controller
 {
+    public function __construct(
+        private readonly TenantRoleService $roles,
+    ) {}
     public function branch(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -208,17 +212,21 @@ class TenantPortalSetupController extends Controller
 
     public function updateUser(Request $request, TenantUser $user): RedirectResponse
     {
-        $roles = ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'];
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'phone' => ['nullable', 'string', 'max:50'],
-            'role' => ['required', Rule::in($roles)],
+            'role' => ['required', Rule::in($this->roles->assignableRoleKeys())],
             'is_active' => ['required', 'boolean'],
             'password' => ['nullable', 'string', 'min:8', 'max:255'],
         ]);
 
         $currentUser = auth('tenant')->user();
+        if ($currentUser) {
+            $this->roles->assertCanManageUser($currentUser, $user);
+            $this->roles->assertCanAssignRole($currentUser, $data['role']);
+        }
+
         if ($currentUser && (int) $currentUser->id === (int) $user->id &&
             ($data['role'] !== $user->role || ! (bool) $data['is_active'])) {
             return back()->withErrors(['role' => 'You cannot change your own role or disable your own account.']);
@@ -250,15 +258,18 @@ class TenantPortalSetupController extends Controller
 
     public function user(Request $request): RedirectResponse
     {
-        $roles = ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'];
-
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'phone' => ['nullable', 'string', 'max:50'],
-            'role' => ['required', Rule::in($roles)],
+            'role' => ['required', Rule::in($this->roles->assignableRoleKeys())],
             'password' => ['required', 'string', 'min:8', 'max:255'],
         ]);
+
+        $currentUser = auth('tenant')->user();
+        if ($currentUser) {
+            $this->roles->assertCanAssignRole($currentUser, $data['role']);
+        }
 
         TenantUser::query()->create([
             'public_id' => (string) Str::ulid(),

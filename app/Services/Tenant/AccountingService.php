@@ -419,6 +419,37 @@ class AccountingService
         );
     }
 
+    public function postManualConsumption(
+        StockMovement $movement,
+        TenantUser $actor,
+        string $valueDelta,
+    ): ?JournalEntry {
+        $minor = Money::toMinor($valueDelta);
+
+        // Manual ingredient consumption reduces the inventory asset and is
+        // recognized as material cost (COGS) exactly once for the movement.
+        if ($minor === 0) {
+            return null;
+        }
+
+        $amount = Money::fromMinor(abs($minor));
+
+        return $this->post(
+            $movement->branch_id,
+            $actor,
+            'stock_movement',
+            $movement->id,
+            'manual-consumption',
+            'Manual consumption of '.$movement->item->name.($movement->notes ? ' — '.$movement->notes : ''),
+            $movement->occurred_at->format('Y-m-d'),
+            [
+                ['account_id' => $this->systemAccount('cost_of_goods_sold')->id, 'debit' => $amount],
+                ['account_id' => $this->systemAccount('inventory_asset')->id, 'credit' => $amount],
+            ],
+            'stock-movement:'.$movement->id.':manual-consumption',
+        );
+    }
+
     public function postCashVariance(
         string $branchId,
         TenantUser $actor,

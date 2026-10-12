@@ -110,7 +110,11 @@ internal static class DesktopGlassDialog
         // This is intentionally the owner's *current content*, rather than
         // overwriting the owner's Window.Effect or installing a persistent
         // application-wide blur that could degrade kitchen performance.
-        var backdrop = owner?.Content as UIElement;
+        // A window must never blur itself: at startup the sign-in window is
+        // also the active window, and self-blurring made the login unreadable.
+        var backdrop = owner is not null && !ReferenceEquals(owner, dialog)
+            ? owner.Content as UIElement
+            : null;
         var originalEffect = backdrop?.Effect;
         try
         {

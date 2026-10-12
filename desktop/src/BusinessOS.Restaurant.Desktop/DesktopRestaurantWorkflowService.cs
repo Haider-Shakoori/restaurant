@@ -32,6 +32,12 @@ public sealed class DesktopRestaurantWorkflowService
         var session = await _sessions.LoadAsync(token)
             ?? throw new InvalidOperationException("Sign in to the Restaurant desktop before running operational actions.");
 
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync(token)
+            ?? throw new UnauthorizedAccessException("Activation is missing.");
+        var lease = new BusinessOS.Restaurant.Licensing.SignedLeaseVerifier().Verify(activation.Lease, activation.PublicKey);
+        if (session.TenantId != lease.TenantId || lease.OfflineValidUntil <= DateTimeOffset.UtcNow ||
+            lease.SubscriptionEndsAt <= DateTimeOffset.UtcNow)
+            throw new UnauthorizedAccessException("Session does not match a valid licensed restaurant.");
         return new LocalTerminalPrincipal(
             $"desktop-{Environment.MachineName}".ToLowerInvariant(),
             session.User.Id,

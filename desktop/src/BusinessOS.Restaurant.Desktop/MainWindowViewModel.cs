@@ -21,6 +21,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly DesktopNoticeFeed _noticeFeed = new();
     private readonly List<DispatcherTimer> _noticeTimers = new();
 
+    [ObservableProperty] private string _tenantLabel = string.Empty;
+
     public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
     public bool CanViewDashboard => CanView("dashboard");
     public bool CanViewPos => CanView("pos");
@@ -35,6 +37,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool CanViewReports => CanView("reports");
     public bool CanViewUsers => CanView("users");
     public bool CanViewSettings => CanView("settings");
+    public bool CanViewModules => CanView("modules");
+    public bool CanViewCatalogMenu => CanViewMenu || CanViewRecipes;
+    public bool CanViewStockMenu => CanViewInventory || CanViewPurchases || CanViewExpenses || CanViewClosing;
+    public bool CanViewManageMenu => CanViewReports || CanViewUsers || CanViewSettings;
 
     private bool CanView(string route) =>
         RestaurantWorkspaceRoutes.CanOpen(_session.User.Role, route);
@@ -74,7 +80,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(AuthSession session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
-        CurrentRoute = RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
+        CurrentRoute = "modules";
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
@@ -148,7 +154,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // Startup loads the dashboard once; the toolbar refresh additionally reloads the active page.
         // Local operation comes first: never block opening the first page
         // behind optional WAN/LAN or licensing diagnostics.
-        await NavigateAsync(RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role));
+        var activation = await new WindowsActivationStore().LoadAsync();
+        if (activation is not null)
+        {
+            var lease = new SignedLeaseVerifier().Verify(activation.Lease, activation.PublicKey);
+            TenantLabel = lease.TenantName ?? $"Restaurant {lease.TenantId}";
+        }
+        await NavigateAsync("modules");
         await RefreshDiagnosticsAsync();
     }
 
@@ -163,7 +175,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         WorkspaceLoadingMessage = "Refreshing local " + route + " data…";
         try
         {
-            var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            var refreshedPage = await CreatePageAsync(route);
             if (_pageRequests.IsCurrent(requestId) && CurrentRoute == route && CanView(route))
             {
                 CurrentPage = refreshedPage;
@@ -251,6 +263,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ThemeButtonText));
     }
 
+    private Task<System.Windows.FrameworkElement> CreatePageAsync(string route) => route == "modules"
+        ? Task.FromResult(ModuleHome.Create(_session.User.Role, NavigateCommand))
+        : RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+
     private async Task NavigateAsync(string? key)
     {
         var route = key ?? RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
@@ -273,6 +289,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         var (pageTitle, pageSubtitle) = route switch
         {
+            "modules" => ("All Modules", "Choose a workspace"),
             "dashboard" => ("Dashboard", "Restaurant overview and today's operations"),
             "pos" => ("POS & Orders", "Orders, menu and cashier workflow"),
             "tables" => ("Tables & Floor", "Live table occupancy and dining areas"),
@@ -294,7 +311,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // page must not appear under a misleading new navigation title.
         try
         {
-            var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            var page = await CreatePageAsync(route);
             if (!_pageRequests.IsCurrent(requestId))
                 return;
 

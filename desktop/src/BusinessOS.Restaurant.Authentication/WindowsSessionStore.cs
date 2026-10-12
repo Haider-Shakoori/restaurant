@@ -38,8 +38,9 @@ public sealed class WindowsSessionStore
 
         try
         {
-            return JsonSerializer.Deserialize<AuthSession>(plainBytes, JsonOptions)
+            var session = JsonSerializer.Deserialize<AuthSession>(plainBytes, JsonOptions)
                 ?? throw new CryptographicException("The protected user session is invalid.");
+            return SessionValidity.IsValid(session, DateTimeOffset.UtcNow) ? session : null;
         }
         finally
         {

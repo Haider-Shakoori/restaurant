@@ -60,8 +60,45 @@ class MenuItemImageServingTest extends TestCase
 
         $response->assertOk();
         $this->assertStringStartsWith('image/png', (string) $response->headers->get('Content-Type'));
+        $this->assertStringContainsString('immutable', (string) $response->headers->get('Cache-Control'));
+        $this->assertStringContainsString('max-age=31536000', (string) $response->headers->get('Cache-Control'));
+        $this->assertNotEmpty($response->headers->get('ETag'));
         $this->assertSame($image, $response->streamedContent());
         $this->assertFalse(tenancy()->initialized);
+    }
+
+    public function test_menu_image_url_is_content_versioned_for_long_lived_caching(): void
+    {
+        $tenant = $this->createTenant('images-version.test');
+        tenancy()->initialize($tenant);
+
+        $menuItem = MenuItem::query()->create([
+            'name' => 'Versioned Dish',
+            'price' => '200.00',
+            'is_available' => true,
+            'sort_order' => 0,
+            'image_path' => 'menu-items/first.png',
+        ]);
+
+        $first = $menuItem->image_url;
+        $this->assertStringContainsString('?v=', (string) $first);
+
+        $menuItem->update(['image_path' => 'menu-items/replaced.png']);
+        $second = $menuItem->fresh()->image_url;
+
+        // A replaced image changes the URL, so cached bytes are never stale.
+        $this->assertNotSame($first, $second);
+
+        // Replacing the bytes at the SAME storage path also changes the
+        // content version (file size/mtime signature), not just the path.
+        $image = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAWcXev8AAAAASUVORK5CYII=', true);
+        Storage::disk('public')->put('menu-items/replaced.png', $image);
+        $beforeSamePath = $menuItem->fresh()->image_url;
+        Storage::disk('public')->put('menu-items/replaced.png', $image.$image);
+        $afterSamePath = $menuItem->fresh()->image_url;
+        $this->assertNotSame($beforeSamePath, $afterSamePath);
+
+        tenancy()->end();
     }
 
     public function test_menu_image_does_not_leak_across_tenants_and_missing_files_404(): void

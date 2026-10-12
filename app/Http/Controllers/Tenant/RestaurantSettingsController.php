@@ -17,7 +17,7 @@ class RestaurantSettingsController extends Controller
         $branchId = $data['branch_id'] ?? null;
         unset($data['branch_id']);
 
-        $settings->put($data, $branchId);
+        $settings->put($data, $branchId, $request->user()?->getKey());
 
         return back()->with('status', $branchId === null
             ? 'Restaurant workflow settings updated.'

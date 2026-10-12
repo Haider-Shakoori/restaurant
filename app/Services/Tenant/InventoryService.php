@@ -112,6 +112,7 @@ class InventoryService
         string $quantityDelta,
         string $clientAdjustmentId,
         string $reason,
+        bool $asManualConsumption = false,
     ): StockMovement {
         return DB::connection('tenant')->transaction(function () use (
             $branch,
@@ -120,6 +121,7 @@ class InventoryService
             $quantityDelta,
             $clientAdjustmentId,
             $reason,
+            $asManualConsumption,
         ): StockMovement {
             $idempotencyKey = 'adjustment:'.$branch->id.':'.$clientAdjustmentId;
             $existing = StockMovement::query()
@@ -148,11 +150,17 @@ class InventoryService
                 $quantityDelta,
             );
 
-            $this->accounting->postInventoryAdjustment(
-                $movement,
-                $actor,
-                $valueDelta,
-            );
+            // Desktop manual consumption is recognized as material cost; all
+            // other corrections keep the existing inventory adjustment account.
+            if ($asManualConsumption && Quantity::toScaled($quantityDelta) < 0) {
+                $this->accounting->postManualConsumption($movement, $actor, $valueDelta);
+            } else {
+                $this->accounting->postInventoryAdjustment(
+                    $movement,
+                    $actor,
+                    $valueDelta,
+                );
+            }
 
             return $movement;
         });

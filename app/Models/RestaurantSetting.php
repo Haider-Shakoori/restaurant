@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'branch_id',
     'key',
     'value',
+    'updated_by_user_id',
 ])]
 class RestaurantSetting extends Model
 {

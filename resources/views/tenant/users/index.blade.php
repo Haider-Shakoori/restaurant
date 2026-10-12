@@ -22,7 +22,7 @@
                             <tr x-show="@js(strtolower($user->name.' '.$user->email)).includes(query.toLowerCase())">
                                 <td class="px-5 py-4 font-bold">{{ $user->name }}</td>
                                 <td class="px-5 py-4">{{ $user->email ?: '—' }}</td>
-                                <td class="px-5 py-4 capitalize">{{ $user->role }}</td>
+                                <td class="px-5 py-4">{{ $roles[$user->role] ?? ucfirst($user->role) }}</td>
                                 <td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-bold {{ $user->is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600' }}">{{ $user->is_active ? 'Active' : 'Inactive' }}</span></td>
                                 <td class="px-5 py-4">
                                     <details class="min-w-64">
@@ -41,8 +41,8 @@
                                             </label>
                                             <label class="block text-xs font-semibold">Role
                                                 <select name="role" class="mt-1 w-full rounded-lg border border-slate-300 p-2">
-                                                    @foreach ($roles as $role)
-                                                        <option value="{{ $role }}" @selected($user->role === $role)>{{ ucfirst($role) }}</option>
+                                                    @foreach ($roles as $roleKey => $roleName)
+                                                        <option value="{{ $roleKey }}" @selected($user->role === $roleKey)>{{ $roleName }}</option>
                                                     @endforeach
                                                 </select>
                                             </label>
@@ -77,7 +77,7 @@
                     <input name="email" required type="email" placeholder="Email" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
                     <input name="phone" placeholder="Phone" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
                     <select name="role" required class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
-                        @foreach ($roles as $role)<option value="{{ $role }}">{{ ucfirst($role) }}</option>@endforeach
+                        @foreach ($roles as $roleKey => $roleName)<option value="{{ $roleKey }}">{{ $roleName }}</option>@endforeach
                     </select>
                     <input name="password" required type="password" minlength="8" placeholder="Temporary password" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
                     <button class="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white">Create user</button>

@@ -641,23 +641,23 @@ internal static class Program
             .Single(x => x.Name == "ExitPosButton");
         var shortcuts = Descendants<Button>(window)
             .Single(x => x.Name == "WorkspaceShortcutsButton");
-        var sidebar = Descendants<Border>(window)
-            .Single(x => x.Name == "SidebarContainer");
+        var topNav = Descendants<Border>(window)
+            .Single(x => x.Name == "TopNavigationBar");
         Assert(fullscreen.Visibility == Visibility.Visible &&
             shortcuts.Visibility == Visibility.Visible &&
-            sidebar.Visibility == Visibility.Visible &&
+            topNav.Visibility == Visibility.Visible &&
             restore.Visibility == Visibility.Collapsed,
             route + " opens in a normal navigable Windows window by default");
         Click(fullscreen);
         Assert(restore.Visibility == Visibility.Visible &&
-            sidebar.Visibility == Visibility.Collapsed &&
+            topNav.Visibility == Visibility.Collapsed &&
             fullscreen.Visibility == Visibility.Collapsed,
             route + " enters optional full-screen mode by top toolbar");
         Click(restore);
         Assert(fullscreen.Visibility == Visibility.Visible &&
-            sidebar.Visibility == Visibility.Visible &&
+            topNav.Visibility == Visibility.Visible &&
             restore.Visibility == Visibility.Collapsed,
-            route + " restores the normal window and sidebar without leaving the page");
+            route + " restores the normal window and navigation without leaving the page");
     }
 
     private static async Task CheckPosInteractionsAsync(MainWindow window)

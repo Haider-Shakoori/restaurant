@@ -31,3 +31,10 @@ _ide_helper.php
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Desktop build outputs, local prototype reference and archives
+/desktop/**/bin/
+/desktop/**/obj/
+/desktop/artifacts/
+/desktop/ui-preview/
+/desktop/files (2).zip

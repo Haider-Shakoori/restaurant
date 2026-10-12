@@ -57,4 +57,5 @@ public sealed record LeaseSnapshot(
     DateTimeOffset SubscriptionEndsAt,
     JsonElement Features,
     int? MobileDeviceLimit = null,
-    string DesktopMode = DesktopOperatingMode.CloudSync);
+    string DesktopMode = DesktopOperatingMode.CloudSync,
+    string? TenantName = null);

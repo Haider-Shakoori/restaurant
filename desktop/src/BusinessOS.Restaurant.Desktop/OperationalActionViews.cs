@@ -59,7 +59,7 @@ internal static class OperationalActionViews
                     option.PriceDelta))
                 .ToListAsync();
             var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
-                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total), x.UpdatedAtUtc })
+                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total, x.DisplayNumber), x.UpdatedAtUtc })
                     .ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Take(100)
@@ -100,9 +100,35 @@ internal static class OperationalActionViews
                 .Select(x => x.Row)
                 .ToList();
 
-            return (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines);
+            // Floor tiles drive the POS: available and occupied tables with
+            // their live guests/total for one-tap table ordering.
+            var floorTables = await (from table in db.DiningTables.AsNoTracking()
+                                     join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                                     join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                                     where table.IsActive && area.IsActive && branch.IsActive
+                                     orderby area.SortOrder, table.Name
+                                     select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                                         table.Code, table.Name, table.Capacity, table.Status)).ToListAsync();
+            var floorOrders = (await db.Orders.AsNoTracking()
+                    .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
+                    .Select(x => new
+                    {
+                        Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                        x.UpdatedAtUtc,
+                    })
+                    .ToListAsync())
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .Select(x => x.Row).ToArray();
+
+            return (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines, floorTables, floorOrders);
         });
-        var (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines) = pageData;
+        var (factory, tables, menu, modifierChoices, orders, branches, sessions, bills, orderLines, floorTables, floorOrders) = pageData;
+        // Mutable floor state so tiles refresh in place without rebuilding the page.
+        var tablesNow = floorTables;
+        var ordersNow = floorOrders;
+        TableChoice? selectedTable = null;
+        Action<string>? openDishForSelectedTable = null;
+        var posTableStrip = new WrapPanel { Name = "PosTableStrip", Margin = new Thickness(0, 0, 0, 4) };
         Trace.WriteLine($"[Restaurant] POS SQLite: {navigationClock.ElapsedMilliseconds} ms; menu={menu.Count}, activeOrders={orders.Count}, lines={orderLines.Count}");
 
         var workflow = new DesktopRestaurantWorkflowService();
@@ -263,15 +289,14 @@ internal static class OperationalActionViews
             menuSearchBox,
             item =>
             {
-                menuBox.SelectedItem = menu.FirstOrDefault(x => x.Id == item.Id);
-                if (menuBox.SelectedItem is not MenuChoice) return;
-                if (string.IsNullOrWhiteSpace(orderIdBox.Text))
+                // Dishes always join the order of the table tile chosen above;
+                // the table modal shows the updated ticket immediately.
+                if (selectedTable is null)
                 {
-                    firstPhotoAwaitingTable = true;
-                    showQuickOrderSetup?.Invoke();
+                    selectionSummary.Text = "Tap a table tile above to start or resume its order.";
                     return;
                 }
-                add.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                openDishForSelectedTable?.Invoke(item.Id);
             });
         form.Children.Insert(form.Children.IndexOf(menuBox), photoCatalog);
         form.Children.Add(Label("4 · KITCHEN & ORDER ADJUSTMENTS"));
@@ -323,7 +348,7 @@ internal static class OperationalActionViews
         grid.MinHeight = 110;
         grid.MaxHeight = 380;
         grid.SelectionMode = DataGridSelectionMode.Single;
-        grid.Columns.Add(Column("Order", nameof(OrderChoice.ClientOrderId), 220));
+        grid.Columns.Add(Column("Order", nameof(OrderChoice.Display), 220));
         grid.Columns.Add(Column("Service", nameof(OrderChoice.ServiceType), 110));
         grid.Columns.Add(Column("Waiter", nameof(OrderChoice.Waiter), 150));
         grid.Columns.Add(Column("Guests", nameof(OrderChoice.Guests), 80));
@@ -417,9 +442,10 @@ internal static class OperationalActionViews
         // cash or a redundant cashier-session picker in the checkout modal.
         // Sessions remain audited in SQLite and are resolved by bill branch
         // and the signed-in operator only when posting an actual payment.
-        var orderBox = Combo(orders, "ClientOrderId"); orderBox.Width = 360;
+        var orderBox = Combo(orders, nameof(OrderChoice.Display)); orderBox.Width = 360;
         var billBox = Combo(bills, "Display"); billBox.Width = 360; billBox.Name = "PosBillPicker";
-        var paymentMethod = new ComboBox { ItemsSource = new[] { "cash", "card", "bank", "mobile_money", "other" }, SelectedIndex = 0, Height = 34, Width = 160, Margin = new Thickness(0,4,8,6) };
+        // This restaurant collects cash only, so no payment-method selection is
+        // shown; postings stay fully audited against the cashier session.
         var amountBox = new TextBox { Name = "PosPaymentAmount", Text = "0", Height = 38, Width = 180, Margin = new Thickness(0,4,8,6) };
         var discountBox = new TextBox { Text = "0", Height = 34, Width = 110, Margin = new Thickness(0,4,8,6) };
         var splitCountBox = new TextBox { Text = "2", Height = 34, Width = 80, Margin = new Thickness(0,4,8,6) };
@@ -446,13 +472,9 @@ internal static class OperationalActionViews
         cashier.Children.Add(paymentBalance);
         var checkoutFields = new WrapPanel { Margin = new Thickness(0, 6, 0, 6) };
         var amountField = new StackPanel { Margin = new Thickness(0, 0, 24, 0) };
-        amountField.Children.Add(Label("Amount (AFN)"));
+        amountField.Children.Add(Label("Amount received (AFN)"));
         amountField.Children.Add(amountBox);
-        var methodField = new StackPanel();
-        methodField.Children.Add(Label("Payment method"));
-        methodField.Children.Add(paymentMethod);
         checkoutFields.Children.Add(amountField);
-        checkoutFields.Children.Add(methodField);
         cashier.Children.Add(checkoutFields);
         var payRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) };
         var pay = Button("Post payment"); pay.MinHeight = 48;
@@ -561,7 +583,7 @@ internal static class OperationalActionViews
                 if (!decimal.TryParse(amountBox.Text, out var amount) ||
                     amount <= 0m || amount > bill.Balance)
                     throw new InvalidOperationException("Enter an amount greater than zero and no more than the balance due.");
-                var method = paymentMethod.SelectedItem?.ToString() ?? "cash";
+                var method = "cash";
                 cashierStatus.Text = "Verifying the local cashier session…";
                 var cashierContext = await DesktopUiWork.RunAsync(async () =>
                 {
@@ -963,7 +985,7 @@ internal static class OperationalActionViews
                         .Select(x => new
                         {
                             Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName,
-                                x.Status, x.GuestCount, x.Total),
+                                x.Status, x.GuestCount, x.Total, x.DisplayNumber),
                             x.UpdatedAtUtc,
                         }).ToListAsync())
                     .OrderByDescending(x => x.UpdatedAtUtc).Take(100).Select(x => x.Row).ToArray();
@@ -1103,44 +1125,205 @@ internal static class OperationalActionViews
         billingModal.ToolTip = "F8 · Payments and billing";
         billingModal.MinHeight = 42;
 
+        // Table-first ordering: pick a floor tile and everything else — new
+        // order, dishes, guests, kitchen round and checkout — happens in the
+        // table modal. The legacy controls remain reachable for keyboards and
+        // automation (F2–F8) but no longer occupy the toolbar.
+        async Task OpenTableOrderAsync(TableChoice table, TableOrderChoice? order, string? quickAddItemId = null)
+        {
+            var checkout = await OpenTableOrderModalAsync(
+                table, "dine_in", order, selectionSummary,
+                allowCheckout: true, refreshParent: false, quickAddItemId: quickAddItemId);
+            if (checkout && cashierCard is not null)
+            {
+                billingModal.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            }
+            else
+            {
+                await RefreshFloorAsync();
+            }
+        }
+
+        async Task RefreshFloorAsync()
+        {
+            try
+            {
+                var refreshed = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var db = factory.Create();
+                    var refreshedTables = await (from table in db.DiningTables.AsNoTracking()
+                                                 join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                                                 join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                                                 where table.IsActive && area.IsActive && branch.IsActive
+                                                 orderby area.SortOrder, table.Name
+                                                 select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                                                     table.Code, table.Name, table.Capacity, table.Status)).ToListAsync();
+                    var refreshedOrders = (await db.Orders.AsNoTracking()
+                            .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
+                            .Select(x => new
+                            {
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                x.UpdatedAtUtc,
+                            })
+                            .ToListAsync())
+                        .OrderByDescending(x => x.UpdatedAtUtc)
+                        .Select(x => x.Row).ToArray();
+                    return (Tables: refreshedTables, Orders: refreshedOrders);
+                });
+                tablesNow = refreshed.Tables;
+                ordersNow = refreshed.Orders;
+                RenderFloorTiles();
+            }
+            catch (Exception ex)
+            {
+                selectionSummary.Text = "Could not refresh the floor: " + ex.Message;
+            }
+        }
+
+        void RenderFloorTiles()
+        {
+            posTableStrip.Children.Clear();
+            foreach (var table in tablesNow)
+            {
+                posTableStrip.Children.Add(BuildPosTableTile(table, ordersNow.FirstOrDefault(x => x.TableId == table.Id)));
+            }
+        }
+
+        Button BuildPosTableTile(TableChoice table, TableOrderChoice? order)
+        {
+            var stateBrush = table.Status switch
+            {
+                "available" => "SuccessBrush",
+                "occupied" => "BrandPrimaryBrush",
+                _ => "WarningBrush",
+            };
+            var title = new TextBlock
+            {
+                Text = table.Name, FontSize = 15, FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            var meta = new TextBlock
+            {
+                Text = $"Table {table.Code} · {table.Capacity} seats",
+                FontSize = 10.5, Margin = new Thickness(0, 3, 0, 5),
+            };
+            meta.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            var state = new TextBlock
+            {
+                Text = table.Status.ToUpperInvariant(), FontSize = 10.5, FontWeight = FontWeights.Bold,
+            };
+            state.SetResourceReference(TextBlock.ForegroundProperty, stateBrush);
+            var stack = new StackPanel { Margin = new Thickness(11) };
+            stack.Children.Add(title);
+            stack.Children.Add(meta);
+            stack.Children.Add(state);
+            if (order is not null)
+            {
+                var caption = new TextBlock
+                {
+                    Text = $"{order.ShortNumber} · {order.Guests} guest(s) · AFN {order.Total:N0}",
+                    FontSize = 10, Margin = new Thickness(0, 4, 0, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                caption.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                stack.Children.Add(caption);
+            }
+            var surface = new Border
+            {
+                Width = 172, MinHeight = 96, CornerRadius = new CornerRadius(13),
+                BorderThickness = new Thickness(1), Child = stack,
+            };
+            surface.SetResourceReference(Border.BackgroundProperty, "FloorTileBackgroundBrush");
+            surface.SetResourceReference(Border.BorderBrushProperty,
+                table.Id == selectedTable?.Id ? "BrandPrimaryBrush" : "FloorTileBorderBrush");
+            var tile = new Button
+            {
+                Content = surface, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent, Margin = new Thickness(0, 0, 9, 9),
+                ToolTip = order is null
+                    ? "Tap to start a new order at this table"
+                    : "Tap to open this table's order, guests and checkout",
+            };
+            tile.Click += async (_, _) =>
+            {
+                selectedTable = table;
+                RenderFloorTiles();
+                await OpenTableOrderAsync(table, order);
+            };
+            return tile;
+        }
+
         var quickActions = new WrapPanel
         {
             Name = "PosTopActions", Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 0, 4),
         };
-        var quickTableBox = Combo(tables, "Label");
-        quickTableBox.Name = "PosQuickTablePicker";
-        quickTableBox.Width = 250;
-        quickTableBox.Height = 40;
-        quickTableBox.ToolTip = "Choose an available table, then tap dishes. The order opens automatically.";
-        quickTableBox.SelectionChanged += (_, _) =>
+        quickActions.Children.Add(posTableStrip);
+
+        async Task OpenServiceOrderAsync(string type)
         {
-            if (quickTableBox.SelectedItem is not Choice chosen) return;
-            serviceTypeBox.SelectedItem = "dine_in";
-            tableBox.SelectedItem = tables.FirstOrDefault(x => x.Id == chosen.Id);
-            // Never silently switch an order already in progress to another
-            // table. The quick selector applies to the next order only.
-        };
-        var quickTableLabel = new TextBlock
-        {
-            Text = "TABLE", FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(2, 15, 8, 0),
-        };
-        quickActions.Children.Add(quickTableLabel);
-        quickActions.Children.Add(quickTableBox);
-        foreach (var button in new[] { newOrderModal, activeOrdersModal, viewTicketModal, editItemsModal })
+            var checkout = await OpenTableOrderModalAsync(
+                null, type, null, selectionSummary,
+                allowCheckout: true, refreshParent: false, branches: branches);
+            if (checkout && cashierCard is not null)
+            {
+                billingModal.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+            }
+            else
+            {
+                await RefreshFloorAsync();
+            }
+        }
+
+        var takeaway = Button("Takeaway");
+        takeaway.Name = "PosTakeawayButton";
+        takeaway.ToolTip = "New takeaway order without a table";
+        var deliveryOrder = Button("Delivery");
+        deliveryOrder.Name = "PosDeliveryButton";
+        deliveryOrder.ToolTip = "New delivery order without a table";
+        foreach (var button in new[] { takeaway, deliveryOrder })
         {
             button.MinHeight = 40;
+            button.MinWidth = 124;
+            button.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        }
+        takeaway.Click += async (_, _) => await OpenServiceOrderAsync("takeaway");
+        deliveryOrder.Click += async (_, _) => await OpenServiceOrderAsync("delivery");
+        quickActions.Children.Add(takeaway);
+        quickActions.Children.Add(deliveryOrder);
+        if (cashierCard is not null)
+        {
+            // Pay button stays visible: serve, bill and collect payment here.
+            billingModal.Visibility = Visibility.Visible;
+            billingModal.MinHeight = 40;
+            quickActions.Children.Add(billingModal);
+        }
+        // Keys and Full screen belong to the workstation action row, right of
+        // the payment buttons; the top menu bar stays navigation-only.
+        var (posKeys, posFullScreen) = BuildWorkspaceChromeButtons();
+        quickActions.Children.Add(posKeys);
+        quickActions.Children.Add(posFullScreen);
+        foreach (var button in new[] { newOrderModal, activeOrdersModal, viewTicketModal, editItemsModal, addGuestsModal, kitchenModal })
+        {
+            button.Visibility = Visibility.Collapsed;
             quickActions.Children.Add(button);
         }
         kitchenActions.Children.Remove(submit);
-        submit.MinHeight = 40;
+        submit.Visibility = Visibility.Collapsed;
         quickActions.Children.Add(submit);
-        quickActions.Children.Add(addGuestsModal);
-        kitchenModal.MinHeight = 40;
-        quickActions.Children.Add(kitchenModal);
-        if (cashierCard is not null) quickActions.Children.Add(billingModal);
+        openDishForSelectedTable = itemId =>
+        {
+            var table = selectedTable;
+            if (table is null)
+            {
+                selectionSummary.Text = "Tap a table tile above to start or resume its order.";
+                return;
+            }
+            _ = OpenTableOrderAsync(table, ordersNow.FirstOrDefault(x => x.TableId == table.Id), itemId);
+        };
+        RenderFloorTiles();
 
         // Current-order context is visible even while the ticket is closed.
         var topContext = new Border
@@ -1220,7 +1403,7 @@ internal static class OperationalActionViews
             Effect = new System.Windows.Media.Effects.DropShadowEffect
             {
                 Color = Color.FromRgb(8, 22, 44),
-                ShadowDepth = 8, BlurRadius = 30, Opacity = 0.36,
+                ShadowDepth = 4, BlurRadius = 16, Opacity = 0.30,
             },
         };
         var dialogPreferredWidth = 860d;
@@ -1464,6 +1647,7 @@ internal static class OperationalActionViews
 
     public static async Task<FrameworkElement> TablesAsync()
     {
+        var workflow = new DesktopRestaurantWorkflowService();
         // Materialize all SQLite query results on a background thread before
         // constructing any WPF controls. SQLite async providers may block
         // synchronously while waiting for locks.
@@ -1471,6 +1655,8 @@ internal static class OperationalActionViews
         {
             var factory = new LocalDatabaseFactory();
             await factory.EnsureCreatedAsync();
+            // Tables keep their live status: a paid table stays occupied until
+            // staff explicitly mark it vacant from the dining-room panel.
             await using var db = factory.Create();
 
             var rows = await (from table in db.DiningTables.AsNoTracking()
@@ -1479,7 +1665,7 @@ internal static class OperationalActionViews
                               where table.IsActive && area.IsActive && branch.IsActive
                               orderby branch.Name, area.SortOrder, table.Name
                               select new TableChoice(table.Id, branch.Name + " · " + area.Name,
-                                  table.Code, table.Name, table.Capacity, table.Status))
+                                  table.Code, table.Name, table.Capacity, table.Status, table.ReservationNote))
                 .ToListAsync();
 
             var activeOrders = (await (
@@ -1493,7 +1679,7 @@ internal static class OperationalActionViews
                 {
                     Row = new TableOrderChoice(
                         order.Id, order.ClientOrderId, table.Id, table.Name,
-                        order.Status, order.Total),
+                        order.Status, order.Total, order.GuestCount, order.DisplayNumber),
                     order.UpdatedAtUtc,
                 })
                 .ToListAsync())
@@ -1527,7 +1713,7 @@ internal static class OperationalActionViews
                 select new
                 {
                     Row = new TableOrderChoice(order.Id, order.ClientOrderId,
-                        order.DiningTableId, "", order.Status, order.Total),
+                        order.DiningTableId, "", order.Status, order.Total, order.GuestCount, order.DisplayNumber),
                     order.UpdatedAtUtc,
                 }).ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
@@ -1546,11 +1732,10 @@ internal static class OperationalActionViews
             var branches = await db.Branches.AsNoTracking().Where(x => x.IsActive)
                 .OrderBy(x => x.Name).ToListAsync();
 
-            return (rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches);
+            return (factory, rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches);
         });
-        var (rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches) = pageData;
+        var (factory, rows, activeOrders, unsentLines, allFloorOrders, availableTables, areas, branches) = pageData;
 
-        var workflow = new DesktopRestaurantWorkflowService();
         // The translucent surface belongs to the whole floor workspace, not
         // only the table tiles. Its dynamic resources follow Classic/Glass.
         var root = new StackPanel { Margin = new Thickness(4) };
@@ -1607,6 +1792,13 @@ internal static class OperationalActionViews
                 syncTables.IsEnabled = true;
             }
         };
+        // New "dining room" view is the default; the classic floor/list/grid
+        // view stays one click away so the team can revert instantly.
+        var viewToggle = Button(UseNewDiningRoom ? "Classic floor view" : "Dining room view");
+        viewToggle.Name = "TablesViewToggle";
+        viewToggle.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        viewToggle.ToolTip = "Switch between the dining room and the classic floor view";
+        floorActions.Children.Add(viewToggle);
         root.Children.Add(floorActions);
 
         var grid = DataGrid(rows);
@@ -1616,6 +1808,30 @@ internal static class OperationalActionViews
         grid.Columns.Add(Column("Code", nameof(TableChoice.Code), 100));
         grid.Columns.Add(Column("Seats", nameof(TableChoice.Capacity), 80));
         grid.Columns.Add(Column("Status", nameof(TableChoice.Status), 130));
+        var overrideTable = Combo(rows, "Name");
+        overrideTable.Width = 180;
+        var markAvailable = Button("Override → Mark Available");
+        var actor = await workflow.CurrentPrincipalAsync();
+        markAvailable.Visibility = actor.UserRole is "owner" or "admin" or "manager" ? Visibility.Visible : Visibility.Collapsed;
+        overrideTable.Visibility = markAvailable.Visibility;
+        floorActions.Children.Add(overrideTable);
+        floorActions.Children.Add(markAvailable);
+        markAvailable.Click += async (_, _) =>
+        {
+            if (overrideTable.SelectedItem is not TableChoice selected) return;
+            if (!ConfirmOperationalChange($"Mark {selected.Name} available? Active or unpaid orders will block this action. This override is audited.", "Override table occupancy")) return;
+            markAvailable.IsEnabled = false;
+            try
+            {
+                await DesktopUiWork.RunAsync(async () => await new LocalCashierService(new LocalDatabaseFactory())
+                    .MarkTableAvailableAsync(selected.Id, await workflow.CurrentPrincipalAsync(), CancellationToken.None,
+                        "Manual table override from the Tables workspace"));
+                if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+                    await vm.RefreshCommand.ExecuteAsync(null);
+            }
+            catch (Exception ex) { syncStatus.Text = ex.Message; }
+            finally { markAvailable.IsEnabled = true; }
+        };
         // List, Grid and Floor all consume the same current SQLite table rows.
         // The Floor mode preserves dining-area grouping; Grid shows all tiles.
         grid.Visibility = Visibility.Collapsed;
@@ -1848,12 +2064,895 @@ internal static class OperationalActionViews
         };
         root.Children.Add(toggleAdvanced);
         root.Children.Add(advancedOperations);
+
+        var diningHost = await BuildDiningRoomAsync(factory, rows, allFloorOrders, syncStatus);
+        root.Children.Add(diningHost);
+        var classicElements = new UIElement[] { modeChooser, grid, visualFloor, visualGrid };
+        void ApplyTablesView()
+        {
+            var dining = UseNewDiningRoom;
+            diningHost.Visibility = dining ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var element in classicElements)
+            {
+                element.Visibility = dining ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (dining)
+            {
+                toggleAdvanced.Visibility = Visibility.Collapsed;
+                advancedOperations.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                toggleAdvanced.Visibility = Visibility.Visible;
+                SelectFloorMode("floor");
+            }
+
+            viewToggle.Content = dining ? "Classic floor view" : "Dining room view";
+        }
+        viewToggle.Click += (_, _) =>
+        {
+            UseNewDiningRoom = !UseNewDiningRoom;
+            ApplyTablesView();
+            syncStatus.Text = UseNewDiningRoom
+                ? "Dining room view. The classic floor view remains one click away."
+                : "Classic floor view restored.";
+        };
+        ApplyTablesView();
         return new ScrollViewer
         {
             Content = WorkspaceFrostedSurface.Wrap(root),
             Margin = new Thickness(12, 8, 12, 16),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
+    }
+
+    // Dining room view preference is intentionally session-scoped so the team
+    // can flip back to the classic flow instantly while evaluating the design.
+    private static bool UseNewDiningRoom = true;
+
+    /// <summary>
+    /// Cash checkout for a table order: serve → bill → cash payment, with an
+    /// option to mark the table vacant. Reuses the same local workflow calls
+    /// (and their duplicate-payment guards) as the POS checkout.
+    /// </summary>
+    private static async Task<bool> OpenTablePaymentModalAsync(
+        LocalDatabaseFactory factory,
+        TableChoice table,
+        TableOrderChoice order,
+        TextBlock statusText)
+    {
+        var workflow = new DesktopRestaurantWorkflowService();
+        var busy = false;
+        var total = order.Total;
+
+        var lines = await DesktopUiWork.RunAsync(async () =>
+        {
+            await using var db = factory.Create();
+            var orderId = await db.Orders.AsNoTracking()
+                .Where(x => x.ClientOrderId == order.ClientOrderId)
+                .Select(x => x.Id)
+                .FirstOrDefaultAsync();
+            if (orderId is null)
+            {
+                return (IReadOnlyList<TableLineChoice>)[];
+            }
+
+            return (IReadOnlyList<TableLineChoice>)(await db.OrderItems.AsNoTracking()
+                    .Where(x => x.OrderId == orderId && x.Status != "voided" && x.Status != "cancelled")
+                    .Select(x => new { x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal, x.Status, x.KotRoundId, x.CreatedAtUtc })
+                    .ToListAsync())
+                .OrderBy(x => x.CreatedAtUtc)
+                .Select(x => new TableLineChoice(x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal,
+                    x.KotRoundId == null && (x.Status == "pending" || x.Status == "held")))
+                .ToList();
+        });
+
+        var dialog = new Window
+        {
+            Title = $"Take payment · {table.Name}",
+            Name = "TablePaymentDialog",
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            Owner = System.Windows.Application.Current?.MainWindow,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+
+        var content = new StackPanel { Margin = new Thickness(26, 22, 26, 24) };
+        content.Children.Add(new TextBlock { Text = table.Name, FontSize = 24, FontWeight = FontWeights.Bold });
+        var caption = new TextBlock
+        {
+            Text = $"{order.ShortNumber} · {order.Guests} guests · cash payment",
+            Margin = new Thickness(0, 4, 0, 16),
+        };
+        caption.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        content.Children.Add(caption);
+
+        var linesHost = new StackPanel();
+        foreach (var line in lines)
+        {
+            var row = new Grid { Margin = new Thickness(0, 5, 0, 5) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new TextBlock { Text = $"{line.Quantity} × {line.ItemName}", TextWrapping = TextWrapping.Wrap };
+            Grid.SetColumn(text, 0);
+            row.Children.Add(text);
+            var amount = new TextBlock
+            {
+                Text = $"AFN {line.LineTotal:N2}", Margin = new Thickness(10, 0, 0, 0),
+                FontWeight = FontWeights.SemiBold,
+            };
+            Grid.SetColumn(amount, 1);
+            row.Children.Add(amount);
+            linesHost.Children.Add(row);
+        }
+        if (lines.Count == 0)
+        {
+            var empty = new TextBlock { Text = "No items on this order yet.", Margin = new Thickness(0, 4, 0, 4) };
+            empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            linesHost.Children.Add(empty);
+        }
+        content.Children.Add(linesHost);
+
+        var totalRow = new Grid { Margin = new Thickness(0, 14, 0, 4) };
+        totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        totalRow.Children.Add(new TextBlock { Text = "Total due", FontSize = 18, FontWeight = FontWeights.Bold });
+        var totalText = new TextBlock { Text = $"AFN {total:N2}", FontSize = 21, FontWeight = FontWeights.Bold };
+        totalText.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+        Grid.SetColumn(totalText, 1);
+        totalRow.Children.Add(totalText);
+        content.Children.Add(totalRow);
+
+        content.Children.Add(new TextBlock { Text = "Amount received (AFN)", Margin = new Thickness(0, 14, 0, 6) });
+        var received = new TextBox { Text = total.ToString("0.00"), Height = 40, MinWidth = 180 };
+        System.Windows.Automation.AutomationProperties.SetName(received, "Amount received");
+        content.Children.Add(received);
+
+        var changeText = new TextBlock { FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) };
+        content.Children.Add(changeText);
+        void UpdateChange()
+        {
+            var enough = decimal.TryParse(received.Text, out var parsed) && parsed >= total;
+            changeText.Text = enough
+                ? $"Change to give back: AFN {parsed - total:N2}"
+                : "Enter the cash amount received (at least the total due).";
+            changeText.SetResourceReference(TextBlock.ForegroundProperty, enough ? "SuccessBrush" : "TextMutedBrush");
+        }
+        received.TextChanged += (_, _) => UpdateChange();
+        UpdateChange();
+
+        var markVacant = new CheckBox
+        {
+            Name = "TablePaymentMarkVacant",
+            Content = $"Mark {table.Name} vacant after payment",
+            IsChecked = true,
+            Margin = new Thickness(0, 14, 0, 0),
+        };
+        content.Children.Add(markVacant);
+
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
+        status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        content.Children.Add(status);
+
+        var complete = Button("Complete payment");
+        complete.Name = "TablePaymentCompleteButton";
+        complete.MinWidth = 190;
+        complete.MinHeight = 46;
+        complete.IsDefault = true;
+        var cancel = Button("Cancel");
+        cancel.IsCancel = true;
+        cancel.MinHeight = 46;
+        cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
+        actions.Children.Add(complete);
+        actions.Children.Add(cancel);
+        content.Children.Add(actions);
+
+        complete.Click += async (_, _) =>
+        {
+            if (busy)
+            {
+                return;
+            }
+
+            busy = true;
+            complete.IsEnabled = false;
+            decimal amount = 0m;
+            var posted = 0m;
+            try
+            {
+                if (!decimal.TryParse(received.Text, out amount) || amount < total || total <= 0m)
+                {
+                    throw new InvalidOperationException("Enter a cash amount at least equal to the total due.");
+                }
+
+                status.Text = "Verifying the order, bill and cashier session…";
+                var actor = await workflow.CurrentPrincipalAsync();
+                await DesktopUiWork.RunBoundedAsync(async token =>
+                {
+                    await using var db = factory.Create();
+                    var live = await db.Orders.AsNoTracking()
+                        .Where(x => x.ClientOrderId == order.ClientOrderId)
+                        .Select(x => new { x.Id, x.Status })
+                        .FirstOrDefaultAsync(token)
+                        ?? throw new InvalidOperationException("The order no longer exists.");
+
+                    if (live.Status is "closed" or "cancelled")
+                    {
+                        throw new InvalidOperationException("This order is already closed.");
+                    }
+
+                    if (live.Status is not ("served" or "billed"))
+                    {
+                        // Serving requires every kitchen ticket to be ready; the
+                        // workflow raises the precise reason otherwise.
+                        await workflow.ServeOrderAsync(live.Id, token);
+                    }
+
+                    var bill = await db.Bills.AsNoTracking()
+                        .Where(x => x.OrderId == live.Id && x.Status == "open")
+                        .Select(x => new { x.Id, x.BranchId, x.BalanceDue })
+                        .FirstOrDefaultAsync(token);
+                    if (bill is null)
+                    {
+                        await workflow.CreateBillAsync(live.Id, token);
+                        await using var recheck = factory.Create();
+                        bill = await recheck.Bills.AsNoTracking()
+                            .Where(x => x.OrderId == live.Id && x.Status == "open")
+                            .Select(x => new { x.Id, x.BranchId, x.BalanceDue })
+                            .FirstOrDefaultAsync(token);
+                    }
+                    if (bill is null)
+                    {
+                        throw new InvalidOperationException("A bill could not be issued for this order.");
+                    }
+
+                    var sessionId = (await db.CashierSessions.AsNoTracking()
+                            .Where(x => x.BranchId == bill.BranchId &&
+                                        x.CashierUserId == actor.UserId &&
+                                        x.Status == "open")
+                            .Select(x => new { x.Id, x.OpenedAt })
+                            .ToListAsync(token))
+                        .OrderByDescending(x => x.OpenedAt)
+                        .Select(x => x.Id)
+                        .FirstOrDefault();
+                    if (sessionId is null)
+                    {
+                        var created = await workflow.OpenCashierSessionAsync(bill.BranchId, 0m, token);
+                        sessionId = System.Text.Json.JsonSerializer.SerializeToElement(created)
+                            .GetProperty("id").GetString();
+                    }
+                    if (sessionId is null)
+                    {
+                        throw new InvalidOperationException("Cashier session could not be opened.");
+                    }
+
+                    var applied = Math.Min(amount, bill.BalanceDue);
+                    if (applied <= 0m)
+                    {
+                        throw new InvalidOperationException("This bill is already settled.");
+                    }
+
+                    await workflow.AddPaymentAsync(bill.Id, sessionId, applied, "cash", null, token);
+                    posted = applied;
+                }, TimeSpan.FromSeconds(30));
+
+                if (markVacant.IsChecked == true)
+                {
+                    try
+                    {
+                        await DesktopUiWork.RunBoundedAsync(
+                            token => new LocalCashierService(factory).MarkTableAvailableAsync(
+                                table.Id, actor, token, "Payment received at table"),
+                            TimeSpan.FromSeconds(25));
+                    }
+                    catch (Exception ex)
+                    {
+                        // Settlement already released the table; a failed manual
+                        // release must not hide a successful payment.
+                        App.LogRecoverableException("table-payment-release", ex);
+                    }
+                }
+                else
+                {
+                    // Settlement releases the table; holding it keeps the table
+                    // occupied until staff clear it, honoring the cashier's
+                    // "do not mark vacant yet" choice.
+                    try
+                    {
+                        await DesktopUiWork.RunBoundedAsync(
+                            token => new LocalCashierService(factory).HoldTableAsync(
+                                table.Id, "Paid · awaiting clearing", actor, token),
+                            TimeSpan.FromSeconds(25));
+                    }
+                    catch (Exception ex)
+                    {
+                        App.LogRecoverableException("table-payment-hold", ex);
+                    }
+                }
+
+                var change = Math.Max(0m, amount - posted);
+                var occupancyNote = markVacant.IsChecked == true
+                    ? $" {table.Name} is vacant."
+                    : $" {table.Name} stays occupied until marked vacant.";
+                statusText.Text = (change > 0m
+                    ? $"{table.Name}: AFN {posted:N2} received; change AFN {change:N2}."
+                    : $"{table.Name}: AFN {posted:N2} received; bill settled.") + occupancyNote;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
+                dialog.DialogResult = true;
+            }
+            catch (Exception ex)
+            {
+                App.LogRecoverableException("table-payment", ex);
+                status.Text = ex.Message;
+                status.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
+            finally
+            {
+                busy = false;
+                complete.IsEnabled = true;
+            }
+        };
+
+        dialog.Content = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        return DesktopGlassDialog.ShowDialog(dialog) == true;
+    }
+
+    /// <summary>
+    /// Dining-room flow: pick a table on the left, act on its live order in the
+    /// right-hand panel (add dishes/guests, send kitchen round, take payment).
+    /// Reuses the same local workflow service and idempotent mutations as POS.
+    /// </summary>
+    private static async Task<FrameworkElement> BuildDiningRoomAsync(
+        LocalDatabaseFactory factory,
+        IReadOnlyList<TableChoice> initialTables,
+        IReadOnlyList<TableOrderChoice> initialOrders,
+        TextBlock statusText)
+    {
+        var workflow = new DesktopRestaurantWorkflowService();
+        var actor = await workflow.CurrentPrincipalAsync();
+        var tablesNow = initialTables;
+        var ordersNow = initialOrders;
+        string? selectedTableId = null;
+        var busy = false;
+
+        var grid = new WrapPanel { Margin = new Thickness(0, 2, 0, 12) };
+        var legend = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+        var panel = new StackPanel();
+        var panelHost = new Border
+        {
+            Width = 360,
+            Margin = new Thickness(16, 2, 0, 0),
+            Padding = new Thickness(18),
+            CornerRadius = new CornerRadius(16),
+            BorderThickness = new Thickness(1),
+            Child = new ScrollViewer
+            {
+                Content = panel,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            },
+        };
+        panelHost.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        panelHost.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+
+        (Color Stripe, string Label, Color LabelColor) TableState(TableChoice table, TableOrderChoice? order)
+        {
+            if (table.Status == "available") return (Color.FromRgb(22, 155, 98), "Free", Color.FromRgb(22, 155, 98));
+            if (table.Status == "occupied" && order?.Status == "billed") return (Color.FromRgb(185, 28, 28), "Waiting to pay", Color.FromRgb(185, 28, 28));
+            if (table.Status == "occupied" && order is null) return (Color.FromRgb(217, 119, 6), "Awaiting clearing", Color.FromRgb(180, 83, 9));
+            if (table.Status == "occupied") return (Color.FromRgb(217, 119, 6), "Seated", Color.FromRgb(180, 83, 9));
+            if (table.Status == "reserved") return (Color.FromRgb(37, 99, 235), "Reserved", Color.FromRgb(37, 99, 235));
+            return (Color.FromRgb(100, 116, 139), table.Status, Color.FromRgb(100, 116, 139));
+        }
+
+        void Legend(string count, string label, Color color)
+        {
+            legend.Children.Add(new TextBlock
+            {
+                Text = "●", Foreground = new SolidColorBrush(color), FontSize = 14,
+                Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
+            });
+            var text = new TextBlock
+            {
+                Text = $"{count} {label}",
+                Margin = new Thickness(0, 0, 18, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontWeight = FontWeights.SemiBold,
+            };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            legend.Children.Add(text);
+        }
+
+        void UpdateLegend()
+        {
+            legend.Children.Clear();
+            Legend(tablesNow.Count(x => x.Status == "available").ToString(), "free", Color.FromRgb(22, 155, 98));
+            Legend(tablesNow.Count(x => x.Status == "occupied" &&
+                ordersNow.FirstOrDefault(o => o.TableId == x.Id)?.Status != "billed").ToString(), "seated", Color.FromRgb(217, 119, 6));
+            Legend(tablesNow.Count(x => x.Status == "reserved").ToString(), "reserved", Color.FromRgb(37, 99, 235));
+            Legend(tablesNow.Count(x => ordersNow.FirstOrDefault(o => o.TableId == x.Id)?.Status == "billed").ToString(),
+                "waiting to pay", Color.FromRgb(185, 28, 28));
+        }
+
+        // Session-scoped reservation prompt: a short guest/time note stored on
+        // the table row; seating a reserved table releases the hold first.
+        string? PromptReservationNote(string tableName)
+        {
+            var dialog = new Window
+            {
+                Title = $"Reserve {tableName}",
+                Width = 460,
+                SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize,
+                Owner = System.Windows.Application.Current?.MainWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            var form = new StackPanel { Margin = new Thickness(20) };
+            form.Children.Add(new TextBlock
+            {
+                Text = "Reservation note (guest name, time and party size)",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 6),
+            });
+            var note = new TextBox { Height = 36 };
+            System.Windows.Automation.AutomationProperties.SetName(note, "Reservation note");
+            form.Children.Add(note);
+            var save = Button("Reserve table");
+            save.MinWidth = 150;
+            save.MinHeight = 40;
+            save.Margin = new Thickness(0, 16, 8, 0);
+            save.IsDefault = true;
+            var cancel = Button("Cancel");
+            cancel.IsCancel = true;
+            cancel.MinHeight = 40;
+            cancel.Margin = new Thickness(0, 16, 0, 0);
+            cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            var actions = new WrapPanel();
+            actions.Children.Add(save);
+            actions.Children.Add(cancel);
+            form.Children.Add(actions);
+            save.Click += (_, _) => dialog.DialogResult = true;
+            dialog.Content = form;
+            return DesktopGlassDialog.ShowDialog(dialog) == true ? note.Text.Trim() : null;
+        }
+
+        async Task<IReadOnlyList<TableLineChoice>> LoadLinesAsync(string clientOrderId)
+        {
+            return await DesktopUiWork.RunAsync(async () =>
+            {
+                await using var db = factory.Create();
+                var orderId = await db.Orders.AsNoTracking()
+                    .Where(x => x.ClientOrderId == clientOrderId)
+                    .Select(x => x.Id)
+                    .FirstOrDefaultAsync();
+                if (orderId is null)
+                {
+                    return (IReadOnlyList<TableLineChoice>)[];
+                }
+
+                return (IReadOnlyList<TableLineChoice>)(await db.OrderItems.AsNoTracking()
+                        .Where(x => x.OrderId == orderId && x.Status != "voided" && x.Status != "cancelled")
+                        .Select(x => new { x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal, x.Status, x.KotRoundId, x.CreatedAtUtc })
+                        .ToListAsync())
+                    .OrderBy(x => x.CreatedAtUtc)
+                    .Select(x => new TableLineChoice(x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal,
+                        x.KotRoundId == null && (x.Status == "pending" || x.Status == "held")))
+                    .ToList();
+            });
+        }
+
+        Button BuildCard(TableChoice table)
+        {
+            var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
+            var (stripeColor, label, labelColor) = TableState(table, order);
+            var tint = new SolidColorBrush(Color.FromArgb(24, stripeColor.R, stripeColor.G, stripeColor.B));
+
+            var labelText = new TextBlock
+            {
+                Text = table.Name, FontSize = 18, FontWeight = FontWeights.Bold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            labelText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+            var seats = new TextBlock { Text = $"{table.Capacity} seats", FontSize = 11, Margin = new Thickness(0, 4, 0, 12) };
+            seats.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+            var status = new TextBlock { Text = label, FontSize = 12, FontWeight = FontWeights.Bold, Foreground = new SolidColorBrush(labelColor) };
+            var detail = new TextBlock
+            {
+                Text = order is null
+                    ? (table.Status == "reserved" ? "Reserved"
+                        : table.Status == "occupied" ? "Awaiting clearing" : "Ready to seat")
+                    : $"{order.Guests} guests · {order.ShortNumber} · AFN {order.Total:N0}",
+                FontSize = 11, Margin = new Thickness(0, 6, 0, 0),
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+            detail.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+            var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
+            body.Children.Add(labelText);
+            body.Children.Add(seats);
+            body.Children.Add(status);
+            if (order is not null)
+            {
+                body.Children.Add(detail);
+            }
+
+            var stripe = new Border { Width = 6, Background = new SolidColorBrush(stripeColor) };
+            var layout = new DockPanel();
+            DockPanel.SetDock(stripe, Dock.Left);
+            layout.Children.Add(stripe);
+            layout.Children.Add(body);
+
+            var selected = table.Id == selectedTableId;
+            var surface = new Border
+            {
+                Width = 196, MinHeight = 124, CornerRadius = new CornerRadius(12),
+                BorderThickness = new Thickness(selected ? 2 : 1),
+                Background = tint,
+                ClipToBounds = true,
+                Child = layout,
+            };
+            surface.SetResourceReference(Border.BorderBrushProperty,
+                selected ? "BrandPrimaryBrush" : "FloorTileBorderBrush");
+
+            var tile = new Button
+            {
+                Content = surface, Padding = new Thickness(0), BorderThickness = new Thickness(0),
+                Background = Brushes.Transparent, Margin = new Thickness(0, 0, 9, 9),
+                ToolTip = order is null ? "Select this table to seat guests" : "Select this table to work on its order",
+            };
+            tile.Click += async (_, _) =>
+            {
+                selectedTableId = table.Id;
+                await RenderAsync();
+            };
+            return tile;
+        }
+
+        async Task RenderPanelAsync()
+        {
+            panel.Children.Clear();
+            var table = tablesNow.FirstOrDefault(x => x.Id == selectedTableId);
+            if (table is null)
+            {
+                panel.Children.Add(new TextBlock { Text = "Dining room", FontSize = 24, FontWeight = FontWeights.Bold });
+                var hint = new TextBlock
+                {
+                    Text = "Select a table to open its order or seat new guests.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 6, 0, 0),
+                };
+                hint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+                panel.Children.Add(hint);
+                return;
+            }
+
+            var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
+            panel.Children.Add(new TextBlock { Text = table.Name, FontSize = 24, FontWeight = FontWeights.Bold });
+            var subtitle = new TextBlock
+            {
+                Text = order is null
+                    ? (table.Status == "reserved"
+                        ? (string.IsNullOrWhiteSpace(table.ReservationNote) ? "Reserved" : $"Reserved · {table.ReservationNote}")
+                        : table.Status == "occupied"
+                            ? (string.IsNullOrWhiteSpace(table.ReservationNote)
+                                ? "Occupied · awaiting clearing"
+                                : $"Occupied · {table.ReservationNote}")
+                            : $"Free, seats {table.Capacity}")
+                    : $"{order.Guests} guests · {order.ShortNumber}",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 12),
+            };
+            subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            panel.Children.Add(subtitle);
+
+            var lines = order is null
+                ? (IReadOnlyList<TableLineChoice>)[]
+                : await LoadLinesAsync(order.ClientOrderId);
+
+            if (lines.Count == 0)
+            {
+                var empty = new TextBlock
+                {
+                    Text = order is null ? "No open order for this table." : "No items yet — add dishes to start the order.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 2, 0, 8),
+                };
+                empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                panel.Children.Add(empty);
+            }
+
+            foreach (var line in lines)
+            {
+                var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var text = new TextBlock
+                {
+                    Text = $"{line.Quantity} × {line.ItemName}{(line.Unsent ? "  · not sent" : "")}",
+                    TextWrapping = TextWrapping.Wrap,
+                };
+                if (line.Unsent)
+                {
+                    text.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+                }
+                Grid.SetColumn(text, 0);
+                row.Children.Add(text);
+                var amount = new TextBlock
+                {
+                    Text = $"AFN {line.LineTotal:N0}", Margin = new Thickness(10, 0, 0, 0),
+                    FontWeight = FontWeights.SemiBold,
+                };
+                Grid.SetColumn(amount, 1);
+                row.Children.Add(amount);
+                panel.Children.Add(row);
+            }
+
+            var totalRow = new Grid { Margin = new Thickness(0, 14, 0, 10) };
+            totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            totalRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            totalRow.Children.Add(new TextBlock { Text = "Total", FontSize = 18, FontWeight = FontWeights.Bold });
+            var totalText = new TextBlock { Text = $"AFN {order?.Total ?? 0m:N2}", FontSize = 20, FontWeight = FontWeights.Bold };
+            totalText.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+            Grid.SetColumn(totalText, 1);
+            totalRow.Children.Add(totalText);
+            panel.Children.Add(totalRow);
+
+            var addDishes = Button(order is null
+                ? (table.Status == "reserved" ? "Seat now & take order" : "Seat guests & take order")
+                : "Add dishes & guests");
+            addDishes.Name = "DiningRoomOrderButton";
+            addDishes.MinHeight = 44;
+            var reserve = Button(table.Status == "reserved" ? "Cancel reservation" : "Reserve table");
+            reserve.Name = "DiningRoomReserveButton";
+            reserve.MinHeight = 44;
+            reserve.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            reserve.Visibility = table.Status is "available" or "reserved"
+                ? Visibility.Visible : Visibility.Collapsed;
+            var send = Button("Send to kitchen");
+            send.Name = "DiningRoomSendButton";
+            send.MinHeight = 44;
+            send.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            send.IsEnabled = order is not null && lines.Any(line => line.Unsent);
+            var pay = Button("Take payment");
+            pay.Name = "DiningRoomPayButton";
+            pay.MinHeight = 44;
+            pay.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            pay.IsEnabled = order is not null;
+            // A paid table waiting for the crew to clear it exposes the one
+            // action it needs: mark it vacant (no open order required).
+            var vacant = Button("Mark vacant");
+            vacant.Name = "DiningRoomVacantButton";
+            vacant.MinHeight = 44;
+            vacant.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            vacant.Visibility = order is null && table.Status == "occupied"
+                ? Visibility.Visible : Visibility.Collapsed;
+            panel.Children.Add(addDishes);
+            panel.Children.Add(reserve);
+            panel.Children.Add(vacant);
+            panel.Children.Add(send);
+            panel.Children.Add(pay);
+
+            addDishes.Click += async (_, _) =>
+            {
+                try
+                {
+                    if (busy)
+                    {
+                        return;
+                    }
+
+                    if (table.Status == "reserved")
+                    {
+                        // Seating a reserved table releases the hold first; the
+                        // order service only accepts free tables for dine-in.
+                        busy = true;
+                        await DesktopUiWork.RunBoundedAsync(
+                            token => new LocalCashierService(factory).CancelReservationAsync(table.Id, actor, token),
+                            TimeSpan.FromSeconds(25));
+                        busy = false;
+                    }
+
+                    await OpenTableOrderModalAsync(table, "dine_in", order, statusText);
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    busy = false;
+                    statusText.Text = ex.Message;
+                }
+            };
+            reserve.Click += async (_, _) =>
+            {
+                if (busy)
+                {
+                    return;
+                }
+
+                try
+                {
+                    busy = true;
+                    if (table.Status == "reserved")
+                    {
+                        if (!DesktopGlassDialog.Confirm(
+                                $"Release the reservation for {table.Name}?",
+                                "Cancel reservation"))
+                        {
+                            return;
+                        }
+
+                        await DesktopUiWork.RunBoundedAsync(
+                            token => new LocalCashierService(factory).CancelReservationAsync(table.Id, actor, token),
+                            TimeSpan.FromSeconds(25));
+                        statusText.Text = $"{table.Name} reservation released.";
+                    }
+                    else
+                    {
+                        var note = PromptReservationNote(table.Name);
+                        if (note is null)
+                        {
+                            return;
+                        }
+
+                        await DesktopUiWork.RunBoundedAsync(
+                            token => new LocalCashierService(factory).ReserveTableAsync(table.Id, note, actor, token),
+                            TimeSpan.FromSeconds(25));
+                        statusText.Text = $"{table.Name} reserved.";
+                    }
+
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally
+                {
+                    busy = false;
+                }
+            };
+            send.Click += async (_, _) =>
+            {
+                if (busy || order is null)
+                {
+                    return;
+                }
+
+                busy = true;
+                send.IsEnabled = false;
+                try
+                {
+                    await DesktopUiWork.RunBoundedAsync(
+                        token => workflow.SendKotAsync(order.ClientOrderId, token),
+                        TimeSpan.FromSeconds(25));
+                    statusText.Text = $"{table.Name}: new items sent to the kitchen.";
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally
+                {
+                    busy = false;
+                }
+            };
+            pay.Click += async (_, _) =>
+            {
+                if (order is null)
+                {
+                    statusText.Text = $"{table.Name} has no open order to pay.";
+                    return;
+                }
+
+                var paid = await OpenTablePaymentModalAsync(factory, table, order, statusText);
+                if (paid)
+                {
+                    await RefreshAsync();
+                }
+            };
+            vacant.Click += async (_, _) =>
+            {
+                if (busy)
+                {
+                    return;
+                }
+
+                busy = true;
+                try
+                {
+                    await DesktopUiWork.RunBoundedAsync(
+                        token => new LocalCashierService(factory).ClearTableAsync(
+                            table.Id, actor, token, "Cleared from the dining room"),
+                        TimeSpan.FromSeconds(25));
+                    statusText.Text = $"{table.Name} is vacant.";
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally
+                {
+                    busy = false;
+                }
+            };
+        }
+
+        async Task RenderAsync()
+        {
+            grid.Children.Clear();
+            foreach (var table in tablesNow)
+            {
+                grid.Children.Add(BuildCard(table));
+            }
+            UpdateLegend();
+            await RenderPanelAsync();
+        }
+
+        async Task RefreshAsync()
+        {
+            try
+            {
+                var refreshed = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var db = factory.Create();
+                    var refreshedTables = await (from table in db.DiningTables.AsNoTracking()
+                                                 join area in db.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                                                 join branch in db.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                                                 where table.IsActive && area.IsActive && branch.IsActive
+                                                 orderby branch.Name, area.SortOrder, table.Name
+                                                 select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                                                     table.Code, table.Name, table.Capacity, table.Status,
+                                                     table.ReservationNote)).ToListAsync();
+                    var refreshedOrders = (await db.Orders.AsNoTracking()
+                            .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
+                            .Select(x => new
+                            {
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                x.UpdatedAtUtc,
+                            })
+                            .ToListAsync())
+                        .OrderByDescending(x => x.UpdatedAtUtc)
+                        .Select(x => x.Row).ToArray();
+                    return (Tables: refreshedTables, Orders: refreshedOrders);
+                });
+                tablesNow = refreshed.Tables;
+                ordersNow = refreshed.Orders;
+                await RenderAsync();
+            }
+            catch (Exception ex)
+            {
+                statusText.Text = "Dining room refresh failed: " + ex.Message;
+            }
+        }
+
+        var roomTitle = new TextBlock { Text = "Dining room", FontSize = 24, FontWeight = FontWeights.Bold };
+        var roomHint = new TextBlock
+        {
+            Text = "Select a table to open its order or seat new guests.",
+            Margin = new Thickness(0, 4, 0, 10),
+        };
+        roomHint.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+
+        var left = new StackPanel();
+        left.Children.Add(roomTitle);
+        left.Children.Add(roomHint);
+        left.Children.Add(legend);
+        left.Children.Add(grid);
+
+        var layout = new Grid();
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        layout.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        layout.Children.Add(left);
+        Grid.SetColumn(panelHost, 1);
+        layout.Children.Add(panelHost);
+
+        await RenderAsync();
+        return layout;
     }
 
     public static async Task<FrameworkElement> KitchenAsync()
@@ -1926,6 +3025,10 @@ internal static class OperationalActionViews
         filterRow.Children.Add(selectedDish);
         filterRow.Children.Add(markReady);
         filterRow.Children.Add(boardRefresh);
+        // Same workstation chrome as POS, right of the kitchen action row.
+        var (kotKeys, kotFullScreen) = BuildWorkspaceChromeButtons();
+        filterRow.Children.Add(kotKeys);
+        filterRow.Children.Add(kotFullScreen);
         filterRow.Children.Add(statusText);
         root.Children.Add(filterRow);
 
@@ -1981,11 +3084,48 @@ internal static class OperationalActionViews
         handoffPanel.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         root.Children.Add(handoffPanel);
 
-        var board = new WrapPanel
+        // Three flow columns (New → Cooking → Ready for pickup) mirror the
+        // kitchen mock-up; every card keeps its one-tap READY action.
+        var board = new Grid { HorizontalAlignment = HorizontalAlignment.Stretch };
+        board.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        board.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        board.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        (StackPanel Host, TextBlock Count) KitchenColumn(string title, string accentBrush, int column)
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
+            var count = new TextBlock { FontWeight = FontWeights.SemiBold, Margin = new Thickness(10, 2, 0, 0) };
+            count.SetResourceReference(TextBlock.ForegroundProperty, accentBrush);
+            var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 0, 0, 12) };
+            header.Children.Add(new TextBlock { Text = title, FontSize = 17, FontWeight = FontWeights.Bold });
+            header.Children.Add(count);
+            var host = new StackPanel();
+            var dock = new DockPanel();
+            DockPanel.SetDock(header, Dock.Top);
+            dock.Children.Add(header);
+            dock.Children.Add(new ScrollViewer
+            {
+                Content = host,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            });
+            var card = new Border
+            {
+                CornerRadius = new CornerRadius(14),
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(column == 0 ? 0 : 8, 0, column == 2 ? 0 : 8, 0),
+                Padding = new Thickness(14),
+                Child = dock,
+            };
+            card.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+            card.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
+            Grid.SetColumn(card, column);
+            board.Children.Add(card);
+            return (host, count);
+        }
+
+        var (newQueueColumn, newQueueCount) = KitchenColumn("New", "BrandPrimaryBrush", 0);
+        var (cookingColumn, cookingCount) = KitchenColumn("Cooking", "WarningBrush", 1);
+        var (readyColumn, readyCount) = KitchenColumn("Ready for pickup", "SuccessBrush", 2);
         root.Children.Add(board);
 
         var timerBindings = new List<(TextBlock Label, Border Badge, TextBlock State, DateTimeOffset QueuedAt, string Priority, string Status)>();
@@ -2299,7 +3439,9 @@ internal static class OperationalActionViews
 
         void RenderBoard()
         {
-            board.Children.Clear();
+            newQueueColumn.Children.Clear();
+            cookingColumn.Children.Clear();
+            readyColumn.Children.Clear();
             timerBindings.Clear();
 
             var stationId = (stationFilter.SelectedItem as Choice)?.Id ?? "";
@@ -2313,20 +3455,44 @@ internal static class OperationalActionViews
 
             foreach (var row in filtered)
             {
-                board.Children.Add(BuildKitchenCard(row));
+                var card = BuildKitchenCard(row);
+                switch (row.Status)
+                {
+                    case "queued":
+                    case "active":
+                        newQueueColumn.Children.Add(card);
+                        break;
+                    case "preparing":
+                    case "expo":
+                        cookingColumn.Children.Add(card);
+                        break;
+                    case "ready":
+                        readyColumn.Children.Add(card);
+                        break;
+                    default:
+                        newQueueColumn.Children.Add(card);
+                        break;
+                }
             }
+
+            newQueueCount.Text = newQueueColumn.Children.Count.ToString();
+            cookingCount.Text = cookingColumn.Children.Count.ToString();
+            readyCount.Text = readyColumn.Children.Count.ToString();
 
             UpdateKitchenSummary();
 
             if (filtered.Length == 0)
             {
-                var empty = new TextBlock
+                foreach (var emptyColumn in new[] { newQueueColumn, cookingColumn, readyColumn })
                 {
-                    Text = "No active kitchen items match this filter.",
-                    Margin = new Thickness(0, 18, 0, 18),
-                };
-                empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-                board.Children.Add(empty);
+                    var empty = new TextBlock
+                    {
+                        Text = "No tickets in this stage.",
+                        Margin = new Thickness(2, 14, 0, 14),
+                    };
+                    empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                    emptyColumn.Children.Add(empty);
+                }
             }
         }
 
@@ -2647,6 +3813,627 @@ internal static class OperationalActionViews
         return block;
     }
 
+    /// <summary>
+    /// Table-first ordering: tap a floor tile to open its live order here —
+    /// add dishes, adjust guests (up to the table capacity) and send the KOT
+    /// without leaving the floor. Reuses the same local workflow service and
+    /// idempotent mutations as POS, so no duplicate orders or KOT rounds occur.
+    /// </summary>
+    private static async Task<bool> OpenTableOrderModalAsync(
+        TableChoice? table,
+        string serviceType,
+        TableOrderChoice? floorOrder,
+        TextBlock parentStatus,
+        bool allowCheckout = false,
+        bool refreshParent = true,
+        string? quickAddItemId = null,
+        IReadOnlyList<Choice>? branches = null)
+    {
+        var factory = new LocalDatabaseFactory();
+        var workflow = new DesktopRestaurantWorkflowService();
+
+        var modalData = await DesktopUiWork.RunAsync(async () =>
+        {
+            await factory.EnsureCreatedAsync();
+            await using var db = factory.Create();
+            var menu = await (from item in db.MenuItems.AsNoTracking()
+                              join category in db.MenuCategories.AsNoTracking() on item.MenuCategoryId equals category.Id into groups
+                              from category in groups.DefaultIfEmpty()
+                              where item.IsAvailable
+                              orderby category == null ? "" : category.Name, item.SortOrder, item.Name
+                              select new TableMenuChoice(item.Id, item.Name,
+                                  category == null ? "Uncategorized" : category.Name, item.Price)).ToListAsync();
+            var order = table is null
+                ? null
+                : (await db.Orders.AsNoTracking()
+                    .Where(x => x.DiningTableId == table.Id &&
+                                x.ServiceType == "dine_in" &&
+                                x.Status != "closed" && x.Status != "cancelled")
+                    .Select(x => new { x.ClientOrderId, x.Status, x.GuestCount, x.Total, x.DisplayNumber, x.UpdatedAtUtc })
+                    .ToListAsync())
+                    .OrderByDescending(x => x.UpdatedAtUtc)
+                    .FirstOrDefault();
+            return (Menu: menu, Order: order);
+        });
+
+        var isTableOrder = table is not null;
+        var capacity = table?.Capacity ?? 100;
+        var windowTitle = isTableOrder
+            ? $"Table order · {table!.Name}"
+            : serviceType switch
+            {
+                "delivery" => "Delivery order",
+                "counter" => "Counter order",
+                _ => "Takeaway order",
+            };
+        var clientOrderId = modalData.Order?.ClientOrderId;
+        var orderStatus = modalData.Order?.Status ?? "available";
+        var billed = orderStatus == "billed";
+        var guests = Math.Max(1, modalData.Order?.GuestCount ?? floorOrder?.Guests ?? 1);
+        var busy = false;
+        var changed = false;
+
+        var dialog = new Window
+        {
+            Title = windowTitle,
+            Name = "TableOrderDialog",
+            Width = 1020,
+            Height = 740,
+            MinWidth = 820,
+            MinHeight = 560,
+            Owner = System.Windows.Application.Current?.MainWindow,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.CanResize,
+        };
+
+        var statusLine = new TextBlock { TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold };
+        var orderCaption = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var guestLabel = new TextBlock { FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 2, 0) };
+        var guestMinus = Button("−");
+        var guestPlus = Button("+");
+        foreach (var guestButton in new[] { guestMinus, guestPlus })
+        {
+            guestButton.MinWidth = 42;
+            guestButton.Height = 32;
+            guestButton.Margin = new Thickness(4, 0, 4, 0);
+            guestButton.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        }
+        guestMinus.ToolTip = "Remove one guest";
+        guestPlus.ToolTip = "Add one guest to this table";
+        var guestPanel = new WrapPanel { Margin = new Thickness(0, 8, 0, 0) };
+        guestPanel.Children.Add(new TextBlock { Text = "Guests", Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center });
+        guestPanel.Children.Add(guestMinus);
+        guestPanel.Children.Add(guestLabel);
+        guestPanel.Children.Add(guestPlus);
+        guestPanel.Children.Add(new TextBlock
+        {
+            Text = $"table seats {capacity}",
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var summaryPanel = new StackPanel();
+        var totalText = new TextBlock { FontWeight = FontWeights.Bold, FontSize = 16 };
+        var unsentText = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
+        var sendButton = Button("SEND TO KITCHEN");
+        sendButton.Name = "TableOrderSendButton";
+        sendButton.MinWidth = 220;
+        sendButton.Height = 44;
+        sendButton.ToolTip = "Send every new item to the kitchen exactly once";
+        var checkoutRequested = false;
+        var openPos = Button(allowCheckout ? "Checkout & payments" : "Open in POS");
+        openPos.Name = "TableOrderCheckoutButton";
+        if (!allowCheckout)
+        {
+            openPos.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        }
+        openPos.MinWidth = allowCheckout ? 200 : 120;
+        var close = Button("Close");
+        close.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        close.MinWidth = 90;
+
+        // Service orders (takeaway/delivery/counter) open without a table but
+        // still need a branch and an optional customer reference. The values
+        // are mirrored into plain strings because the workflow action executes
+        // on a background thread and must not read WPF controls.
+        ComboBox? branchBox = null;
+        TextBox? referenceBox = null;
+        var serviceBranchId = branches?.FirstOrDefault()?.Id ?? string.Empty;
+        var serviceReference = string.Empty;
+        async Task<string> EnsureOrderAsync(CancellationToken token)
+        {
+            if (!string.IsNullOrWhiteSpace(clientOrderId))
+            {
+                return clientOrderId!;
+            }
+
+            if (table is not null)
+            {
+                clientOrderId = await workflow.OpenOrderAsync(table.Id, guests, null, token);
+            }
+            else
+            {
+                clientOrderId = await workflow.OpenOrderAsync(
+                    serviceType, null, serviceBranchId,
+                    serviceReference.Length == 0 ? null : serviceReference,
+                    guests, null, token);
+            }
+
+            return clientOrderId!;
+        }
+
+        void RefreshGuestLabel()
+        {
+            guestLabel.Text = $"{guests} / {capacity}";
+            guestMinus.IsEnabled = !billed && !busy && guests > 1;
+            guestPlus.IsEnabled = !billed && !busy && guests < capacity;
+        }
+
+        async Task<IReadOnlyList<TableLineChoice>> LoadLinesAsync()
+        {
+            var orderId = clientOrderId;
+            if (string.IsNullOrWhiteSpace(orderId))
+            {
+                return [];
+            }
+
+            return await DesktopUiWork.RunAsync(async () =>
+            {
+                await using var db = factory.Create();
+                var localOrderId = await db.Orders.AsNoTracking()
+                    .Where(x => x.ClientOrderId == orderId)
+                    .Select(x => x.Id)
+                    .FirstOrDefaultAsync();
+                if (localOrderId is null)
+                {
+                    return (IReadOnlyList<TableLineChoice>)[];
+                }
+
+                return (IReadOnlyList<TableLineChoice>)(await db.OrderItems.AsNoTracking()
+                    .Where(x => x.OrderId == localOrderId &&
+                                x.Status != "voided" && x.Status != "cancelled")
+                    .Select(x => new { x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal, x.Status, x.KotRoundId, x.CreatedAtUtc })
+                    .ToListAsync())
+                    .OrderBy(x => x.CreatedAtUtc)
+                    .Select(x => new TableLineChoice(
+                        x.ClientLineId, x.ItemName, x.Quantity, x.LineTotal,
+                        x.KotRoundId == null && (x.Status == "pending" || x.Status == "held")))
+                    .ToList();
+            });
+        }
+
+        async Task RefreshSummaryAsync()
+        {
+            var lines = await LoadLinesAsync();
+            summaryPanel.Children.Clear();
+
+            if (lines.Count == 0)
+            {
+                var empty = new TextBlock
+                {
+                    Text = "No items yet. Tap a dish on the left to build the order.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 4, 0, 8),
+                };
+                empty.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                summaryPanel.Children.Add(empty);
+            }
+
+            foreach (var line in lines)
+            {
+                var row = new Grid { Margin = new Thickness(0, 3, 0, 3) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var text = new TextBlock
+                {
+                    Text = $"{line.Quantity} × {line.ItemName}{(line.Unsent ? "  · NOT SENT" : "  · sent")}",
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                if (line.Unsent)
+                {
+                    text.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+                }
+                Grid.SetColumn(text, 0);
+                row.Children.Add(text);
+
+                var right = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+                right.Children.Add(new TextBlock
+                {
+                    Text = $"AFN {line.LineTotal:N2}",
+                    Margin = new Thickness(8, 0, 6, 0),
+                    FontWeight = FontWeights.SemiBold,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                if (line.Unsent && !billed)
+                {
+                    var remove = Button("×");
+                    remove.MinWidth = 30;
+                    remove.Height = 26;
+                    remove.Margin = new Thickness(0);
+                    remove.Padding = new Thickness(0);
+                    remove.ToolTip = $"Remove {line.ItemName} (audited void)";
+                    remove.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+                    var captured = line;
+                    remove.Click += async (_, _) => await RunActionAsync(
+                        remove,
+                        token => workflow.VoidOrderItemAsync(
+                            clientOrderId!, captured.ClientLineId,
+                            "Removed while ordering at the table", token),
+                        $"Removed {captured.ItemName}.");
+                    right.Children.Add(remove);
+                }
+                Grid.SetColumn(right, 1);
+                row.Children.Add(right);
+                summaryPanel.Children.Add(row);
+            }
+
+            totalText.Text = $"Order total: AFN {lines.Sum(x => x.LineTotal):N2}";
+            var unsent = lines.Count(x => x.Unsent);
+            unsentText.Text = unsent == 0
+                ? "Nothing waiting to be sent to the kitchen."
+                : $"{unsent} item(s) not sent yet.";
+            unsentText.SetResourceReference(TextBlock.ForegroundProperty,
+                unsent == 0 ? "TextMutedBrush" : "BrandPrimaryBrush");
+            sendButton.IsEnabled = !busy && !billed && unsent > 0;
+        }
+
+        async Task RunActionAsync(Button? trigger, Func<CancellationToken, Task> action, string success)
+        {
+            if (busy)
+            {
+                return;
+            }
+
+            busy = true;
+            if (trigger is not null)
+            {
+                trigger.IsEnabled = false;
+            }
+            RefreshGuestLabel();
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                await DesktopUiWork.RunBoundedAsync(action, TimeSpan.FromSeconds(25));
+                changed = true;
+                statusLine.Text = success;
+                statusLine.SetResourceReference(TextBlock.ForegroundProperty, "SuccessBrush");
+            }
+            catch (Exception ex)
+            {
+                App.LogRecoverableException("table-order-modal", ex);
+                statusLine.Text = ex.Message;
+                statusLine.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            }
+            finally
+            {
+                busy = false;
+                if (trigger is not null)
+                {
+                    trigger.IsEnabled = true;
+                }
+                await RefreshSummaryAsync();
+                RefreshGuestLabel();
+            }
+        }
+
+        // Menu area: search + category chips + paged dish tiles.
+        var search = new TextBox { Height = 36, MinWidth = 260, Margin = new Thickness(0, 4, 8, 4) };
+        search.SetResourceReference(Control.BackgroundProperty, "InputBackgroundBrush");
+        System.Windows.Automation.AutomationProperties.SetName(search, "Search dishes for this table");
+        search.ToolTip = "Search dishes for this table";
+        dialog.Loaded += (_, _) => search.Focus();
+        var categoryRow = new WrapPanel();
+        var tilesPanel = new WrapPanel();
+        var menuItems = modalData.Menu;
+        var activeCategory = "All";
+
+        void RenderMenu()
+        {
+            tilesPanel.Children.Clear();
+            var text = search.Text.Trim();
+            var matching = menuItems
+                .Where(x => (activeCategory == "All" ||
+                             string.Equals(x.Category, activeCategory, StringComparison.OrdinalIgnoreCase)) &&
+                            (text.Length == 0 ||
+                             x.Name.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                             x.Category.Contains(text, StringComparison.OrdinalIgnoreCase)))
+                .Take(80)
+                .ToArray();
+
+            foreach (var item in matching)
+            {
+                var name = new TextBlock
+                {
+                    Text = item.Name,
+                    FontWeight = FontWeights.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxHeight = 40,
+                };
+                var meta = new TextBlock
+                {
+                    Text = $"{item.Category} · AFN {item.Price:N0}  ·  + Add",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 4, 0, 0),
+                };
+                meta.SetResourceReference(TextBlock.ForegroundProperty, "BrandPrimaryBrush");
+                var stack = new StackPanel { Margin = new Thickness(10, 8, 10, 8) };
+                stack.Children.Add(name);
+                stack.Children.Add(meta);
+
+                var tile = new Button
+                {
+                    Content = stack,
+                    Width = 202,
+                    MinHeight = 76,
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(0, 0, 8, 8),
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    IsEnabled = !billed,
+                };
+                tile.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+                var captured = item;
+                tile.Click += async (_, _) => await RunActionAsync(tile, async token =>
+                {
+                    await EnsureOrderAsync(token);
+                    await workflow.AddItemAsync(clientOrderId!, captured.Id, 1, null, token);
+                }, $"Added {captured.Name}.");
+                tilesPanel.Children.Add(tile);
+            }
+
+            if (matching.Length == 0)
+            {
+                var none = new TextBlock { Text = "No dishes match this search.", Margin = new Thickness(2, 6, 0, 6) };
+                none.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                tilesPanel.Children.Add(none);
+            }
+        }
+
+        guestMinus.Click += async (_, _) => await RunActionAsync(guestMinus, async token =>
+        {
+            var next = Math.Max(1, guests - 1);
+            if (clientOrderId is not null)
+            {
+                await workflow.UpdateGuestsAsync(clientOrderId, next, token);
+            }
+            guests = next;
+        }, "Guest count updated.");
+
+        guestPlus.Click += async (_, _) => await RunActionAsync(guestPlus, async token =>
+        {
+            var next = Math.Min(capacity, guests + 1);
+            if (clientOrderId is not null)
+            {
+                await workflow.UpdateGuestsAsync(clientOrderId, next, token);
+            }
+            guests = next;
+        }, "Guest count updated.");
+
+        sendButton.Click += async (_, _) =>
+        {
+            if (clientOrderId is null)
+            {
+                return;
+            }
+
+            await RunActionAsync(sendButton,
+                token => workflow.SendKotAsync(clientOrderId, token),
+                "New items sent to the kitchen · next: Checkout & payments when ready.");
+        };
+
+        openPos.Click += (_, _) =>
+        {
+            if (allowCheckout)
+            {
+                checkoutRequested = true;
+                dialog.DialogResult = true;
+                return;
+            }
+
+            dialog.DialogResult = true;
+            var vm = System.Windows.Application.Current?.MainWindow?.DataContext as MainWindowViewModel;
+            if (vm?.NavigateCommand.CanExecute("pos") == true)
+            {
+                vm.NavigateCommand.Execute("pos");
+            }
+        };
+        close.Click += (_, _) => dialog.DialogResult = false;
+
+        var header = new StackPanel { Margin = new Thickness(0, 0, 0, 10) };
+        header.Children.Add(new TextBlock
+        {
+            Text = isTableOrder ? table!.Name : windowTitle,
+            FontSize = 24,
+            FontWeight = FontWeights.Bold,
+        });
+        var subtitle = new TextBlock
+        {
+            Text = isTableOrder
+                ? $"{table!.Area} · Table {table.Code} · {table.Capacity} seats"
+                : "No table needed — add dishes, send the kitchen round and checkout.",
+            Margin = new Thickness(0, 3, 0, 6),
+        };
+        subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        header.Children.Add(subtitle);
+
+        if (!isTableOrder && branches is { Count: > 1 })
+        {
+            var serviceRow = new WrapPanel { Margin = new Thickness(0, 2, 0, 6) };
+            serviceRow.Children.Add(new TextBlock
+            {
+                Text = "Branch", VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            });
+            branchBox = new ComboBox
+            {
+                ItemsSource = branches,
+                DisplayMemberPath = "Label",
+                MinWidth = 210,
+                Height = 34,
+                Margin = new Thickness(0, 0, 14, 0),
+            };
+            branchBox.SelectedItem = branches[0];
+            branchBox.SelectionChanged += (_, _) =>
+            {
+                if (branchBox.SelectedItem is Choice choice)
+                {
+                    serviceBranchId = choice.Id;
+                }
+            };
+            serviceRow.Children.Add(branchBox);
+            serviceRow.Children.Add(new TextBlock
+            {
+                Text = "Customer / reference", VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            });
+            referenceBox = new TextBox { MinWidth = 200, Height = 34 };
+            referenceBox.TextChanged += (_, _) => serviceReference = referenceBox.Text.Trim();
+            System.Windows.Automation.AutomationProperties.SetName(referenceBox, "Takeaway or delivery reference");
+            serviceRow.Children.Add(referenceBox);
+            header.Children.Add(serviceRow);
+        }
+
+        var displayNumber = modalData.Order?.DisplayNumber ?? 0;
+        var orderLabel = displayNumber > 0 ? $"#{displayNumber}" : clientOrderId;
+        orderCaption.Text = clientOrderId is null
+            ? isTableOrder
+                ? "New table order — the order opens with the first dish."
+                : $"New {windowTitle.ToLowerInvariant()} — the order opens with the first dish."
+            : $"Order {orderLabel} · {orderStatus.ToUpperInvariant()}" +
+              (billed ? $" · unpaid bill AFN {modalData.Order!.Total:N2}" : "");
+        orderCaption.SetResourceReference(TextBlock.ForegroundProperty, billed ? "ErrorBrush" : "TextSecondaryBrush");
+        header.Children.Add(orderCaption);
+        if (isTableOrder)
+        {
+            header.Children.Add(guestPanel);
+        }
+        if (billed)
+        {
+            var warning = new TextBlock
+            {
+                Text = "This table has an unpaid bill. Settle it in POS before adding items or changing guests.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 0),
+                FontWeight = FontWeights.SemiBold,
+            };
+            warning.SetResourceReference(TextBlock.ForegroundProperty, "ErrorBrush");
+            header.Children.Add(warning);
+        }
+
+        var menuToolbar = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
+        menuToolbar.Children.Add(search);
+        var categoryScroller = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Margin = new Thickness(0, 0, 0, 6),
+            Content = categoryRow,
+        };
+        var left = new DockPanel { Margin = new Thickness(0, 0, 14, 0) };
+        DockPanel.SetDock(menuToolbar, Dock.Top);
+        left.Children.Add(menuToolbar);
+        DockPanel.SetDock(categoryScroller, Dock.Top);
+        left.Children.Add(categoryScroller);
+        left.Children.Add(new ScrollViewer
+        {
+            Content = tilesPanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        });
+
+        var right = new DockPanel { Width = 330, Margin = new Thickness(6, 0, 0, 0) };
+        var rightTitle = new TextBlock { Text = "Order summary", FontSize = 16, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) };
+        DockPanel.SetDock(rightTitle, Dock.Top);
+        right.Children.Add(rightTitle);
+        var rightFooter = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        rightFooter.Children.Add(totalText);
+        rightFooter.Children.Add(unsentText);
+        rightFooter.Children.Add(sendButton);
+        DockPanel.SetDock(rightFooter, Dock.Bottom);
+        right.Children.Add(rightFooter);
+        summaryPanel.Margin = new Thickness(0, 0, 0, 8);
+        // The scrolling summary is added last so DockPanel fills the middle
+        // area between the title and the pinned send footer.
+        right.Children.Add(new ScrollViewer
+        {
+            Content = summaryPanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            MinHeight = 200,
+        });
+
+        var body = new Grid();
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        body.Children.Add(left);
+        Grid.SetColumn(right, 1);
+        body.Children.Add(right);
+
+        var footer = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+        footer.Children.Add(openPos);
+        footer.Children.Add(close);
+        statusLine.Margin = new Thickness(0, 8, 0, 0);
+
+        var rootGrid = new DockPanel { Margin = new Thickness(20) };
+        DockPanel.SetDock(header, Dock.Top);
+        rootGrid.Children.Add(header);
+        DockPanel.SetDock(statusLine, Dock.Bottom);
+        rootGrid.Children.Add(statusLine);
+        DockPanel.SetDock(footer, Dock.Bottom);
+        rootGrid.Children.Add(footer);
+        rootGrid.Children.Add(body);
+        dialog.Content = rootGrid;
+
+        foreach (var category in new[] { "All" }
+            .Concat(menuItems.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase)))
+        {
+            var chip = Button(category);
+            chip.MinWidth = 0;
+            chip.Height = 30;
+            chip.Margin = new Thickness(0, 0, 6, 6);
+            chip.Padding = new Thickness(10, 0, 10, 0);
+            chip.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            var captured = category;
+            chip.Click += (_, _) =>
+            {
+                activeCategory = captured;
+                RenderMenu();
+            };
+            categoryRow.Children.Add(chip);
+        }
+
+        search.TextChanged += (_, _) => RenderMenu();
+        RenderMenu();
+        await RefreshSummaryAsync();
+        RefreshGuestLabel();
+
+        // A dish tapped on the POS page opens this modal already carrying it.
+        if (!string.IsNullOrWhiteSpace(quickAddItemId) && !billed)
+        {
+            var quickItem = menuItems.FirstOrDefault(x => x.Id == quickAddItemId);
+            if (quickItem is not null)
+            {
+                await RunActionAsync(null, async token =>
+                {
+                    await EnsureOrderAsync(token);
+                    await workflow.AddItemAsync(clientOrderId!, quickItem.Id, 1, null, token);
+                }, $"Added {quickItem.Name}.");
+            }
+        }
+
+        DesktopGlassDialog.ShowDialog(dialog);
+
+        if (changed && parentStatus is not null && refreshParent)
+        {
+            parentStatus.Text = $"{table?.Name ?? windowTitle}: order updated; floor refreshed.";
+            if (System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm)
+            {
+                await vm.RefreshCommand.ExecuteAsync(null);
+            }
+        }
+
+        return checkoutRequested;
+    }
+
     private static FrameworkElement BuildVisualFloorBoard(
         IReadOnlyList<TableChoice> tables,
         IReadOnlyList<TableOrderChoice> activeOrders,
@@ -2658,16 +4445,35 @@ internal static class OperationalActionViews
         bool groupByArea = true)
     {
         var floor = new StackPanel { Margin = new Thickness(0, 10, 0, 12) };
-        var summary = new TextBlock
+        // Colour key doubles as live status counts, like the dining-room design.
+        var freeTables = tables.Count(x => x.Status == "available");
+        var seatedTables = tables.Count(x => x.Status == "occupied" &&
+            activeOrders.FirstOrDefault(o => o.TableId == x.Id)?.Status != "billed");
+        var waitingTables = tables.Count(x => activeOrders.FirstOrDefault(o => o.TableId == x.Id)?.Status == "billed");
+        var reservedTables = tables.Count(x => x.Status == "reserved");
+        var legend = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
+        void LegendEntry(string count, string label, Color color)
         {
-            Text = $"{tables.Count(x => x.Status == "available")} available · " +
-                   $"{tables.Count(x => x.Status == "occupied")} occupied · " +
-                   $"{tables.Count(x => x.Status != "available" && x.Status != "occupied")} other",
-            FontSize = 13, FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 10),
-        };
-        summary.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-        floor.Children.Add(summary);
+            legend.Children.Add(new TextBlock
+            {
+                Text = "●", Foreground = new SolidColorBrush(color), FontSize = 14,
+                Margin = new Thickness(0, 0, 6, 0), VerticalAlignment = VerticalAlignment.Center,
+            });
+            var text = new TextBlock
+            {
+                Text = $"{count} {label}",
+                Margin = new Thickness(0, 0, 18, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                FontWeight = FontWeights.SemiBold,
+            };
+            text.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            legend.Children.Add(text);
+        }
+        LegendEntry(freeTables.ToString(), "free", Color.FromRgb(22, 155, 98));
+        LegendEntry(seatedTables.ToString(), "seated", Color.FromRgb(217, 119, 6));
+        LegendEntry(reservedTables.ToString(), "reserved", Color.FromRgb(37, 99, 235));
+        LegendEntry(waitingTables.ToString(), "waiting to pay", Color.FromRgb(185, 28, 28));
+        floor.Children.Add(legend);
 
         if (tables.Count == 0)
         {
@@ -2697,62 +4503,78 @@ internal static class OperationalActionViews
             foreach (var table in area)
             {
                 var order = activeOrders.FirstOrDefault(x => x.TableId == table.Id);
-                var stateBrush = table.Status switch
+                var waitingToPay = order?.Status == "billed";
+                var (stripeColor, label, labelColor) = table.Status switch
                 {
-                    "available" => "SuccessBrush",
-                    "occupied" => "BrandPrimaryBrush",
-                    _ => "TextMutedBrush",
+                    "available" => (Color.FromRgb(22, 155, 98), "Free", Color.FromRgb(22, 155, 98)),
+                    "occupied" when waitingToPay => (Color.FromRgb(185, 28, 28), "Waiting to pay", Color.FromRgb(185, 28, 28)),
+                    "occupied" => (Color.FromRgb(217, 119, 6), "Seated", Color.FromRgb(180, 83, 9)),
+                    "reserved" => (Color.FromRgb(37, 99, 235), "Reserved", Color.FromRgb(37, 99, 235)),
+                    _ => (Color.FromRgb(100, 116, 139), table.Status, Color.FromRgb(100, 116, 139)),
                 };
+                var tint = new SolidColorBrush(Color.FromArgb(24, stripeColor.R, stripeColor.G, stripeColor.B));
 
-                var label = new TextBlock
+                var labelText = new TextBlock
                 {
                     Text = table.Name,
                     FontSize = 18,
                     FontWeight = FontWeights.Bold,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 };
-                label.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-                var subtitle = new TextBlock
+                labelText.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                var seats = new TextBlock
                 {
-                    Text = $"Table {table.Code} · {table.Capacity} seats",
+                    Text = $"{table.Capacity} seats",
                     FontSize = 11,
-                    Margin = new Thickness(0, 5, 0, 12),
+                    Margin = new Thickness(0, 4, 0, 12),
                 };
-                subtitle.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-                var state = new TextBlock
+                seats.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
+                var status = new TextBlock
                 {
-                    Text = table.Status.ToUpperInvariant(),
-                    FontSize = 11,
+                    Text = label,
+                    FontSize = 12,
                     FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(labelColor),
                 };
-                state.SetResourceReference(TextBlock.ForegroundProperty, stateBrush);
+                var detailText = new TextBlock
+                {
+                    Text = order is null
+                        ? (table.Status == "reserved" ? "Reserved" : "Ready to seat")
+                        : $"{order.Guests} guests · {order.ShortNumber} · AFN {order.Total:N0}",
+                    FontSize = 11,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                detailText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
-                var body = new StackPanel { Margin = new Thickness(13) };
-                body.Children.Add(label);
-                body.Children.Add(subtitle);
-                body.Children.Add(state);
+                var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
+                body.Children.Add(labelText);
+                body.Children.Add(seats);
+                body.Children.Add(status);
                 if (order is not null)
                 {
-                    var orderCaption = new TextBlock
-                    {
-                        Text = $"{order.ClientOrderId} · AFN {order.Total:N2}",
-                        Margin = new Thickness(0, 6, 0, 0),
-                        FontSize = 10,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
-                    orderCaption.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-                    body.Children.Add(orderCaption);
+                    body.Children.Add(detailText);
                 }
+
+                // Coloured status stripe plus a soft tint, matching the dining-room mock-up.
+                var stripe = new Border
+                {
+                    Width = 6,
+                    Background = new SolidColorBrush(stripeColor),
+                };
+                var layout = new DockPanel();
+                DockPanel.SetDock(stripe, Dock.Left);
+                layout.Children.Add(stripe);
+                layout.Children.Add(body);
 
                 var surface = new Border
                 {
-                    Width = 190, MinHeight = 119, CornerRadius = new CornerRadius(15),
+                    Width = 196, MinHeight = 124, CornerRadius = new CornerRadius(12),
                     BorderThickness = new Thickness(1),
-                    Child = body,
+                    Background = tint,
+                    ClipToBounds = true,
+                    Child = layout,
                 };
-                // Frosted glass panels keep readable text over the restaurant
-                // artwork while respecting the current light/glass theme.
-                surface.SetResourceReference(Border.BackgroundProperty, "FloorTileBackgroundBrush");
                 surface.SetResourceReference(Border.BorderBrushProperty, "FloorTileBorderBrush");
 
                 var tile = new Button
@@ -2762,28 +4584,22 @@ internal static class OperationalActionViews
                     BorderThickness = new Thickness(0),
                     Background = Brushes.Transparent,
                     Margin = new Thickness(0, 0, 11, 11),
-                    ToolTip = order is null
-                        ? "Available table · select as a target for transfer/split"
-                        : "Occupied table · select its active order for operations",
+                    ToolTip = "Tap to open this table's order: add dishes, add guests and send to the kitchen",
                 };
-                tile.Click += (_, _) =>
+                tile.Click += async (_, _) =>
                 {
+                    // Preserve the transfer/merge convenience selection, then open
+                    // the live table order so staff can order without leaving the floor.
                     if (order is not null)
                     {
                         sourceOrderBox.SelectedItem = transferableOrders.FirstOrDefault(x => x.Id == order.Id);
-                        statusText.Text = order.Status == "billed"
-                            ? $"{table.Name} has an unpaid bill · AFN {order.Total:N2}. Open POS & Cashier and settle the balance before freeing the table."
-                            : $"Selected {table.Name} / {order.ClientOrderId}. Choose a target table for transfer.";
                     }
                     else if (table.Status == "available")
                     {
                         targetTableBox.SelectedItem = availableTables.FirstOrDefault(x => x.Id == table.Id);
-                        statusText.Text = $"Selected available table {table.Name} as transfer target.";
                     }
-                    else
-                    {
-                        statusText.Text = $"{table.Name} is {table.Status}; review the table status before assigning it.";
-                    }
+
+                    await OpenTableOrderModalAsync(table, "dine_in", order, statusText);
                 };
                 tiles.Children.Add(tile);
             }
@@ -2821,6 +4637,31 @@ internal static class OperationalActionViews
         HorizontalAlignment = HorizontalAlignment.Left,
     };
 
+    /// <summary>
+    /// Workstation chrome that rides with each operational page: Keys and Full
+    /// screen sit at the right edge of the page's own action row (POS payment
+    /// buttons, Kitchen filter row) instead of the global top bar. The buttons
+    /// talk to the shell through <see cref="OperationalWorkspaceChrome"/>.
+    /// </summary>
+    private static (Button Keys, Button FullScreen) BuildWorkspaceChromeButtons()
+    {
+        var keys = Button("⌨  Keys");
+        keys.Name = "WorkspaceKeysButton";
+        keys.ToolTip = "F1 · Show this page's keyboard shortcuts";
+        var fullScreen = Button("⛶  Full screen");
+        fullScreen.Name = "WorkspaceFullScreenButton";
+        fullScreen.ToolTip = "F11 · Toggle full screen for this workstation";
+        foreach (var button in new[] { keys, fullScreen })
+        {
+            button.MinHeight = 40;
+            button.MinWidth = 122;
+            button.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        }
+        keys.Click += (_, _) => OperationalWorkspaceChrome.RequestShortcuts();
+        fullScreen.Click += (_, _) => OperationalWorkspaceChrome.RequestFullScreenToggle();
+        return (keys, fullScreen);
+    }
+
     private static Border Card(UIElement child)
     {
         var border = new Border
@@ -2834,8 +4675,8 @@ internal static class OperationalActionViews
         border.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
         border.Effect = new System.Windows.Media.Effects.DropShadowEffect
         {
-            BlurRadius = 18,
-            ShadowDepth = 4,
+            BlurRadius = 8,
+            ShadowDepth = 2,
             Opacity = 0.10,
             Color = System.Windows.Media.Color.FromRgb(7, 24, 39),
         };
@@ -2868,20 +4709,37 @@ internal static class OperationalActionViews
         // DateTimeOffset. Keep the status predicate server-side, then evaluate
         // the completed-ticket age and stable KDS ordering in managed code.
         // The previous LINQ query prevented Kitchen from opening at all.
+        // Completed (served) tickets never appear on the live board.
         var ticketCandidates = await db.KitchenTickets
             .AsNoTracking()
             .Where(x => x.Status == "queued" ||
                         x.Status == "active" ||
                         x.Status == "preparing" ||
                         x.Status == "expo" ||
-                        x.Status == "ready" ||
-                        x.Status == "completed")
+                        x.Status == "ready")
             .ToArrayAsync();
         var tickets = ticketCandidates
             .Where(x => x.Status != "completed" || x.CompletedAt >= recentCompletedCutoff)
             .OrderByDescending(x => x.Priority == "rush")
             .ThenBy(x => x.QueuedAt)
             .ToArray();
+
+        // A closed or cancelled order must never strand a KOT card: the board
+        // only shows work that still belongs to a live order. This also clears
+        // cards left over from before settlement cascaded ticket cleanup.
+        var boardOrderIds = tickets.Select(x => x.OrderId).Distinct().ToArray();
+        var closedOrderIds = boardOrderIds.Length == 0
+            ? []
+            : (await db.Orders.AsNoTracking()
+                    .Where(x => boardOrderIds.Contains(x.Id) &&
+                                (x.Status == "closed" || x.Status == "cancelled"))
+                    .Select(x => x.Id)
+                    .ToArrayAsync())
+                .ToHashSet(StringComparer.Ordinal);
+        if (closedOrderIds.Count > 0)
+        {
+            tickets = tickets.Where(x => !closedOrderIds.Contains(x.OrderId)).ToArray();
+        }
 
         var ticketIds = tickets.Select(x => x.Id).ToArray();
         var ticketItems = ticketIds.Length == 0
@@ -3093,13 +4951,23 @@ internal static class OperationalActionViews
     {
         public string Display => $"{Quantity} × {ItemName} · {Status}{(RoundNumber.HasValue ? $" · R{RoundNumber}" : "")}";
     }
-    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total);
-    private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
-    private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status);
-    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total)
+    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total, int DisplayNumber)
     {
-        public string Display => $"{ClientOrderId} · {Table} · {Status} · AFN {Total:N2}";
+        public string Display => DisplayNumber > 0
+            ? $"#{DisplayNumber} · {ServiceType} · {Status}"
+            : ClientOrderId;
     }
+    private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
+    private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status, string? ReservationNote = null);
+    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total, int Guests, int DisplayNumber)
+    {
+        public string Display => DisplayNumber > 0
+            ? $"#{DisplayNumber} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}"
+            : $"{ClientOrderId} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}";
+        public string ShortNumber => DisplayNumber > 0 ? $"#{DisplayNumber}" : ClientOrderId;
+    }
+    private sealed record TableMenuChoice(string Id, string Name, string Category, decimal Price);
+    private sealed record TableLineChoice(string ClientLineId, string ItemName, int Quantity, decimal LineTotal, bool Unsent);
     private sealed record TableSplitLineChoice(string OrderId, string OrderItemId, string ItemName, int Quantity, string Status)
     {
         public string Display => $"{Quantity} × {ItemName} · {Status}";

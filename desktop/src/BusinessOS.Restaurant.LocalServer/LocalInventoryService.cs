@@ -544,13 +544,21 @@ public sealed class LocalInventoryService
         string clientCountId,
         string reason,
         LocalTerminalPrincipal actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool quantityIsConsumed = false,
+        string? notes = null)
     {
         EnsureInventoryRole(actor);
         if (physicalRemainingBase < 0)
             throw new LocalSyncConflictException("invalid_payload", "Remaining stock cannot be negative.");
         if (string.IsNullOrWhiteSpace(clientCountId) || string.IsNullOrWhiteSpace(reason))
             throw new LocalSyncConflictException("invalid_payload", "Count ID and reason are required.");
+
+        // The ledger keeps the reason first; optional operator notes stay
+        // searchable in the same audited movement record.
+        var ledgerNote = string.IsNullOrWhiteSpace(notes)
+            ? reason.Trim()
+            : reason.Trim() + " — " + notes.Trim();
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
         await using var db = _databaseFactory.Create();
@@ -579,7 +587,9 @@ public sealed class LocalInventoryService
         var balance = await db.InventoryBalances
             .SingleOrDefaultAsync(x => x.BranchId == branchId && x.InventoryItemId == item.Id, cancellationToken);
         var onHand = Quantity(balance?.Quantity ?? 0m);
-        var remaining = Quantity(physicalRemainingBase);
+        var remaining = Quantity(quantityIsConsumed ? onHand - physicalRemainingBase : physicalRemainingBase);
+        if (remaining < 0)
+            throw new LocalSyncConflictException("invalid_payload", "Consumption exceeds available stock.");
         if (remaining > onHand)
             throw new LocalSyncConflictException("invalid_payload",
                 "Physical stock is above book quantity. Use Adjust Stock for corrections or receive a purchase first.");
@@ -593,7 +603,7 @@ public sealed class LocalInventoryService
         var movement = await RecordMovementAsync(
             db, branchId, item, actor, "consumption", delta,
             "manual_stock_count", clientCountId.Trim(), key,
-            null, averageCost, reason.Trim(), cancellationToken);
+            null, averageCost, ledgerNote, cancellationToken);
 
         valuation.Quantity = Quantity(Math.Max(0m, valuation.Quantity + delta));
         valuation.Value = Money(Math.Max(0m, valuation.Value - Money(-delta * averageCost)));
@@ -607,7 +617,7 @@ public sealed class LocalInventoryService
                 local_inventory_item_id = item.Id,
                 quantity_delta = delta,
                 client_adjustment_id = clientCountId.Trim(),
-                reason = reason.Trim(),
+                reason = ledgerNote,
                 consumption_method = "manual_stock_count",
                 unit_cost = averageCost,
             });
@@ -622,6 +632,7 @@ public sealed class LocalInventoryService
                 average_unit_cost = averageCost,
                 consumption_cost = Money(-delta * averageCost),
                 reason = reason.Trim(),
+                notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim(),
             });
         await db.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);

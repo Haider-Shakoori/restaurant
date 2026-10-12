@@ -417,6 +417,7 @@ public sealed class LocalSyncService
         }
 
         var now = DateTimeOffset.UtcNow;
+        var displayNumber = await NextOrderDisplayNumberAsync(db, branchId, cancellationToken);
         var order = new LocalOrder
         {
             Id = Guid.CreateVersion7().ToString("N"),
@@ -431,6 +432,7 @@ public sealed class LocalSyncService
             WaiterName = principal.UserName,
             Status = "draft",
             GuestCount = guestCount,
+            DisplayNumber = displayNumber,
             Notes = OptionalString(payload, "notes", 2000),
             Subtotal = 0m,
             Total = 0m,
@@ -806,6 +808,34 @@ public sealed class LocalSyncService
             });
     }
 
+    /// <summary>Short daily order number per branch (e.g. #0007) for staff.</summary>
+    private static async Task<int> NextOrderDisplayNumberAsync(
+        RestaurantDbContext db,
+        string branchId,
+        CancellationToken cancellationToken)
+    {
+        var businessDate = DateOnly.FromDateTime(DateTime.Now);
+        var counter = await db.OrderCounters.SingleOrDefaultAsync(
+            value => value.BranchId == branchId && value.BusinessDate == businessDate,
+            cancellationToken);
+
+        if (counter is null)
+        {
+            counter = new LocalOrderCounter
+            {
+                BranchId = branchId,
+                BusinessDate = businessDate,
+                LastNumber = 0,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+            };
+            db.OrderCounters.Add(counter);
+        }
+
+        counter.LastNumber += 1;
+        counter.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        return counter.LastNumber;
+    }
+
     private async Task<Dictionary<string, object?>> VoidOrderItemAsync(
         RestaurantDbContext db,
         LocalTerminalPrincipal principal,
@@ -967,7 +997,8 @@ public sealed class LocalSyncService
                 .SingleOrDefaultAsync(value => value.Id == order.DiningTableId, cancellationToken);
             if (table is not null)
             {
-                table.Status = "available";
+                table.Status = await db.Orders.AnyAsync(x => x.DiningTableId == table.Id && x.Id != order.Id &&
+                    x.Status != "closed" && x.Status != "cancelled", cancellationToken) ? "occupied" : "available";
                 AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
             }
         }

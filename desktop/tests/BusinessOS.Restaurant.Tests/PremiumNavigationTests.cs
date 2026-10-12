@@ -33,9 +33,35 @@ public sealed class PremiumNavigationTests
             .Select(e => (string?)e.Attribute("CommandParameter"))
             .Where(value => value is not null)
             .ToArray();
-        var expected = new[] { "dashboard", "pos", "tables", "kitchen", "menu", "recipes",
+        var expected = new[] { "modules", "dashboard", "pos", "tables", "kitchen", "menu", "recipes",
             "inventory", "purchases", "expenses", "closing", "reports", "users", "settings" };
-        Assert.Equal(expected.OrderBy(x => x), routes.OrderBy(x => x));
+        Assert.Equal(expected.Length + 4, routes.Length); // narrow-screen menu mirrors four operational routes
+        Assert.Equal(expected.OrderBy(x => x), routes.Distinct().OrderBy(x => x));
+    }
+
+    [Fact]
+    public void Group_dropdowns_highlight_when_any_route_in_the_group_is_active()
+    {
+        var root = RepositoryRoot();
+        var xaml = XDocument.Load(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "MainWindow.xaml"));
+        XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
+        var style = xaml.Descendants().Single(e =>
+            e.Name.LocalName == "Style" && (string?)e.Attribute(x + "Key") == "NavMenuButton");
+        Assert.Contains(style.Descendants(), e =>
+            e.Name.LocalName == "MultiBinding" &&
+            ((string?)e.Attribute("Converter"))?.Contains("NavigationGroupMatchConverter") == true);
+        Assert.Contains(style.Descendants(), e =>
+            e.Name.LocalName == "Binding" && (string?)e.Attribute("Path") == "Tag");
+
+        var groups = xaml.Descendants()
+            .Where(e => e.Name.LocalName == "Button")
+            .Select(e => (string?)e.Attribute("Tag"))
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .ToArray();
+        Assert.Contains("menu,recipes", groups);
+        Assert.Contains("inventory,purchases,expenses,closing", groups);
+        Assert.Contains("reports,users,settings", groups);
     }
 
     [Fact]
@@ -48,7 +74,7 @@ public sealed class PremiumNavigationTests
         Assert.Contains("CurrentRoute = route;", viewModel);
         // A failed navigation must not leave the previous dashboard under a
         // new POS heading when SQLite rejects a query.
-        Assert.True(viewModel.IndexOf("var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);", StringComparison.Ordinal) <
+        Assert.True(viewModel.IndexOf("var page = await CreatePageAsync(route);", StringComparison.Ordinal) <
                     viewModel.IndexOf("PageTitle = pageTitle;", StringComparison.Ordinal));
         Assert.True(viewModel.IndexOf("CurrentPage = page;", StringComparison.Ordinal) <
                     viewModel.IndexOf("CurrentRoute = route;", StringComparison.Ordinal));
@@ -112,7 +138,7 @@ public sealed class PremiumNavigationTests
         Assert.Contains("if (!_pageRequests.IsCurrent(requestId))", navigate);
         Assert.Contains("_pageRequests.IsCurrent(requestId) && CurrentRoute == route", refresh);
         Assert.True(refresh.IndexOf("_pageRequests.Begin()", StringComparison.Ordinal) <
-                    refresh.IndexOf("await RestaurantOperationalPages.CreateAsync(", StringComparison.Ordinal));
+                    refresh.IndexOf("await CreatePageAsync(route)", StringComparison.Ordinal));
         Assert.DoesNotContain("await RefreshDiagnosticsAsync();", refresh);
         Assert.Contains("_ = RefreshDiagnosticsAsync();", refresh);
         Assert.Contains("IsWorkspaceLoading = true;", navigate);
@@ -128,21 +154,24 @@ public sealed class PremiumNavigationTests
         var shell = XDocument.Load(Path.Combine(root, "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "MainWindow.xaml"));
         var banner = shell.Descendants().Single(e =>
-            e.Name.LocalName == "Border" && (string?)e.Attribute("Grid.Row") == "1");
+            e.Name.LocalName == "Border" &&
+            ((string?)e.Attribute("Visibility"))?.Contains("HasWorkspaceError") == true);
+        Assert.Equal("0", (string?)banner.Attribute("Grid.Row"));
         Assert.Contains("HasWorkspaceError", (string?)banner.Attribute("Visibility"));
         Assert.Contains(banner.Descendants(), e => e.Name.LocalName == "TextBlock" &&
             (string?)e.Attribute("Text") == "{Binding WorkspaceErrorMessage}");
         Assert.Contains(banner.Descendants(), e => e.Name.LocalName == "Button" &&
             (string?)e.Attribute("Command") == "{Binding RetryWorkspaceCommand}");
         // Select the banner's own containing Grid, not an ancestor shell Grid.
+        // The old page header row is gone, so the banner is the first row.
         var contentGrid = banner.Parent ?? throw new InvalidOperationException("Missing content Grid.");
         var rows = contentGrid.Elements().Single(e => e.Name.LocalName == "Grid.RowDefinitions")
             .Elements().ToArray();
-        Assert.Equal("Auto", (string?)rows[1].Attribute("Height"));
+        Assert.Equal("Auto", (string?)rows[0].Attribute("Height"));
 
         var workspace = shell.Descendants().Single(e => e.Name.LocalName == "ContentControl" &&
             ((string?)e.Attribute("Content"))?.Contains("CurrentPage", StringComparison.Ordinal) == true);
-        Assert.Equal("2", (string?)workspace.Parent?.Attribute("Grid.Row"));
+        Assert.Equal("1", (string?)workspace.Parent?.Attribute("Grid.Row"));
     }
 
     [Fact]

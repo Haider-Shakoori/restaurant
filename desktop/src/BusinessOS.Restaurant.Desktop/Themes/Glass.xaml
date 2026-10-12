@@ -5,9 +5,8 @@
     <SolidColorBrush x:Key="AppBackgroundBrush" Color="#102033" />
     <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#46304460" />
 
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#C9F8FBFF" />
-    <SolidColorBrush x:Key="SidebarBrush" Color="#B8F5F9FF" />
-    <SolidColorBrush x:Key="TopBarBrush" Color="#C7F8FBFF" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#E1F8FBFF" />
+    <SolidColorBrush x:Key="TopBarBrush" Color="#DFF8FBFF" />
     <SolidColorBrush x:Key="PageBackgroundBrush" Color="#1EFFFFFF" />
     <!-- Theme-aware white-glass workspace shared by Settings and Kitchen/KOT. -->
     <SolidColorBrush x:Key="WorkspaceFrostedBackgroundBrush" Color="#D9F8FBFF" />
@@ -15,46 +14,54 @@
     <Thickness x:Key="WorkspaceFrostedPadding">22</Thickness>
 
     <LinearGradientBrush x:Key="CardBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#D8FFFFFF" Offset="0" />
-        <GradientStop Color="#BDEFF6FF" Offset="0.62" />
-        <GradientStop Color="#A7EAF2FF" Offset="1" />
+        <GradientStop Color="#EDFFFFFF" Offset="0" />
+        <GradientStop Color="#D9EFF6FF" Offset="0.62" />
+        <GradientStop Color="#C7EAF3FF" Offset="1" />
     </LinearGradientBrush>
 
-    <SolidColorBrush x:Key="CardBorderBrush" Color="#D8FFFFFF" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#EDFFFFFF" />
     <!-- Layered readable frosted white surfaces, without a second blur on text. -->
-    <SolidColorBrush x:Key="FloorAreaBackgroundBrush" Color="#94F8FBFF" />
-    <SolidColorBrush x:Key="FloorTileBackgroundBrush" Color="#DBFFFFFF" />
+    <SolidColorBrush x:Key="FloorAreaBackgroundBrush" Color="#B4F8FBFF" />
+    <SolidColorBrush x:Key="FloorTileBackgroundBrush" Color="#EBFFFFFF" />
     <SolidColorBrush x:Key="FloorTileBorderBrush" Color="#F2FFFFFF" />
     <!-- Nested rows and toolbar controls remain translucent over the blurred artwork. -->
-    <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#B6F8FBFF" />
-    <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#98EDF6FF" />
-    <SolidColorBrush x:Key="GridHeaderBackgroundBrush" Color="#B0EEF5FF" />
+    <SolidColorBrush x:Key="GridRowBackgroundBrush" Color="#D0F8FBFF" />
+    <SolidColorBrush x:Key="GridAlternatingRowBackgroundBrush" Color="#BAEFF6FF" />
+    <SolidColorBrush x:Key="GridHeaderBackgroundBrush" Color="#CDEEF6FF" />
     <SolidColorBrush x:Key="GridSelectedRowBrush" Color="#A6D4E8FF" />
-    <SolidColorBrush x:Key="TopBarActionBrush" Color="#92F8FBFF" />
-    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#D4FFFFFF" />
+    <SolidColorBrush x:Key="TopBarActionBrush" Color="#B2F8FBFF" />
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#EAFFFFFF" />
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#101828" />
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#344054" />
     <SolidColorBrush x:Key="TextMutedBrush" Color="#667085" />
     <SolidColorBrush x:Key="BorderBrush" Color="#8CB8CCE6" />
     <SolidColorBrush x:Key="BorderStrongBrush" Color="#B8C9D8E8" />
-    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#2F6BFF" />
-    <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#BFD9E7FF" />
+    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#F97316" />
+    <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#BFFFEDD5" />
     <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
     <SolidColorBrush x:Key="WarningSoftBrush" Color="#DFFEF3C7" />
     <SolidColorBrush x:Key="ErrorBrush" Color="#C2413A" />
     <SolidColorBrush x:Key="ErrorSoftBrush" Color="#DFFEE2E2" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#039855" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#C0ECFDF3" />
-    <SolidColorBrush x:Key="HoverBrush" Color="#8AFFFFFF" />
-    <!-- Solid accessible actions. Both themes provide the exact same brush keys. -->
-    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#F3C969" />
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#E9BC58" />
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#D9A63B" />
-    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#D6A94B" />
-    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#9B6C15" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#99FFEDD5" />
+    <!-- Crisp sign-in photography with a soft dark scrim for card readability. -->
+    <LinearGradientBrush x:Key="LoginScrimBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#14102333" Offset="0" />
+        <GradientStop Color="#3D102333" Offset="0.55" />
+        <GradientStop Color="#66102333" Offset="1" />
+    </LinearGradientBrush>
+    <!-- Solid accessible actions. Both themes provide the exact same brush keys.
+         Orange leads the brand; dark charcoal text keeps every state at or
+         above the 4.5:1 contrast guard. -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#F97316" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#EA580C" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#D97706" />
+    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#EA580C" />
+    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#1F2937" />
     <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#111827" />
     <SolidColorBrush x:Key="ButtonSecondaryBackgroundBrush" Color="#F8FAFC" />
-    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#E8EFF8" />
+    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#FEF3E7" />
     <SolidColorBrush x:Key="ButtonSecondaryPressedBrush" Color="#DCE5F0" />
     <SolidColorBrush x:Key="ButtonSecondaryOutlineBrush" Color="#CBD5E1" />
     <SolidColorBrush x:Key="ButtonSecondaryForegroundBrush" Color="#0F172A" />

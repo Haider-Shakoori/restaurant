@@ -8,12 +8,15 @@
         Background="{DynamicResource AppBackgroundBrush}"
         SnapsToDevicePixels="True" UseLayoutRounding="True">
     <Grid>
+        <!-- Crisp photo backdrop: the sign-in page reads clearly at a glance;
+             a theme scrim (invisible in Classic, soft dark in Glass) keeps the
+             card and text readable over busy photography. -->
         <Image x:Name="RestaurantBackdrop"
                Source="Assets/RestaurantGlassBackground.jpg"
                Stretch="UniformToFill"
-               RenderOptions.BitmapScalingMode="HighQuality"
-               Effect="{DynamicResource BackgroundBlurEffect}" />
+               RenderOptions.BitmapScalingMode="HighQuality" />
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
+        <Border Background="{DynamicResource LoginScrimBrush}" />
 
         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                       VerticalScrollBarVisibility="Auto">
@@ -59,6 +62,16 @@
                                FontSize="13" TextWrapping="Wrap"
                                Foreground="{DynamicResource TextSecondaryBrush}"
                                Margin="0,0,0,22" />
+
+                    <TextBlock Text="LICENSED RESTAURANT" FontSize="11"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                    <TextBlock x:Name="LicensedRestaurantText"
+                               FontSize="15" FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource BrandPrimaryBrush}"
+                               Margin="0,4,0,15"
+                               AutomationProperties.Name="Licensed restaurant" />
 
                     <TextBlock Text="RESTAURANT SERVER" FontSize="11"
                                FontWeight="SemiBold"

@@ -11,6 +11,7 @@
         UseLayoutRounding="True">
     <Window.Resources>
         <nav:NavigationRouteMatchConverter x:Key="NavigationRouteMatchConverter" />
+        <nav:NavigationGroupMatchConverter x:Key="NavigationGroupMatchConverter" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
         <Style x:Key="NavButton" TargetType="Button">
             <Setter Property="Height" Value="44" />
@@ -55,7 +56,7 @@
                     <Setter Property="Background" Value="{DynamicResource BrandPrimarySoftBrush}" />
                     <Setter Property="Foreground" Value="{DynamicResource BrandPrimaryBrush}" />
                     <Setter Property="FontWeight" Value="SemiBold" />
-                    <Setter Property="BorderThickness" Value="3,0,0,0" />
+                    <Setter Property="BorderThickness" Value="0,0,0,3" />
                 </DataTrigger>
                 <Trigger Property="IsKeyboardFocused" Value="True">
                     <Setter Property="BorderThickness" Value="2" />
@@ -63,6 +64,25 @@
                 <Trigger Property="IsEnabled" Value="False">
                     <Setter Property="Opacity" Value="0.55" />
                 </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Top-navigation dropdown trigger: same pill as a route button, but
+             highlighted orange while any route in its Tag group is active. -->
+        <Style x:Key="NavMenuButton" TargetType="Button" BasedOn="{StaticResource NavButton}">
+            <Style.Triggers>
+                <DataTrigger Value="True">
+                    <DataTrigger.Binding>
+                        <MultiBinding Converter="{StaticResource NavigationGroupMatchConverter}">
+                            <Binding Path="CurrentRoute" />
+                            <Binding Path="Tag" RelativeSource="{RelativeSource Self}" />
+                        </MultiBinding>
+                    </DataTrigger.Binding>
+                    <Setter Property="Background" Value="{DynamicResource BrandPrimarySoftBrush}" />
+                    <Setter Property="Foreground" Value="{DynamicResource BrandPrimaryBrush}" />
+                    <Setter Property="FontWeight" Value="SemiBold" />
+                    <Setter Property="BorderThickness" Value="0,0,0,3" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -138,303 +158,56 @@
         <Border Background="{DynamicResource ShellBackdropOverlayBrush}" />
 
         <Grid>
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="SidebarColumn" Width="252" />
-                <ColumnDefinition Width="0" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Border x:Name="SidebarContainer" Grid.Column="0"
-                    Background="{DynamicResource SidebarBrush}"
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border x:Name="TopNavigationBar" Grid.Row="0"
+                    Background="{DynamicResource TopBarBrush}"
                     BorderBrush="{DynamicResource CardBorderBrush}"
-                    BorderThickness="0,0,1,0"
-                    CornerRadius="0">
-                <Border.Effect>
-                    <DropShadowEffect BlurRadius="28"
-                                      ShadowDepth="7"
-                                      Opacity="0.18"
-                                      Color="#071827" />
-                </Border.Effect>
-                <DockPanel Margin="14">
-                    <StackPanel DockPanel.Dock="Top" Margin="6,8,6,18">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="58" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Border Width="52" Height="52" CornerRadius="16"
-                                    Background="{DynamicResource BrandPrimaryBrush}">
-                                <TextBlock Text="B"
-                                           Foreground="White"
-                                           FontSize="26"
-                                           FontWeight="Bold"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" />
-                            </Border>
-                            <StackPanel Grid.Column="1" Margin="11,2,0,0">
-                                <TextBlock Text="BusinessOS"
-                                           FontSize="20"
-                                           FontWeight="Bold" />
-                                <TextBlock Text="Restaurant"
-                                           FontSize="20"
-                                           FontWeight="Bold"
-                                           Foreground="{DynamicResource BrandPrimaryBrush}"
-                                           Margin="0,-3,0,0" />
-                            </StackPanel>
-                        </Grid>
-                        <TextBlock Text="Serve Faster  ·  Manage Smarter"
-                                   Foreground="{DynamicResource TextMutedBrush}"
-                                   FontSize="11.5"
-                                   Margin="2,9,0,0" />
-                    </StackPanel>
-
-                    <StackPanel DockPanel.Dock="Bottom" Margin="8,12,8,6">
-                        <Border Background="{DynamicResource SuccessSoftBrush}"
-                                CornerRadius="12"
-                                Padding="10,8"
-                                Margin="0,0,0,10">
-                            <StackPanel>
-                                <TextBlock Text="LICENSE"
-                                           FontSize="9.5"
-                                           FontWeight="Bold"
-                                           Foreground="{DynamicResource SuccessBrush}" />
-                                <TextBlock Text="{Binding LicenseText}"
-                                           FontSize="11.5"
-                                           FontWeight="SemiBold"
-                                           Foreground="{DynamicResource TextSecondaryBrush}"
-                                           TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
+                    BorderThickness="0,0,0,1"
+                    Padding="10,7">
+                <DockPanel LastChildFill="True">
+                    <!-- Brand -->
+                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal"
+                                VerticalAlignment="Center" Margin="4,0,14,0">
+                        <Border Width="38" Height="38" CornerRadius="12"
+                                Background="{DynamicResource BrandPrimaryBrush}">
+                            <TextBlock Text="B" Foreground="White" FontWeight="Bold" FontSize="20"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="BusinessOS Restaurant" FontWeight="SemiBold" />
-                        <TextBlock Text="Local-first · Built for Afghanistan"
-                                   Foreground="{DynamicResource TextMutedBrush}"
-                                   FontSize="10.5" />
+                        <StackPanel x:Name="BrandText" Margin="10,1,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="BusinessOS" FontSize="15" FontWeight="Bold" />
+                            <TextBlock Text="RESTAURANT" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource BrandPrimaryBrush}"
+                                       Margin="0,-2,0,0" />
+                        </StackPanel>
                     </StackPanel>
 
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-                            <TextBlock Text="OPERATIONS"
-                                       Foreground="{DynamicResource TextMutedBrush}"
-                                       FontWeight="SemiBold"
-                                       FontSize="10"
-                                       Margin="14,0,0,6" />
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Dashboard"
-                                     Command="{Binding NavigateCommand}" CommandParameter="dashboard"
-                                     Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE80F;" Width="28" />
-                                     <TextBlock Text="Dashboard" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="POS &amp; Orders"
-                                     Command="{Binding NavigateCommand}" CommandParameter="pos"
-                                     Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE7BF;" Width="28" />
-                                     <TextBlock Text="POS &amp; Orders" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Tables &amp; Floor"
-                                     Command="{Binding NavigateCommand}" CommandParameter="tables"
-                                     Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE8A0;" Width="28" />
-                                     <TextBlock Text="Tables &amp; Floor" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Kitchen / KOT"
-                                     Command="{Binding NavigateCommand}" CommandParameter="kitchen"
-                                     Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE713;" Width="28" />
-                                     <TextBlock Text="Kitchen / KOT" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Menu &amp; Products"
-                                     Command="{Binding NavigateCommand}" CommandParameter="menu"
-                                     Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE8A5;" Width="28" />
-                                     <TextBlock Text="Menu &amp; Products" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Recipes &amp; Food Cost"
-                                     Command="{Binding NavigateCommand}" CommandParameter="recipes"
-                                     Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE8D2;" Width="28" />
-                                     <TextBlock Text="Recipes &amp; Food Cost" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-
-                            <TextBlock Text="MANAGEMENT"
-                                       Foreground="{DynamicResource TextMutedBrush}"
-                                       FontWeight="SemiBold"
-                                       FontSize="10"
-                                       Margin="14,18,0,6" />
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Inventory"
-                                     Command="{Binding NavigateCommand}" CommandParameter="inventory"
-                                     Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE719;" Width="28" />
-                                     <TextBlock Text="Inventory" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Purchases"
-                                     Command="{Binding NavigateCommand}" CommandParameter="purchases"
-                                     Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE8D4;" Width="28" />
-                                     <TextBlock Text="Purchases" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Expenses"
-                                     Command="{Binding NavigateCommand}" CommandParameter="expenses"
-                                     Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE8D4;" Width="28" />
-                                     <TextBlock Text="Expenses" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Daily Closing"
-                                     Command="{Binding NavigateCommand}" CommandParameter="closing"
-                                     Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE10A;" Width="28" />
-                                     <TextBlock Text="Daily Closing" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Reports &amp; Accounting"
-                                     Command="{Binding NavigateCommand}" CommandParameter="reports"
-                                     Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE9D9;" Width="28" />
-                                     <TextBlock Text="Reports &amp; Accounting" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-
-                            <TextBlock Text="SYSTEM"
-                                       Foreground="{DynamicResource TextMutedBrush}"
-                                       FontWeight="SemiBold"
-                                       FontSize="10"
-                                       Margin="14,18,0,6" />
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Users &amp; Roles"
-                                     Command="{Binding NavigateCommand}" CommandParameter="users"
-                                     Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE77B;" Width="28" />
-                                     <TextBlock Text="Users &amp; Roles" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Settings"
-                                     Command="{Binding NavigateCommand}" CommandParameter="settings"
-                                     Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}">
-                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17"
-                                                Text="&#xE713;" Width="28" />
-                                     <TextBlock Text="Settings" VerticalAlignment="Center" />
-                                 </StackPanel>
-                             </Button>
-                        </StackPanel>
-                    </ScrollViewer>
-                </DockPanel>
-            </Border>
-
-            <Grid x:Name="WorkspaceShell" Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition x:Name="TopBarRow" Height="76" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <Border x:Name="ShellHeader" Grid.Row="0"
-                        Background="{DynamicResource TopBarBrush}"
-                        BorderBrush="{DynamicResource CardBorderBrush}"
-                        BorderThickness="0,0,0,1"
-                        CornerRadius="0"
-                        Padding="16,0">
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="24"
-                                          ShadowDepth="5"
-                                          Opacity="0.14"
-                                          Color="#071827" />
-                    </Border.Effect>
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Grid.Column="0">
-                            <TextBlock Text="{Binding PageTitle}" TextTrimming="CharacterEllipsis"
-                                       FontSize="22"
-                                       FontWeight="Bold" />
-                            <!-- Page names are enough: remove repeated decorative descriptions. -->
-                            <TextBlock x:Name="HeaderSubtitle" Visibility="Collapsed"
-                                       Text="{Binding PageSubtitle}" />
-                        </StackPanel>
-
-                        <StackPanel Grid.Column="1" Orientation="Horizontal"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Center">
-                            <Border x:Name="NetworkModeBadge" Background="{DynamicResource SuccessSoftBrush}"
-                                    CornerRadius="12"
-                                    Padding="12,7">
-                                <TextBlock Text="{Binding NetworkMode, StringFormat=●  {0}}"
-                                           Foreground="{DynamicResource SuccessBrush}"
-                                           FontWeight="SemiBold" />
-                            </Border>
-                            <Border x:Name="OperatorBadge" Margin="12,0,0,0" Padding="10,7"
-                                    Background="{DynamicResource TopBarActionBrush}"
-                                    CornerRadius="10">
-                                <TextBlock Text="{Binding OperatorLabel}"
-                                           MaxWidth="165"
-                                           FontWeight="SemiBold"
-                                           TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource TextSecondaryBrush}" />
-                            </Border>
-                            <Button x:Name="SwitchOperatorButton" Margin="8,0,0,0"
-                                    Style="{StaticResource TopBarGhostButton}"
-                                    Content="Switch operator"
-                                    ToolTip="Sign in as a different restaurant operator"
-                                    Click="OnSwitchOperatorClick" />
-                            <Button Margin="10,0,0,0"
-                                    Style="{StaticResource TopBarGhostButton}"
-                                    Content="{Binding ThemeButtonText}"
-                                    Command="{Binding ToggleThemeCommand}" />
-                            <Button x:Name="WorkspaceShortcutsButton" Margin="8,0,0,0"
-                                     Style="{StaticResource TopBarGhostButton}"
-                                     Content="⌨  Keys"
-                                     Visibility="Collapsed"
-                                     ToolTip="F1 shows page shortcuts · F11 toggles full screen"
-                                     Click="OnWorkspaceShortcutsClick" />
-                             <Button x:Name="WorkspaceFullScreenButton" Margin="8,0,0,0"
-                                     Style="{StaticResource TopBarGhostButton}"
-                                     Content="⛶  Full screen"
-                                     Visibility="Collapsed"
-                                     ToolTip="Toggle full screen (F11)"
-                                     Click="OnWorkspaceFullScreenClick" />
-                             <Button x:Name="RefreshButton" Margin="8,0,0,0"
-                                    Style="{StaticResource TopBarGhostButton}"
-                                    Content="↻  Refresh"
-                                    Command="{Binding RefreshCommand}" />
-                            <Button x:Name="NotificationBellButton" Margin="8,0,0,0"
-                                    Style="{StaticResource TopBarGhostButton}"
-                                    Content="{Binding NotificationBellLabel}"
-                                    ToolTip="Show restaurant notifications"
-                                    AutomationProperties.Name="Notifications"
-                                    Command="{Binding ToggleNotificationsCommand}" />
+                    <!-- Right side: compact account menu, then All Modules at the far right. -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Shell status and quick actions live in the top menu bar. -->
+                        <Border x:Name="NetworkModeBadge"
+                                Background="{DynamicResource SuccessSoftBrush}"
+                                CornerRadius="12"
+                                Padding="10,6"
+                                Margin="0,0,4,0">
+                            <TextBlock Text="{Binding NetworkMode, StringFormat=&#x25CF;  {0}}"
+                                       Foreground="{DynamicResource SuccessBrush}"
+                                       FontWeight="SemiBold" FontSize="12" />
+                        </Border>
+                        <Button Margin="6,0,0,0"
+                                Style="{StaticResource TopBarGhostButton}"
+                                Content="{Binding ThemeButtonText}"
+                                Command="{Binding ToggleThemeCommand}"
+                                ToolTip="Switch between Classic and Glass appearance" />
+                        <Button x:Name="RefreshButton" Margin="6,0,0,0"
+                                Style="{StaticResource TopBarGhostButton}"
+                                Content="&#x21BB;  Refresh"
+                                Command="{Binding RefreshCommand}" />
+                        <Button x:Name="NotificationBellButton" Margin="6,0,0,0"
+                                Style="{StaticResource TopBarGhostButton}"
+                                Content="{Binding NotificationBellLabel}"
+                                ToolTip="Show restaurant notifications"
+                                AutomationProperties.Name="Notifications"
+                                Command="{Binding ToggleNotificationsCommand}" />
                             <Popup PlacementTarget="{Binding ElementName=NotificationBellButton}"
                                    Placement="Bottom" HorizontalOffset="-250" VerticalOffset="10"
                                    AllowsTransparency="True" StaysOpen="False"
@@ -471,13 +244,340 @@
                                     </DockPanel>
                                 </Border>
                             </Popup>
-                        </StackPanel>
+                        <Button x:Name="UserMenuButton" Style="{StaticResource TopBarGhostButton}"
+                                Click="OnUserMenuClick"
+                                ToolTip="Account, restaurant and sign out"
+                                AutomationProperties.Name="Operator menu">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="15" Text="&#xE77B;"
+                                           VerticalAlignment="Center" />
+                                <Border x:Name="OperatorBadge" Margin="7,0,4,0" Padding="8,4"
+                                        CornerRadius="9"
+                                        Background="{DynamicResource TopBarActionBrush}">
+                                    <TextBlock Text="{Binding OperatorLabel}" FontSize="12"
+                                               FontWeight="SemiBold" MaxWidth="150"
+                                               TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" />
+                                </Border>
+                                <TextBlock Text="▾" FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextMutedBrush}" />
+                            </StackPanel>
+                        </Button>
+                        <Popup x:Name="UserMenuPopup"
+                               PlacementTarget="{Binding ElementName=UserMenuButton}"
+                               Placement="Bottom" HorizontalOffset="-240" VerticalOffset="6"
+                               AllowsTransparency="True" StaysOpen="False"
+                               DataContext="{Binding DataContext, ElementName=TopNavigationBar}">
+                            <Border Width="280" Padding="16"
+                                    Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource CardBorderBrush}"
+                                    BorderThickness="1" CornerRadius="16">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="20" ShadowDepth="5"
+                                                      Color="#0E223A" Opacity="0.25" />
+                                </Border.Effect>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding OperatorLabel}" FontSize="14"
+                                               FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding TenantLabel}" FontSize="12"
+                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap" Margin="0,3,0,0" />
+                                    <Border BorderBrush="{DynamicResource CardBorderBrush}"
+                                            BorderThickness="0,1,0,0" Margin="0,12,0,12" />
+                                    <Button x:Name="SwitchOperatorButton" Content="Log out"
+                                            Style="{StaticResource TopBarGhostButton}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center"
+                                            Click="OnSwitchOperatorClick"
+                                            AutomationProperties.Name="Log out" />
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+
+                        <Button x:Name="AllModulesButton" Margin="8,0,0,0"
+                                Style="{StaticResource PrimaryActionButton}"
+                                Padding="14,8" MinHeight="38"
+                                Command="{Binding NavigateCommand}" CommandParameter="modules"
+                                Visibility="{Binding CanViewModules, Converter={StaticResource BoolToVisibilityConverter}}"
+                                ToolTip="Show all modules" AutomationProperties.Name="All Modules">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#x229E;" FontSize="16" Margin="0,0,7,0"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="All Modules" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- Primary links and grouped dropdowns. -->
+                    <Grid VerticalAlignment="Center">
+                        <ScrollViewer x:Name="TopNavScroll"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="TopNavLinks" Orientation="Horizontal">
+                                <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Dashboard"
+                                        Command="{Binding NavigateCommand}" CommandParameter="dashboard"
+                                        Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE80F;" Width="28" />
+                                        <TextBlock Text="Dashboard" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource NavButton}" AutomationProperties.Name="POS &amp; Orders"
+                                        Command="{Binding NavigateCommand}" CommandParameter="pos"
+                                        Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE7BF;" Width="28" />
+                                        <TextBlock Text="POS &amp; Orders" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Tables &amp; Floor"
+                                        Command="{Binding NavigateCommand}" CommandParameter="tables"
+                                        Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8A0;" Width="28" />
+                                        <TextBlock Text="Tables &amp; Floor" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+                                <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Kitchen / KOT"
+                                        Command="{Binding NavigateCommand}" CommandParameter="kitchen"
+                                        Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Width="28" />
+                                        <TextBlock Text="Kitchen / KOT" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
+
+                                <Button x:Name="CatalogMenuButton" Style="{StaticResource NavMenuButton}"
+                                        Tag="menu,recipes" Click="OnNavMenuClick"
+                                        AutomationProperties.Name="Catalog menu"
+                                        Visibility="{Binding CanViewCatalogMenu, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Catalog" VerticalAlignment="Center" />
+                                        <TextBlock Text="▾" FontSize="10" Margin="6,1,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                    </StackPanel>
+                                </Button>
+                                <Popup x:Name="CatalogMenuPopup"
+                                       PlacementTarget="{Binding ElementName=CatalogMenuButton}"
+                                       Placement="Bottom" VerticalOffset="4"
+                                       AllowsTransparency="True" StaysOpen="False"
+                                       DataContext="{Binding DataContext, ElementName=TopNavigationBar}">
+                                    <Border Width="250" Padding="8"
+                                            Background="{DynamicResource SurfaceBrush}"
+                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                            BorderThickness="1" CornerRadius="14">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="18" ShadowDepth="4"
+                                                              Color="#0E223A" Opacity="0.22" />
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Menu &amp; Products"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="menu"
+                                                    Visibility="{Binding CanViewMenu, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8A5;" Width="28" />
+                                                    <TextBlock Text="Menu &amp; Products" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Recipes &amp; Food Cost"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="recipes"
+                                                    Visibility="{Binding CanViewRecipes, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8D2;" Width="28" />
+                                                    <TextBlock Text="Recipes &amp; Food Cost" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+
+                                <Button x:Name="StockMenuButton" Style="{StaticResource NavMenuButton}"
+                                        Tag="inventory,purchases,expenses,closing" Click="OnNavMenuClick"
+                                        AutomationProperties.Name="Stock menu"
+                                        Visibility="{Binding CanViewStockMenu, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Stock" VerticalAlignment="Center" />
+                                        <TextBlock Text="▾" FontSize="10" Margin="6,1,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                    </StackPanel>
+                                </Button>
+                                <Popup x:Name="StockMenuPopup"
+                                       PlacementTarget="{Binding ElementName=StockMenuButton}"
+                                       Placement="Bottom" VerticalOffset="4"
+                                       AllowsTransparency="True" StaysOpen="False"
+                                       DataContext="{Binding DataContext, ElementName=TopNavigationBar}">
+                                    <Border Width="250" Padding="8"
+                                            Background="{DynamicResource SurfaceBrush}"
+                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                            BorderThickness="1" CornerRadius="14">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="18" ShadowDepth="4"
+                                                              Color="#0E223A" Opacity="0.22" />
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Inventory"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="inventory"
+                                                    Visibility="{Binding CanViewInventory, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE719;" Width="28" />
+                                                    <TextBlock Text="Inventory" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Purchases"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="purchases"
+                                                    Visibility="{Binding CanViewPurchases, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8D4;" Width="28" />
+                                                    <TextBlock Text="Purchases" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Expenses"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="expenses"
+                                                    Visibility="{Binding CanViewExpenses, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8D4;" Width="28" />
+                                                    <TextBlock Text="Expenses" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Daily Closing"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="closing"
+                                                    Visibility="{Binding CanViewClosing, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE10A;" Width="28" />
+                                                    <TextBlock Text="Daily Closing" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+
+                                <Button x:Name="ManageMenuButton" Style="{StaticResource NavMenuButton}"
+                                        Tag="reports,users,settings" Click="OnNavMenuClick"
+                                        AutomationProperties.Name="Manage menu"
+                                        Visibility="{Binding CanViewManageMenu, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Manage" VerticalAlignment="Center" />
+                                        <TextBlock Text="▾" FontSize="10" Margin="6,1,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TextMutedBrush}" />
+                                    </StackPanel>
+                                </Button>
+                                <Popup x:Name="ManageMenuPopup"
+                                       PlacementTarget="{Binding ElementName=ManageMenuButton}"
+                                       Placement="Bottom" VerticalOffset="4"
+                                       AllowsTransparency="True" StaysOpen="False"
+                                       DataContext="{Binding DataContext, ElementName=TopNavigationBar}">
+                                    <Border Width="250" Padding="8"
+                                            Background="{DynamicResource SurfaceBrush}"
+                                            BorderBrush="{DynamicResource CardBorderBrush}"
+                                            BorderThickness="1" CornerRadius="14">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="18" ShadowDepth="4"
+                                                              Color="#0E223A" Opacity="0.22" />
+                                        </Border.Effect>
+                                        <StackPanel>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Reports &amp; Accounting"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="reports"
+                                                    Visibility="{Binding CanViewReports, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE9D9;" Width="28" />
+                                                    <TextBlock Text="Reports &amp; Accounting" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Users &amp; Roles"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="users"
+                                                    Visibility="{Binding CanViewUsers, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE77B;" Width="28" />
+                                                    <TextBlock Text="Users &amp; Roles" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Settings"
+                                                    Command="{Binding NavigateCommand}" CommandParameter="settings"
+                                                    Visibility="{Binding CanViewSettings, Converter={StaticResource BoolToVisibilityConverter}}">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Width="28" />
+                                                    <TextBlock Text="Settings" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+                                </Popup>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <!-- Tablet/narrow: the primary route links collapse into this menu.
+                             All Modules and the account menu stay reachable to the right. -->
+                        <Button x:Name="TopNavCompactButton" Style="{StaticResource NavMenuButton}"
+                                Content="☰  Modules" Visibility="Collapsed"
+                                HorizontalAlignment="Left" Click="OnNavMenuClick"
+                                AutomationProperties.Name="Modules menu" />
+                        <Popup x:Name="TopNavCompactMenu"
+                               PlacementTarget="{Binding ElementName=TopNavCompactButton}"
+                               Placement="Bottom" VerticalOffset="4"
+                               AllowsTransparency="True" StaysOpen="False"
+                               DataContext="{Binding DataContext, ElementName=TopNavigationBar}">
+                            <Border Width="250" Padding="8"
+                                    Background="{DynamicResource SurfaceBrush}"
+                                    BorderBrush="{DynamicResource CardBorderBrush}"
+                                    BorderThickness="1" CornerRadius="14">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="18" ShadowDepth="4"
+                                                      Color="#0E223A" Opacity="0.22" />
+                                </Border.Effect>
+                                <StackPanel>
+                                    <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Dashboard (compact)"
+                                            Command="{Binding NavigateCommand}" CommandParameter="dashboard"
+                                            Visibility="{Binding CanViewDashboard, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE80F;" Width="28" />
+                                            <TextBlock Text="Dashboard" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource NavButton}" AutomationProperties.Name="POS &amp; Orders (compact)"
+                                            Command="{Binding NavigateCommand}" CommandParameter="pos"
+                                            Visibility="{Binding CanViewPos, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE7BF;" Width="28" />
+                                            <TextBlock Text="POS &amp; Orders" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Tables &amp; Floor (compact)"
+                                            Command="{Binding NavigateCommand}" CommandParameter="tables"
+                                            Visibility="{Binding CanViewTables, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE8A0;" Width="28" />
+                                            <TextBlock Text="Tables &amp; Floor" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource NavButton}" AutomationProperties.Name="Kitchen / KOT (compact)"
+                                            Command="{Binding NavigateCommand}" CommandParameter="kitchen"
+                                            Visibility="{Binding CanViewKitchen, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="17" Text="&#xE713;" Width="28" />
+                                            <TextBlock Text="Kitchen / KOT" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
                     </Grid>
-                </Border>
+                </DockPanel>
+            </Border>
+
+
+            <Grid x:Name="WorkspaceShell" Grid.Row="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
 
                 <!-- Only show a recovery action when the most recent workspace load fails.
                      A failed load never replaces the current operational page. -->
-                <Border Grid.Row="1"
+                <Border Grid.Row="0"
                         Visibility="{Binding HasWorkspaceError, Converter={StaticResource BoolToVisibilityConverter}}"
                         Background="{DynamicResource BrandPrimarySoftBrush}"
                         BorderBrush="{DynamicResource BorderStrongBrush}"
@@ -495,7 +595,7 @@
                     </DockPanel>
                 </Border>
 
-                <Border Grid.Row="2"
+                <Border x:Name="WorkspaceSurface" Grid.Row="1"
                         Background="{DynamicResource PageBackgroundBrush}"
                         BorderBrush="{DynamicResource CardBorderBrush}"
                         BorderThickness="0"
@@ -512,7 +612,7 @@
 
                 <!-- Non-blocking progress: do not hide or disable the active
                      page while SQLite builds the next workspace. -->
-                <Border Grid.Row="2" Panel.ZIndex="25"
+                <Border Grid.Row="1" Panel.ZIndex="25"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
                         Margin="0,7,20,0" Padding="12,7"
                         CornerRadius="12"
@@ -531,7 +631,7 @@
 
                 <!-- The POS owns the entire screen. Always provide a discoverable
                      way back to the standard navigation and desktop chrome. -->
-                <Button x:Name="ExitPosButton" Grid.Row="2"
+                <Button x:Name="ExitPosButton" Grid.Row="1"
                         Panel.ZIndex="35"
                         HorizontalAlignment="Right" VerticalAlignment="Top"
                         Margin="0,6,24,0" Padding="16,9"

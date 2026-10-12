@@ -48,13 +48,42 @@ internal static class RestaurantModulesPanel
         var recipes = Check("Recipes and portion costing", initial.RecipesEnabled);
         var inventory = Check("Inventory and stock tracking", initial.InventoryEnabled);
         var purchasing = Check("Purchasing and suppliers (requires inventory)", initial.PurchasingEnabled);
-        var automatic = Check("Deduct ingredients automatically when a KOT is prepared (recipe mode)",
+        var automatic = Check("Automatic Recipe Ingredient Deduction",
             initial.AutomaticRecipeConsumptionEnabled);
-        foreach (var check in new[] { recipes, inventory, purchasing, automatic })
+        foreach (var check in new[] { recipes, inventory, purchasing })
         {
             check.IsEnabled = canEdit;
             root.Children.Add(check);
         }
+
+        // Batch 5: the deduction mode is the most consequential inventory
+        // switch, so it gets an explicit ON/OFF presentation with descriptions.
+        var stateBadge = new TextBlock
+        {
+            FontSize = 12,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 0, 2),
+        };
+        var stateDescription = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        stateDescription.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+        var modeCardContent = new StackPanel { Margin = new Thickness(14) };
+        modeCardContent.Children.Add(stateBadge);
+        modeCardContent.Children.Add(automatic);
+        modeCardContent.Children.Add(stateDescription);
+        var modeCard = new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 8, 0, 6),
+            Child = modeCardContent,
+        };
+        modeCard.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
+        modeCard.SetResourceReference(Border.BorderBrushProperty, "BrandPrimaryBrush");
+        root.Children.Add(modeCard);
 
         var modeHelp = new TextBlock
         {
@@ -73,6 +102,13 @@ internal static class RestaurantModulesPanel
                 automatic.IsChecked = false;
             purchasing.IsEnabled = canEdit && inventory.IsChecked == true;
             automatic.IsEnabled = canEdit && recipes.IsChecked == true && inventory.IsChecked == true;
+            var automaticOn = automatic.IsChecked == true;
+            stateBadge.Text = automaticOn ? "Deduction mode: ON" : "Deduction mode: OFF";
+            stateBadge.SetResourceReference(TextBlock.ForegroundProperty,
+                automaticOn ? "BrandPrimaryBrush" : "TextMutedBrush");
+            stateDescription.Text = automaticOn
+                ? "Ingredients are deducted automatically from KOT/order production using the configured recipes. Manual counts stay disabled to prevent double costing."
+                : "Orders and KOT do not deduct recipe ingredients. Record the actual consumption from the Inventory module; purchases remain stock assets until consumed.";
             modeHelp.Text = automatic.IsChecked == true
                 ? "RECIPE MODE — KOT production consumes configured recipe quantities. Manual stock counts are disabled to prevent double costing."
                 : "MANUAL MODE — Sending a KOT does not deduct new recipe portions. Go to Inventory → Count Remaining Stock after service: opening stock + received stock − physical closing balance = consumption. This feeds ingredient cost in profit reports. Existing committed history is never reversed.";

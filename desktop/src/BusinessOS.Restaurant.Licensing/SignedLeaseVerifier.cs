@@ -53,7 +53,9 @@ public sealed class SignedLeaseVerifier
             ReadDate(root, "subscription_ends_at"),
             root.GetProperty("features").Clone(),
             ReadOptionalInt(root, "mobile_device_limit"),
-            ReadDesktopMode(root));
+            ReadDesktopMode(root),
+            root.TryGetProperty("tenant_name", out var tenantName) && tenantName.ValueKind == JsonValueKind.String
+                ? tenantName.GetString() : null);
 
         if (!string.Equals(snapshot.KeyId, lease.KeyId, StringComparison.Ordinal))
         {

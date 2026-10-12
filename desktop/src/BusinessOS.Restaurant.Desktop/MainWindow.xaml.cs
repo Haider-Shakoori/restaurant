@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows.Input;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows;
 using BusinessOS.Restaurant.Authentication;
@@ -25,6 +26,8 @@ public partial class MainWindow : Window
         _viewModel = new MainWindowViewModel(session);
         DataContext = _viewModel;
         _viewModel.PropertyChanged += OnWorkspaceChanged;
+        OperationalWorkspaceChrome.FullScreenToggleRequested += OnChromeFullScreenToggle;
+        OperationalWorkspaceChrome.ShortcutsRequested += OnChromeShortcuts;
         PreviewKeyDown += OnWorkspaceKeyDown;
         Loaded += OnLoadedAsync;
         Closed += OnClosed;
@@ -39,16 +42,41 @@ public partial class MainWindow : Window
 
     private void ApplyResponsiveLayout()
     {
-        // A narrow cashier display must keep route/actions accessible without
-        // top-bar collisions. The full details return automatically when resized.
-        var compact = ActualWidth < 1240;
+        // A narrow cashier display collapses the primary route links into one
+        // menu; grouped dropdowns, the account menu and All Modules stay
+        // reachable right of it without overlapping.
+        var compact = ActualWidth < 1400;
+        BrandText.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         OperatorBadge.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        HeaderSubtitle.Visibility = Visibility.Collapsed;
-        SwitchOperatorButton.Content = compact ? "Switch" : "Switch operator";
-        WorkspaceShortcutsButton.Content = compact ? "⌨" : "⌨  Keys";
-        WorkspaceFullScreenButton.Content = compact ? "⛶" : "⛶  Full screen";
+        TopNavLinks.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        TopNavCompactButton.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
+        if (!compact) TopNavCompactMenu.IsOpen = false;
+        // The old page header row is gone: its status and actions now live in
+        // the top menu bar, so the workspace keeps the full content height.
+        NetworkModeBadge.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
         RefreshButton.Content = compact ? "↻" : "↻  Refresh";
         RefreshButton.ToolTip = "Refresh the current workspace";
+    }
+
+    private void OnUserMenuClick(object sender, RoutedEventArgs e) =>
+        UserMenuPopup.IsOpen = !UserMenuPopup.IsOpen;
+
+    private void OnNavMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button) return;
+        var popup = button.Tag?.ToString() switch
+        {
+            "menu,recipes" => CatalogMenuPopup,
+            "inventory,purchases,expenses,closing" => StockMenuPopup,
+            "reports,users,settings" => ManageMenuPopup,
+            _ => TopNavCompactMenu,
+        };
+        var open = !popup.IsOpen;
+        CatalogMenuPopup.IsOpen = false;
+        StockMenuPopup.IsOpen = false;
+        ManageMenuPopup.IsOpen = false;
+        TopNavCompactMenu.IsOpen = false;
+        popup.IsOpen = open;
     }
 
     private void OnThemeChanged(AppearanceTheme theme)
@@ -75,6 +103,8 @@ public partial class MainWindow : Window
         _viewModel.PropertyChanged -= OnWorkspaceChanged;
         PreviewKeyDown -= OnWorkspaceKeyDown;
         ThemeManager.ThemeChanged -= OnThemeChanged;
+        OperationalWorkspaceChrome.FullScreenToggleRequested -= OnChromeFullScreenToggle;
+        OperationalWorkspaceChrome.ShortcutsRequested -= OnChromeShortcuts;
         _viewModel.ReleaseNotifications();
     }
 
@@ -92,10 +122,6 @@ public partial class MainWindow : Window
     private void UpdateOperationalButtons()
     {
         var active = IsOperationalRoute(_viewModel.CurrentRoute);
-        WorkspaceShortcutsButton.Visibility = active && !_posFullScreen
-            ? Visibility.Visible : Visibility.Collapsed;
-        WorkspaceFullScreenButton.Visibility = active && !_posFullScreen
-            ? Visibility.Visible : Visibility.Collapsed;
         ExitPosButton.Visibility = active && _posFullScreen
             ? Visibility.Visible : Visibility.Collapsed;
         ExitPosButton.ToolTip = "Return to normal window (F11 or Esc)";
@@ -111,10 +137,7 @@ public partial class MainWindow : Window
             _originalWindowState = WindowState;
             _originalWindowStyle = WindowStyle;
             _originalResizeMode = ResizeMode;
-            SidebarContainer.Visibility = Visibility.Collapsed;
-            SidebarColumn.Width = new GridLength(0);
-            ShellHeader.Visibility = Visibility.Collapsed;
-            TopBarRow.Height = new GridLength(0);
+            TopNavigationBar.Visibility = Visibility.Collapsed;
             WorkspaceContent.MaxWidth = double.PositiveInfinity;
             WindowState = WindowState.Normal;
             WindowStyle = WindowStyle.None;
@@ -125,10 +148,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            SidebarContainer.Visibility = Visibility.Visible;
-            SidebarColumn.Width = new GridLength(252);
-            ShellHeader.Visibility = Visibility.Visible;
-            TopBarRow.Height = new GridLength(76);
+            TopNavigationBar.Visibility = Visibility.Visible;
             WorkspaceContent.MaxWidth = 1900;
             WindowState = WindowState.Normal;
             WindowStyle = _originalWindowStyle;
@@ -143,11 +163,16 @@ public partial class MainWindow : Window
     private void OnExitPosClick(object sender, RoutedEventArgs e) =>
         SetPosFullScreen(false);
 
-    private void OnWorkspaceFullScreenClick(object sender, RoutedEventArgs e) =>
-        SetPosFullScreen(!_posFullScreen);
+    private void OnChromeFullScreenToggle()
+    {
+        // Keys/Full screen now ride with the POS and Kitchen action rows.
+        if (IsOperationalRoute(_viewModel.CurrentRoute))
+        {
+            SetPosFullScreen(!_posFullScreen);
+        }
+    }
 
-    private void OnWorkspaceShortcutsClick(object sender, RoutedEventArgs e) =>
-        ShowOperationalShortcuts();
+    private void OnChromeShortcuts() => ShowOperationalShortcuts();
 
     private void ShowOperationalShortcuts()
     {
@@ -282,18 +307,20 @@ public partial class MainWindow : Window
     {
         try
         {
+            await new WindowsSessionStore().ClearAsync();
+            IsEnabled = false;
             var activation = await new WindowsActivationStore().LoadAsync()
                 ?? throw new InvalidOperationException("Restaurant activation could not be verified.");
             var connection = await new ConnectionSettingsStore().LoadAsync();
             var signIn = new OperatorSignInWindow(
-                activation.Snapshot.TenantId, connection?.TenantBaseUrl)
+                activation.Snapshot.TenantId, activation.TenantBaseUrl, activation.Snapshot.TenantName)
             {
                 Owner = this,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
             };
 
             if (DesktopGlassDialog.ShowDialog(signIn) != true || signIn.SignedInSession is null)
-                return;
+            { Close(); return; }
 
             // Never reuse a view model, navigation authorization or cached pages
             // across operators on a shared cashier workstation.
@@ -306,8 +333,9 @@ public partial class MainWindow : Window
         {
             App.LogRecoverableException("switch-operator", exception);
             DesktopGlassDialog.Notice(
-                "Could not switch operator. Your existing workspace is unchanged.",
+                "You have been logged out. Restart to sign in again.",
                 "BusinessOS Restaurant", this);
+            Close();
         }
     }
 
