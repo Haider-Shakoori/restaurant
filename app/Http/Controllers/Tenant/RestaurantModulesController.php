@@ -50,7 +50,7 @@ class RestaurantModulesController extends Controller
         }
 
         // Settings are restaurant-wide; no branch override is permitted.
-        $settings->put($data);
+        $settings->put($data, null, $request->user()?->getKey());
 
         return $request->expectsJson()
             ? response()->json(['data' => $this->modules($settings)])

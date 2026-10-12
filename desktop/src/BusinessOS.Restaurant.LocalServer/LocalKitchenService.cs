@@ -183,7 +183,9 @@ public sealed class LocalKitchenService
                 RoundNumber = round.RoundNumber,
                 KitchenStationId = station.Id,
                 SubmittedByUserId = actor.UserId,
-                TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}",
+                // The human KOT number repeats each business day, so the unique
+                // internal ticket number carries the business date as well.
+                TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}-{round.BusinessDate:yyyyMMdd}",
                 KotNumber = round.KotNumber,
                 Priority = priority,
                 Status = initialStatus,
@@ -414,17 +416,42 @@ public sealed class LocalKitchenService
         }
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        if (items.Length > 0 &&
+            (!round.ExpoEnabled || (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
+                .ReadyOnlyKotEnabled))
+        {
+            var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+            AddChange(db, "order", order.Id, order.WaiterId,
+                await BasicOrderSnapshotAsync(db, order, cancellationToken));
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
     }
 
-    public async Task<object> ReadyItemAsync(
+    public Task<object> ReadyItemAsync(
         string ticketItemId,
         LocalTerminalPrincipal actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        ReadyItemInternalAsync(ticketItemId, actor, cancellationToken, directReady: false);
+
+    // Desktop one-tap READY. Preserve optional staged APIs and old KOT
+    // history, but let a kitchen operator directly mark queued dishes
+    // ready for waiter pickup even when an old round captured START/EXPO.
+    public Task<object> ReadyItemDirectAsync(
+        string ticketItemId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken) =>
+        ReadyItemInternalAsync(ticketItemId, actor, cancellationToken, directReady: true);
+
+    private async Task<object> ReadyItemInternalAsync(
+        string ticketItemId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken,
+        bool directReady)
     {
         EnsureKitchenRole(actor);
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
@@ -437,11 +464,26 @@ public sealed class LocalKitchenService
         var ticket = await RequireTicketAsync(db, item.KitchenTicketId, cancellationToken);
         var round = await RequireRoundAsync(db, ticket, cancellationToken);
 
-        await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken);
+        var wasReady = item.Status == "ready";
+        await ReadyItemCoreAsync(db, ticket, round, item.Id, actor, cancellationToken,
+            forceReady: directReady);
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        // TicketSnapshotAsync materializes AsNoTracking() records. Flush the
+        // updated kitchen item within the same transaction before reading
+        // the pickup payload, otherwise mobile may receive stale QUEUED JSON.
+        await db.SaveChangesAsync(cancellationToken);
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        // Notify the assigned waiter even when only one item of a larger KOT
+        // is ready and the aggregate order stays "submitted". Mobile/LAN
+        // pickup alerts derive their state from the kitchen_tickets snapshot.
+        if (!wasReady && item.Status == "ready")
+        {
+            var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+            AddChange(db, "order", order.Id, order.WaiterId,
+                await BasicOrderSnapshotAsync(db, order, cancellationToken));
+        }
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -484,6 +526,7 @@ public sealed class LocalKitchenService
 
         var now = DateTimeOffset.UtcNow;
         item.Status = "ready";
+        item.ReadyAt ??= now;
         var orderItem = await db.OrderItems
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
         orderItem.Status = "ready";
@@ -500,8 +543,12 @@ public sealed class LocalKitchenService
             new { ticket_id = ticket.Id, order_item_id = item.OrderItemId, round_number = ticket.RoundNumber });
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId,
+            await BasicOrderSnapshotAsync(db, order, cancellationToken));
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -872,7 +919,7 @@ public sealed class LocalKitchenService
             RoundNumber = round.RoundNumber,
             KitchenStationId = station.Id,
             SubmittedByUserId = actor.UserId,
-            TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}",
+            TicketNumber = $"{round.KotNumber}-{NormalizeCode(station.Code)}-{round.BusinessDate:yyyyMMdd}",
             KotNumber = round.KotNumber,
             Priority = "rush",
             Status = initialStatus,
@@ -1177,7 +1224,8 @@ public sealed class LocalKitchenService
         LocalKotRound round,
         string itemId,
         LocalTerminalPrincipal actor,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forceReady = false)
     {
         var item = await db.KitchenTicketItems
             .SingleAsync(value => value.Id == itemId, cancellationToken);
@@ -1194,39 +1242,40 @@ public sealed class LocalKitchenService
                 $"Kitchen item cannot move from {item.Status} to ready.");
         }
 
-        if (round.PreparingEnabled && item.Status != "preparing")
-        {
-            throw new LocalSyncConflictException(
-                "order_state_conflict",
-                "This KOT round uses the Preparing stage. Start the item before marking it ready.");
-        }
-
-        if (!round.PreparingEnabled && item.Status is not ("queued" or "active"))
-        {
-            throw new LocalSyncConflictException(
-                "order_state_conflict",
+        // For ready-only restaurants, use the current simplified kitchen mode
+        // even for older queued KOT rounds that captured Preparing / Expo.
+        // Preserve the round's history, but don't force an obsolete START
+        // before a waiter can receive the pickup notification.
+        var readyOnly = forceReady ||
+            (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
+            .ReadyOnlyKotEnabled;
+        if (!readyOnly && round.PreparingEnabled && item.Status is "queued" or "active")
+            throw new LocalSyncConflictException("order_state_conflict",
+                "Start preparation before marking this staged KOT ready.");
+        if (item.Status is not ("queued" or "active" or "preparing" or "expo"))
+            throw new LocalSyncConflictException("order_state_conflict",
                 $"Kitchen item cannot move from {item.Status} to ready.");
-        }
 
         var now = DateTimeOffset.UtcNow;
-        item.Status = round.ExpoEnabled ? "expo" : "ready";
-        item.ReadyAt ??= now;
+        var transferToExpo = !readyOnly && round.ExpoEnabled && item.Status == "preparing";
+        item.Status = transferToExpo ? "expo" : "ready";
+        if (!transferToExpo) item.ReadyAt ??= now;
 
         var orderItem = await db.OrderItems
             .SingleAsync(value => value.Id == item.OrderItemId, cancellationToken);
         orderItem.Status = item.Status;
         orderItem.UpdatedAtUtc = now;
 
-        if (!round.PreparingEnabled)
-        {
-            await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
-        }
+        // The inventory service deduplicates by kitchen production key.
+        // Committing here handles direct queued→ready and preserves prior
+        // consumption for tickets previously moved to Preparing.
+        await _inventory.CommitKitchenItemAsync(db, item, actor, cancellationToken);
 
         LocalOperationsControlService.AddAudit(
             db,
             actor,
             "kitchen",
-            round.ExpoEnabled ? "kitchen.item_sent_to_expo" : "kitchen.item_ready",
+            transferToExpo ? "kitchen.item_to_expo" : "kitchen.item_ready",
             null,
             "kitchen_ticket_item",
             item.Id,
@@ -1236,6 +1285,7 @@ public sealed class LocalKitchenService
                 order_item_id = item.OrderItemId,
                 round_number = ticket.RoundNumber,
                 expo_enabled = round.ExpoEnabled,
+                next_step = transferToExpo ? "expo" : "waiter_pickup",
             });
     }
 

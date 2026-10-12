@@ -14,6 +14,7 @@ use App\Models\InventoryBalance;
 use App\Models\InventoryItem;
 use App\Models\MenuItem;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\PurchaseOrder;
 use App\Models\Recipe;
 use App\Models\RestaurantBranch;
@@ -30,6 +31,7 @@ class DesktopReconciliationService
 {
     public function __construct(
         private readonly OrderService $orders,
+        private readonly OrderOperationsService $orderOperations,
         private readonly KitchenService $kitchen,
         private readonly CashierService $cashier,
         private readonly BillingService $billing,
@@ -228,6 +230,14 @@ class DesktopReconciliationService
             'order.item.add' => $this->addOrderItem($device, $actor, $localEntityId, $payload),
             'order.submit' => $this->submitOrder($device, $actor, $localEntityId, $payload),
             'order.serve' => $this->serveOrder($device, $actor, $localEntityId, $payload),
+            'order.cancel' => $this->cancelOrder($device, $actor, $localEntityId, $payload),
+            'order.guests.update' => $this->updateOrderGuests($device, $actor, $localEntityId, $payload),
+            'order.table.transfer' => $this->transferOrderTable($device, $actor, $localEntityId, $payload),
+            'order.merge' => $this->mergeCloudOrders($device, $actor, $localEntityId, $payload),
+            'order.item.move' => $this->moveOrderItems($device, $actor, $localEntityId, $payload),
+            'order.split' => $this->splitOrder($device, $actor, $localEntityId, $payload),
+            'order.item.void' => $this->voidOrderItem($device, $actor, $localEntityId, $payload),
+            'table.mark_available' => $this->markTableAvailable($device, $actor, $localEntityId, $payload),
             'cashier.session.open' => $this->openCashierSession($device, $actor, $localEntityId, $payload),
             'cashier.session.close' => $this->closeCashierSession($device, $actor, $localEntityId, $payload),
             'bill.issue' => $this->issueBill($device, $actor, $localEntityId, $payload),
@@ -266,6 +276,162 @@ class DesktopReconciliationService
     {
         $order = Order::query()->where('client_order_id', $payload['client_order_id'] ?? null)->firstOrFail();
         $line = $this->orders->addItem($order, $actor, $payload);
+        $this->link($device, 'order_item', $localId, $line->id);
+
+        return ['entity_type' => 'order_item', 'entity_id' => $line->id];
+    }
+
+    private function cancelOrder(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $order = Order::query()->where('client_order_id', $payload['client_order_id'] ?? null)->firstOrFail();
+        $order = $this->orderOperations->cancel(
+            $order,
+            $actor,
+            (string) ($payload['reason'] ?? 'Desktop cancellation'),
+        );
+        $this->link($device, 'order', $localId, $order->id);
+
+        return ['entity_type' => 'order', 'entity_id' => $order->id];
+    }
+
+    private function updateOrderGuests(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $order = Order::query()->where('client_order_id', $payload['client_order_id'] ?? null)->firstOrFail();
+        $order = $this->orderOperations->updateGuests(
+            $order,
+            $actor,
+            (int) ($payload['guest_count'] ?? 1),
+        );
+        $this->link($device, 'order', $localId, $order->id);
+
+        return ['entity_type' => 'order', 'entity_id' => $order->id];
+    }
+
+    private function markTableAvailable(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        // Tables synced from the tenant keep their cloud id locally; locally
+        // created ids use the reconciliation link when one exists.
+        $cloudId = $this->resolve($device, 'dining_table', $localId) ?? $localId;
+        $table = DiningTable::query()->findOrFail($cloudId);
+        $previous = $table->status;
+        $reason = (string) ($payload['reason'] ?? 'Management availability override');
+
+        $table = $this->orderOperations->releaseTableForManagement($table, $actor, $reason);
+
+        $this->link($device, 'dining_table', $localId, $table->id);
+        $this->storeOperationalRecord($device, $actor, 'table.availability_override', $localId, [
+            'dining_table_id' => $table->id,
+            'previous_status' => $previous,
+            'status' => $table->status,
+            'reason' => $reason,
+        ]);
+
+        return ['entity_type' => 'dining_table', 'entity_id' => $table->id];
+    }
+
+    private function transferOrderTable(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $order = Order::query()->where('client_order_id', $payload['client_order_id'] ?? null)->firstOrFail();
+        $localTableId = (string) ($payload['local_target_table_id'] ?? $payload['target_table_id'] ?? '');
+        $cloudTableId = $this->resolve($device, 'dining_table', $localTableId) ?? $localTableId;
+        $table = DiningTable::query()->findOrFail($cloudTableId);
+
+        $order = $this->orderOperations->transferTable($order, $table, $actor);
+
+        $this->link($device, 'order', $localId, $order->id);
+        $this->link($device, 'dining_table', $localTableId, $table->id);
+
+        return ['entity_type' => 'order', 'entity_id' => $order->id];
+    }
+
+    private function mergeCloudOrders(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $source = Order::query()->where('client_order_id', $payload['source_order_id'] ?? null)->firstOrFail();
+        $target = Order::query()->where('client_order_id', $payload['target_order_id'] ?? null)->firstOrFail();
+
+        $target = $this->orderOperations->mergeOrders($source, $target, $actor);
+
+        $this->link($device, 'order', $localId, $target->id);
+
+        return ['entity_type' => 'order', 'entity_id' => $target->id];
+    }
+
+    private function moveOrderItems(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $source = Order::query()->where('client_order_id', $payload['source_order_id'] ?? null)->firstOrFail();
+        $target = Order::query()->where('client_order_id', $payload['target_order_id'] ?? null)->firstOrFail();
+
+        $this->moveCloudLines($source, $target, $actor, (array) ($payload['lines'] ?? []));
+
+        $this->link($device, 'order', $localId, $target->id);
+
+        return ['entity_type' => 'order', 'entity_id' => $target->id];
+    }
+
+    private function splitOrder(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $source = Order::query()->where('client_order_id', $payload['source_order_id'] ?? null)->firstOrFail();
+        $localTableId = (string) ($payload['local_target_table_id'] ?? $payload['target_table_id'] ?? '');
+        $cloudTableId = $this->resolve($device, 'dining_table', $localTableId) ?? $localTableId;
+        $table = DiningTable::query()->findOrFail($cloudTableId);
+
+        $target = $this->orders->open($actor, [
+            'client_order_id' => (string) ($payload['target_order_id'] ?? ''),
+            'dining_table_id' => $table->id,
+            'service_type' => Order::SERVICE_DINE_IN,
+            'guest_count' => 1,
+            'notes' => 'Split from '.$source->client_order_id,
+        ]);
+
+        $this->link($device, 'order', $localId, $target->id);
+        $this->link($device, 'dining_table', $localTableId, $table->id);
+
+        $this->moveCloudLines($source, $target, $actor, (array) ($payload['lines'] ?? []));
+
+        return ['entity_type' => 'order', 'entity_id' => $target->id];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    private function moveCloudLines(Order $source, Order $target, TenantUser $actor, array $lines): void
+    {
+        foreach ($lines as $line) {
+            $sourceLine = OrderItem::query()
+                ->where('order_id', $source->id)
+                ->where('client_line_id', $line['client_line_id'] ?? null)
+                ->firstOrFail();
+
+            $this->orderOperations->moveUnsentItem(
+                $source,
+                $sourceLine,
+                $target,
+                $actor,
+                (int) ($line['quantity'] ?? 1),
+                ((string) ($line['target_client_line_id'] ?? '')) ?: null,
+            );
+        }
+
+        // Mirrors the desktop: an emptied source order closes and its table is
+        // released only when no other active order still needs it.
+        $this->orderOperations->closeIfEmpty($source, $actor);
+    }
+
+    private function voidOrderItem(DeviceActivation $device, TenantUser $actor, string $localId, array $payload): array
+    {
+        $order = Order::query()->where('client_order_id', $payload['client_order_id'] ?? null)->firstOrFail();
+        $line = OrderItem::query()
+            ->where('order_id', $order->id)
+            ->where('client_line_id', $payload['client_line_id'] ?? null)
+            ->firstOrFail();
+
+        $line = $this->orderOperations->voidOrderItem(
+            $order,
+            $line,
+            $actor,
+            (string) ($payload['reason'] ?? 'Desktop void'),
+        );
+
         $this->link($device, 'order_item', $localId, $line->id);
 
         return ['entity_type' => 'order_item', 'entity_id' => $line->id];
@@ -411,6 +577,7 @@ class DesktopReconciliationService
             (string) ($payload['quantity_delta'] ?? '0'),
             (string) ($payload['client_adjustment_id'] ?? $localId),
             (string) ($payload['reason'] ?? 'Desktop reconciliation'),
+            asManualConsumption: ($payload['consumption_method'] ?? null) === 'manual_stock_count',
         );
 
         $this->link($device, 'stock_movement', $localId, $movement->id);

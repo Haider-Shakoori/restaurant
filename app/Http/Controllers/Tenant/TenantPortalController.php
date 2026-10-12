@@ -24,6 +24,7 @@ use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
 use App\Services\Tenant\KitchenPerformanceService;
 use App\Services\Tenant\RestaurantSettingsService;
+use App\Services\Tenant\TenantRoleService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
@@ -237,11 +238,11 @@ class TenantPortalController extends Controller
         ]);
     }
 
-    public function users(): View
+    public function users(TenantRoleService $roles): View
     {
         return $this->view('tenant.users.index', [
             'users' => TenantUser::query()->orderBy('name')->get(),
-            'roles' => ['owner', 'admin', 'manager', 'waiter', 'cashier', 'kitchen', 'inventory'],
+            'roles' => $roles->roleNamesByKey(),
         ]);
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
@@ -20,6 +21,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly DesktopNoticeFeed _noticeFeed = new();
     private readonly List<DispatcherTimer> _noticeTimers = new();
 
+    [ObservableProperty] private string _tenantLabel = string.Empty;
+
     public string OperatorLabel => $"{_session.User.Name} · {_session.User.Role}";
     public bool CanViewDashboard => CanView("dashboard");
     public bool CanViewPos => CanView("pos");
@@ -34,6 +37,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public bool CanViewReports => CanView("reports");
     public bool CanViewUsers => CanView("users");
     public bool CanViewSettings => CanView("settings");
+    public bool CanViewModules => CanView("modules");
+    public bool CanViewCatalogMenu => CanViewMenu || CanViewRecipes;
+    public bool CanViewStockMenu => CanViewInventory || CanViewPurchases || CanViewExpenses || CanViewClosing;
+    public bool CanViewManageMenu => CanViewReports || CanViewUsers || CanViewSettings;
 
     private bool CanView(string route) =>
         RestaurantWorkspaceRoutes.CanOpen(_session.User.Role, route);
@@ -41,6 +48,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _pageTitle = "Dashboard";
     [ObservableProperty] private string _pageSubtitle = "Restaurant overview and today's operations";
     [ObservableProperty] private object? _currentPage;
+    [ObservableProperty] private bool _isWorkspaceLoading;
+    [ObservableProperty] private string _workspaceLoadingMessage = string.Empty;
     [ObservableProperty] private string _currentRoute = "dashboard";
     [ObservableProperty] private string _licenseText = "Checking license…";
     [ObservableProperty] private bool _hasWorkspaceError;
@@ -71,7 +80,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(AuthSession session)
     {
         _session = session ?? throw new ArgumentNullException(nameof(session));
-        CurrentRoute = RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
+        CurrentRoute = "modules";
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
         NavigateCommand = new AsyncRelayCommand<string>(NavigateAsync);
         ToggleThemeCommand = new RelayCommand(ToggleTheme);
@@ -143,8 +152,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public async Task InitializeAsync()
     {
         // Startup loads the dashboard once; the toolbar refresh additionally reloads the active page.
+        // Local operation comes first: never block opening the first page
+        // behind optional WAN/LAN or licensing diagnostics.
+        var activation = await new WindowsActivationStore().LoadAsync();
+        if (activation is not null)
+        {
+            var lease = new SignedLeaseVerifier().Verify(activation.Lease, activation.PublicKey);
+            TenantLabel = lease.TenantName ?? $"Restaurant {lease.TenantId}";
+        }
+        await NavigateAsync("modules");
         await RefreshDiagnosticsAsync();
-        await NavigateAsync(RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role));
     }
 
     private async Task RefreshAsync()
@@ -152,23 +169,32 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // Capture intent before diagnostics perform any I/O, so this refresh cannot
         // later overwrite a newer workspace navigation.
         var requestId = _pageRequests.Begin();
-        await RefreshDiagnosticsAsync();
-        if (!_pageRequests.IsCurrent(requestId))
-            return;
-
         var route = CurrentRoute;
+        var stopwatch = Stopwatch.StartNew();
+        IsWorkspaceLoading = true;
+        WorkspaceLoadingMessage = "Refreshing local " + route + " data…";
         try
         {
-            var refreshedPage = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            var refreshedPage = await CreatePageAsync(route);
             if (_pageRequests.IsCurrent(requestId) && CurrentRoute == route && CanView(route))
             {
                 CurrentPage = refreshedPage;
                 ClearWorkspaceError();
+                Trace.WriteLine($"[Restaurant] refresh {route}: {stopwatch.ElapsedMilliseconds} ms");
+                DesktopWorkspaceTiming.Record("refresh", route, stopwatch.ElapsedMilliseconds);
+                // Refresh network badges asynchronously AFTER publishing the
+                // local page. Never gate POS on a remote health check.
+                _ = RefreshDiagnosticsAsync();
             }
         }
         catch (Exception exception)
         {
             HandleWorkspaceLoadFailure(route, PageTitle, requestId, exception);
+        }
+        finally
+        {
+            if (_pageRequests.IsCurrent(requestId))
+                IsWorkspaceLoading = false;
         }
     }
 
@@ -237,6 +263,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(ThemeButtonText));
     }
 
+    private Task<System.Windows.FrameworkElement> CreatePageAsync(string route) => route == "modules"
+        ? Task.FromResult(ModuleHome.Create(_session.User.Role, NavigateCommand))
+        : RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+
     private async Task NavigateAsync(string? key)
     {
         var route = key ?? RestaurantWorkspaceRoutes.DefaultRoute(_session.User.Role);
@@ -245,9 +275,21 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         // A later refresh or navigation supersedes even a still-loading earlier route.
         var requestId = _pageRequests.Begin();
+        // Re-clicking the already active item need not rebuild its menu tiles,
+        // query SQLite or trigger image loads. Operators can use the explicit
+        // toolbar Refresh action when they require fresh source data.
+        if (CurrentPage is not null && CurrentRoute == route)
+        {
+            IsWorkspaceLoading = false;
+            return;
+        }
+        var stopwatch = Stopwatch.StartNew();
+        IsWorkspaceLoading = true;
+        WorkspaceLoadingMessage = "Opening " + route + "…";
 
         var (pageTitle, pageSubtitle) = route switch
         {
+            "modules" => ("All Modules", "Choose a workspace"),
             "dashboard" => ("Dashboard", "Restaurant overview and today's operations"),
             "pos" => ("POS & Orders", "Orders, menu and cashier workflow"),
             "tables" => ("Tables & Floor", "Live table occupancy and dining areas"),
@@ -269,7 +311,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         // page must not appear under a misleading new navigation title.
         try
         {
-            var page = await RestaurantOperationalPages.CreateAsync(route, _diagnostics);
+            var page = await CreatePageAsync(route);
             if (!_pageRequests.IsCurrent(requestId))
                 return;
 
@@ -278,10 +320,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
             CurrentPage = page;
             CurrentRoute = route;
             ClearWorkspaceError();
+            Trace.WriteLine($"[Restaurant] navigation {route}: {stopwatch.ElapsedMilliseconds} ms");
+            DesktopWorkspaceTiming.Record("navigation", route, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception)
         {
             HandleWorkspaceLoadFailure(route, pageTitle, requestId, exception);
+        }
+        finally
+        {
+            if (_pageRequests.IsCurrent(requestId))
+                IsWorkspaceLoading = false;
         }
     }
 }

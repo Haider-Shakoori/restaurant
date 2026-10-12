@@ -132,8 +132,8 @@ class MobileOfflineSyncTest extends TestCase
             ->assertJsonCount(1, 'data.menu')
             ->json('data');
 
-        $this->assertSame(
-            "http://{$domain}/media/menu-items/{$menuItem->id}",
+        $this->assertStringStartsWith(
+            "http://{$domain}/media/menu-items/{$menuItem->id}?v=",
             $bootstrap['menu'][0]['items'][0]['image_url'],
         );
 
@@ -655,6 +655,268 @@ class MobileOfflineSyncTest extends TestCase
         $this->assertSame(DiningTable::STATUS_OCCUPIED, $tableTwo->fresh()->status);
         $this->assertSame(DiningTable::STATUS_AVAILABLE, $tableThree->fresh()->status);
 
+        tenancy()->end();
+    }
+
+    public function test_desktop_cancel_guest_updates_and_table_override_keep_cloud_occupancy_accurate(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'desktop-occupancy-device');
+
+        tenancy()->initialize($tenant);
+        [$waiter, $table] = $this->seedRestaurant('waiter-occupancy@restaurant.test');
+        $actorPublicId = $waiter->public_id;
+        tenancy()->end();
+
+        $token = $this->login($domain, 'waiter-occupancy@restaurant.test');
+        $headers = $this->syncHeaders($token, $credentials);
+        $push = fn (array $mutation) => $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/desktop/reconcile/push", ['mutations' => [$mutation]]);
+
+        $mutation = fn (string $id, string $operation, string $localId, array $payload) => [
+            'mutation_id' => $id,
+            'operation' => $operation,
+            'entity_type' => $operation === 'table.mark_available' ? 'dining_table' : 'order',
+            'local_entity_id' => $localId,
+            'actor_public_id' => $actorPublicId,
+            'occurred_at' => now()->utc()->toIso8601String(),
+            'payload' => $payload,
+        ];
+
+        $push($mutation('OCC-OPEN-1', 'order.open', 'occ-local-order-1', [
+            'client_order_id' => 'OCC-1', 'dining_table_id' => $table->id, 'guest_count' => 1,
+        ]))->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        $push($mutation('OCC-GUESTS-1', 'order.guests.update', 'occ-local-order-1', [
+            'client_order_id' => 'OCC-1', 'guest_count' => 4,
+        ]))->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        // A legacy second unsettled order on the same table (created before
+        // this guard existed) must keep the table occupied after one cancel.
+        tenancy()->initialize($tenant);
+        Order::query()->create([
+            'client_order_id' => 'OCC-2',
+            'branch_id' => DiningArea::query()->whereKey($table->dining_area_id)->value('branch_id'),
+            'dining_table_id' => $table->id,
+            'waiter_id' => $waiter->id,
+            'service_type' => Order::SERVICE_DINE_IN,
+            'status' => Order::STATUS_DRAFT,
+            'guest_count' => 2,
+            'subtotal' => '0.00',
+            'total' => '0.00',
+            'opened_at' => now(),
+        ]);
+        tenancy()->end();
+
+        $push($mutation('OCC-CANCEL-1', 'order.cancel', 'occ-local-order-1', [
+            'client_order_id' => 'OCC-1', 'reason' => 'Guest left without ordering',
+        ]))->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        tenancy()->initialize($tenant);
+        $cancelled = Order::query()->where('client_order_id', 'OCC-1')->sole();
+        $this->assertSame(Order::STATUS_CANCELLED, $cancelled->status);
+        $this->assertSame(4, (int) $cancelled->guest_count);
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $table->fresh()->status);
+        tenancy()->end();
+
+        // Unpaid remaining order blocks the manual override.
+        $push($mutation('OCC-OVERRIDE-1', 'table.mark_available', $table->id, [
+            'reason' => 'Stale occupancy',
+        ]))->assertOk()->assertJsonPath('data.results.0.status', 'conflict');
+
+        $push($mutation('OCC-CANCEL-2', 'order.cancel', 'occ-local-order-2', [
+            'client_order_id' => 'OCC-2', 'reason' => 'Party finished',
+        ]))->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        tenancy()->initialize($tenant);
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
+
+        $manager = TenantUser::query()->create([
+            'public_id' => (string) Str::ulid(),
+            'name' => 'Floor Manager',
+            'email' => 'manager-occupancy@restaurant.test',
+            'password' => 'password123',
+            'is_active' => true,
+            'role' => 'manager',
+        ]);
+        $managerPublicId = $manager->public_id;
+        // Simulate stale occupancy: occupied with no active order.
+        $table->update(['status' => DiningTable::STATUS_OCCUPIED]);
+        tenancy()->end();
+
+        $managerHeaders = $this->syncHeaders(
+            $this->login($domain, 'manager-occupancy@restaurant.test'),
+            $credentials,
+        );
+
+        $this->withHeaders($managerHeaders)
+            ->postJson("http://{$domain}/api/v1/desktop/reconcile/push", ['mutations' => [[
+                'mutation_id' => 'OCC-OVERRIDE-2',
+                'operation' => 'table.mark_available',
+                'entity_type' => 'dining_table',
+                'local_entity_id' => $table->id,
+                'actor_public_id' => $managerPublicId,
+                'occurred_at' => now()->utc()->toIso8601String(),
+                'payload' => ['reason' => 'Stale occupancy confirmed'],
+            ]]])
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted');
+
+        tenancy()->initialize($tenant);
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
+        $audit = \App\Models\DesktopOperationalRecord::query()
+            ->where('record_type', 'table.availability_override')
+            ->latest('occurred_at')
+            ->firstOrFail();
+        $this->assertSame('Stale occupancy confirmed', $audit->payload['reason']);
+        $this->assertSame('occupied', $audit->payload['previous_status']);
+        tenancy()->end();
+    }
+
+    public function test_desktop_transfer_merge_split_and_void_reconcile_to_the_tenant(): void
+    {
+        [$business, $domain, $tenant] = $this->createActiveBusiness();
+        $credentials = $this->activateDevice($business, $domain, 'desktop-cashier-ops-device');
+
+        tenancy()->initialize($tenant);
+        [$waiter, $table, $menuItem] = $this->seedRestaurant('waiter-cashier-ops@restaurant.test');
+        $extraTables = [];
+        foreach (['T-02', 'T-03', 'T-04', 'T-05'] as $code) {
+            $extraTables[$code] = DiningTable::query()->create([
+                'dining_area_id' => $table->dining_area_id,
+                'code' => $code,
+                'name' => $code,
+                'capacity' => 4,
+                'status' => DiningTable::STATUS_AVAILABLE,
+                'is_active' => true,
+            ]);
+        }
+        $actorPublicId = $waiter->public_id;
+        tenancy()->end();
+
+        $headers = $this->syncHeaders($this->login($domain, 'waiter-cashier-ops@restaurant.test'), $credentials);
+        $push = fn (array $mutation) => $this->withHeaders($headers)
+            ->postJson("http://{$domain}/api/v1/desktop/reconcile/push", ['mutations' => [$mutation]]);
+        $accepted = function ($response): array {
+            $result = $response->assertOk()->json('data.results.0');
+            $this->assertSame('accepted', $result['status'] ?? '', (string) ($result['message'] ?? ''));
+
+            return $result;
+        };
+        $mutation = fn (string $id, string $operation, string $localId, array $payload) => [
+            'mutation_id' => $id,
+            'operation' => $operation,
+            'entity_type' => 'order',
+            'local_entity_id' => $localId,
+            'actor_public_id' => $actorPublicId,
+            'occurred_at' => now()->utc()->toIso8601String(),
+            'payload' => $payload,
+        ];
+
+        // Order 1 on T-01 with one line, then transfer to T-02.
+        $accepted($push($mutation('B8-OPEN-1', 'order.open', 'b8-o1', [
+            'client_order_id' => 'B8-1', 'dining_table_id' => $table->id, 'guest_count' => 2,
+        ])));
+        $accepted($push($mutation('B8-ADD-1', 'order.item.add', 'b8-l1', [
+            'client_order_id' => 'B8-1', 'menu_item_id' => $menuItem->id,
+            'quantity' => 1, 'client_line_id' => 'B8-L1',
+        ])));
+        $accepted($push($mutation('B8-TRANSFER-1', 'order.table.transfer', 'b8-o1', [
+            'client_order_id' => 'B8-1',
+            'target_table_id' => $extraTables['T-02']->id,
+            'local_target_table_id' => $extraTables['T-02']->id,
+        ])));
+
+        tenancy()->initialize($tenant);
+        $this->assertSame(
+            $extraTables['T-02']->id,
+            Order::query()->where('client_order_id', 'B8-1')->value('dining_table_id'),
+        );
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $extraTables['T-02']->fresh()->status);
+        tenancy()->end();
+
+        // Order 2 on T-03 absorbs the line; the emptied source closes and frees T-02.
+        $accepted($push($mutation('B8-OPEN-2', 'order.open', 'b8-o2', [
+            'client_order_id' => 'B8-2', 'dining_table_id' => $extraTables['T-03']->id, 'guest_count' => 1,
+        ])));
+        $accepted($push($mutation('B8-MOVE-1', 'order.item.move', 'b8-o2', [
+            'source_order_id' => 'B8-1',
+            'target_order_id' => 'B8-2',
+            'lines' => [[
+                'client_line_id' => 'B8-L1',
+                'target_client_line_id' => 'B8-2-B8-L1',
+                'quantity' => 1,
+            ]],
+        ])));
+
+        tenancy()->initialize($tenant);
+        $this->assertSame('250.00', Order::query()->where('client_order_id', 'B8-2')->value('total'));
+        $this->assertSame(Order::STATUS_CLOSED, Order::query()->where('client_order_id', 'B8-1')->value('status'));
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $extraTables['T-02']->fresh()->status);
+        tenancy()->end();
+
+        // Split the moved line onto T-04 under a new order.
+        $accepted($push($mutation('B8-SPLIT-1', 'order.split', 'b8-o3', [
+            'source_order_id' => 'B8-2',
+            'target_order_id' => 'B8-3',
+            'target_table_id' => $extraTables['T-04']->id,
+            'local_target_table_id' => $extraTables['T-04']->id,
+            'lines' => [[
+                'client_line_id' => 'B8-2-B8-L1',
+                'target_client_line_id' => 'B8-3-B8-2-B8-L1',
+                'quantity' => 1,
+            ]],
+        ])));
+
+        tenancy()->initialize($tenant);
+        $split = Order::query()->where('client_order_id', 'B8-3')->sole();
+        $this->assertSame('250.00', $split->total);
+        $this->assertSame(1, $split->items()->count());
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $extraTables['T-04']->fresh()->status);
+        $this->assertSame(Order::STATUS_CLOSED, Order::query()->where('client_order_id', 'B8-2')->value('status'));
+        tenancy()->end();
+
+        // Voiding the split line removes it from cloud totals.
+        $accepted($push($mutation('B8-VOID-1', 'order.item.void', 'b8-l-split', [
+            'client_order_id' => 'B8-3',
+            'client_line_id' => 'B8-3-B8-2-B8-L1',
+            'reason' => 'Guest changed their mind',
+        ])));
+
+        tenancy()->initialize($tenant);
+        $split = Order::query()->where('client_order_id', 'B8-3')->sole();
+        $this->assertSame('0.00', $split->total);
+        $this->assertSame('voided', $split->items()->sole()->status);
+        tenancy()->end();
+
+        // Merge: an active order on T-01 folds into an order on T-03.
+        $accepted($push($mutation('B8-OPEN-3', 'order.open', 'b8-o4', [
+            'client_order_id' => 'B8-4', 'dining_table_id' => $table->id, 'guest_count' => 2,
+        ])));
+        $accepted($push($mutation('B8-ADD-2', 'order.item.add', 'b8-l4', [
+            'client_order_id' => 'B8-4', 'menu_item_id' => $menuItem->id,
+            'quantity' => 2, 'client_line_id' => 'B8-L4',
+        ])));
+        $accepted($push($mutation('B8-OPEN-4', 'order.open', 'b8-o5', [
+            'client_order_id' => 'B8-5', 'dining_table_id' => $extraTables['T-03']->id, 'guest_count' => 1,
+        ])));
+        $accepted($push($mutation('B8-ADD-3', 'order.item.add', 'b8-l5', [
+            'client_order_id' => 'B8-5', 'menu_item_id' => $menuItem->id,
+            'quantity' => 1, 'client_line_id' => 'B8-L5',
+        ])));
+        $accepted($push($mutation('B8-MERGE-1', 'order.merge', 'b8-o5', [
+            'source_order_id' => 'B8-4',
+            'target_order_id' => 'B8-5',
+        ])));
+
+        tenancy()->initialize($tenant);
+        $target = Order::query()->where('client_order_id', 'B8-5')->sole();
+        $this->assertSame('750.00', $target->total);
+        $this->assertSame(2, $target->items()->count());
+        $this->assertSame(Order::STATUS_CANCELLED, Order::query()->where('client_order_id', 'B8-4')->value('status'));
+        $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
+        $this->assertSame(DiningTable::STATUS_OCCUPIED, $extraTables['T-03']->fresh()->status);
         tenancy()->end();
     }
 

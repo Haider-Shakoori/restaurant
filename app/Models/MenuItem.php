@@ -48,7 +48,26 @@ class MenuItem extends Model
             return null;
         }
 
-        return url('/media/menu-items/'.$this->getKey());
+        // The content version keeps immutable browser/desktop caches safe:
+        // replacing an image stores a new path (and even an in-place file
+        // replacement changes size/mtime), so stale bytes are never served.
+        return url('/media/menu-items/'.$this->getKey().'?v='.$this->imageVersion());
+    }
+
+    private function imageVersion(): string
+    {
+        $signature = (string) $this->image_path;
+
+        try {
+            $disk = \Illuminate\Support\Facades\Storage::disk('public');
+            if ($disk->exists($this->image_path)) {
+                $signature .= '|'.$disk->lastModified($this->image_path).'|'.$disk->size($this->image_path);
+            }
+        } catch (\Throwable) {
+            // Remote/unsupported disks fall back to the stored path version.
+        }
+
+        return substr(sha1($signature), 0, 12);
     }
 
     public function category(): BelongsTo

@@ -13,7 +13,9 @@ public static class RestaurantWorkspaceRoutes
         if (string.IsNullOrEmpty(normalizedRole) || string.IsNullOrEmpty(normalizedRoute))
             return false;
 
-        if (normalizedRole is RestaurantRoles.Owner or RestaurantRoles.Manager)
+        if (normalizedRoute == "modules")
+            return normalizedRole is "owner" or "admin" or "manager" or "cashier" or "waiter" or "kitchen" or "expo";
+        if (normalizedRole is RestaurantRoles.Owner or RestaurantRoles.Admin or RestaurantRoles.Manager)
         {
             return normalizedRoute is "dashboard" or "pos" or "tables" or
                 "kitchen" or "menu" or "recipes" or "inventory" or "purchases" or "expenses" or

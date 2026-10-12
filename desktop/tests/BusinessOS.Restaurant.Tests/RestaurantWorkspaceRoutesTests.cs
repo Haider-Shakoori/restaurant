@@ -7,6 +7,9 @@ public sealed class RestaurantWorkspaceRoutesTests
 {
     [Theory]
     [InlineData("owner", "settings", true)]
+    [InlineData("admin", "users", true)]
+    [InlineData("admin", "settings", true)]
+    [InlineData("admin", "pos", true)]
     [InlineData("manager", "purchases", true)]
     [InlineData("owner", "recipes", true)]
     [InlineData("manager", "recipes", true)]
@@ -22,12 +25,22 @@ public sealed class RestaurantWorkspaceRoutesTests
     [InlineData("kitchen", "dashboard", false)]
     [InlineData("kitchen", "pos", false)]
     [InlineData("unknown", "settings", false)]
+    [InlineData("owner", "modules", true)]
+    [InlineData("kitchen", "modules", true)]
+    [InlineData("unknown", "modules", false)]
     [InlineData(null, "pos", false)]
     [InlineData("owner", "invalid", false)]
     public void Only_authorized_workspaces_are_visible_and_navigable(
         string? role, string route, bool allowed)
     {
         Assert.Equal(allowed, RestaurantWorkspaceRoutes.CanOpen(role, route));
+    }
+
+    [Fact]
+    public void Every_valid_operator_can_open_the_module_home()
+    {
+        foreach (var role in new[] { "owner", "manager", "cashier", "waiter", "kitchen", "expo" })
+            Assert.True(RestaurantWorkspaceRoutes.CanOpen(role, "modules"));
     }
 
     [Fact]

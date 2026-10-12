@@ -27,7 +27,10 @@ class SyncCoordinator {
     );
 
     _timer ??= Timer.periodic(
-      const Duration(seconds: 30),
+      // Foreground mobile pickup alerts need fresh LAN/cloud KOT state.
+      // 10-second sync plus the existing 6-second local alert refresh
+      // provides timely notification without continuous HTTP polling.
+      const Duration(seconds: 10),
       (_) => unawaited(_safeSync()),
     );
   }

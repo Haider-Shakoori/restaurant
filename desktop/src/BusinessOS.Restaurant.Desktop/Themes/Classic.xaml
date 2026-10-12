@@ -1,12 +1,11 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:effects="clr-namespace:System.Windows.Media.Effects;assembly=PresentationCore">
-    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F7FB" />
-    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#F4F7FB" />
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F8FAFC" />
+    <SolidColorBrush x:Key="ShellBackdropOverlayBrush" Color="#F8FAFC" />
     <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="SidebarBrush" Color="#FFFFFFFF" />
     <SolidColorBrush x:Key="TopBarBrush" Color="#FFFFFFFF" />
-    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F4F7FB" />
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F8FAFC" />
     <!-- Theme-aware white-glass workspace shared by Settings and Kitchen/KOT. -->
     <SolidColorBrush x:Key="WorkspaceFrostedBackgroundBrush" Color="#00FFFFFF" />
     <SolidColorBrush x:Key="WorkspaceFrostedBorderBrush" Color="#00FFFFFF" />
@@ -29,24 +28,28 @@
     <SolidColorBrush x:Key="TextMutedBrush" Color="#64748B" />
     <SolidColorBrush x:Key="BorderBrush" Color="#E2E8F0" />
     <SolidColorBrush x:Key="BorderStrongBrush" Color="#CBD5E1" />
-    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#0B82F6" />
-    <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#E8F3FF" />
+    <SolidColorBrush x:Key="BrandPrimaryBrush" Color="#F97316" />
+    <SolidColorBrush x:Key="BrandPrimarySoftBrush" Color="#FFF1E6" />
     <SolidColorBrush x:Key="WarningBrush" Color="#B45309" />
     <SolidColorBrush x:Key="WarningSoftBrush" Color="#FFFBEB" />
     <SolidColorBrush x:Key="ErrorBrush" Color="#B91C1C" />
     <SolidColorBrush x:Key="ErrorSoftBrush" Color="#FEF2F2" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#169B62" />
     <SolidColorBrush x:Key="SuccessSoftBrush" Color="#ECFDF5" />
-    <SolidColorBrush x:Key="HoverBrush" Color="#F1F5F9" />
-    <!-- Solid accessible actions. Both themes provide the exact same brush keys. -->
-    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#2563EB" />
-    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#1D4ED8" />
-    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#1E40AF" />
-    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#1D4ED8" />
-    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#60A5FA" />
-    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#FFF7ED" />
+    <!-- Sign-in photography stays crisp; Classic keeps it invisible. -->
+    <SolidColorBrush x:Key="LoginScrimBrush" Color="#00FFFFFF" />
+    <!-- Solid accessible actions. Both themes provide the exact same brush keys.
+         Orange leads the brand; dark charcoal text keeps every state at or
+         above the 4.5:1 contrast guard. -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#F97316" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#EA580C" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#D97706" />
+    <SolidColorBrush x:Key="ButtonOutlineBrush" Color="#EA580C" />
+    <SolidColorBrush x:Key="ButtonFocusBrush" Color="#1F2937" />
+    <SolidColorBrush x:Key="ButtonForegroundBrush" Color="#111827" />
     <SolidColorBrush x:Key="ButtonSecondaryBackgroundBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#EFF6FF" />
+    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#FFF7ED" />
     <SolidColorBrush x:Key="ButtonSecondaryPressedBrush" Color="#DBEAFE" />
     <SolidColorBrush x:Key="ButtonSecondaryOutlineBrush" Color="#CBD5E1" />
     <SolidColorBrush x:Key="ButtonSecondaryForegroundBrush" Color="#0F172A" />

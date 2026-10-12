@@ -2,6 +2,7 @@
 
 use App\Http\Middleware\EnsureActivePlatformAdmin;
 use App\Http\Middleware\EnsureRestaurantModuleEnabled;
+use App\Http\Middleware\EnsureTenantPermission;
 use App\Http\Middleware\EnsureTenantRole;
 use App\Http\Middleware\EnsureTenantSubscriptionActive;
 use App\Http\Middleware\RequirePlanFeature;
@@ -25,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'subscription.active' => EnsureTenantSubscriptionActive::class,
             'plan.feature' => RequirePlanFeature::class,
             'tenant.role' => EnsureTenantRole::class,
+            'tenant.permission' => EnsureTenantPermission::class,
             'tenant.web.guard' => UseTenantWebGuard::class,
         ]);
 

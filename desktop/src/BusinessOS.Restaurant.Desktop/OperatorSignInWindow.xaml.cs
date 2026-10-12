@@ -15,15 +15,19 @@ public partial class OperatorSignInWindow : Window
 
     public AuthSession? SignedInSession { get; private set; }
 
-    public OperatorSignInWindow(string licensedTenantId, string? tenantBaseUrl)
+    public OperatorSignInWindow(string licensedTenantId, string? tenantBaseUrl,
+        string? licensedTenantName = null)
     {
         _licensedTenantId = licensedTenantId;
         InitializeComponent();
+        LicensedRestaurantText.Text = string.IsNullOrWhiteSpace(licensedTenantName)
+            ? $"Restaurant {licensedTenantId}"
+            : licensedTenantName;
         TenantUrlBox.Text = tenantBaseUrl ?? string.Empty;
+        TenantUrlBox.IsReadOnly = true;
         RestaurantBackdrop.Visibility = ThemeManager.Current == AppearanceTheme.Glass
             ? Visibility.Visible : Visibility.Collapsed;
-        Loaded += (_, _) => (string.IsNullOrWhiteSpace(TenantUrlBox.Text)
-            ? TenantUrlBox : EmailBox).Focus();
+        Loaded += (_, _) => EmailBox.Focus();
     }
 
     private async void OnSignInClick(object sender, RoutedEventArgs e)

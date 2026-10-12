@@ -25,17 +25,50 @@ public sealed class KitchenBoardPresentationTests
     }
 
     [Fact]
-    public void Existing_kot_state_transitions_and_kitchen_timer_are_retained()
+    public void Kitchen_has_only_ready_actions_and_retains_timer_and_mobile_alerts()
     {
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
 
-        Assert.Contains("workflow.StartKitchenItemAsync(", source);
-        Assert.Contains("workflow.MarkKitchenItemReadyAsync(", source);
-        Assert.Contains("workflow.PassExpoItemAsync(", source);
-        Assert.Contains("await workflow.RefireKitchenItemAsync(", source);
+        Assert.DoesNotContain("workflow.StartKitchenItemAsync(", source);
+        Assert.DoesNotContain("Button(\"START\")", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.Contains("KotTopReadyButton", source);
+        Assert.Contains("KotTopActionToolbar", source);
+        Assert.Contains("KotIndependentContentScroll", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.DoesNotContain("Button(\"RE-FIRE\")", source);
+        Assert.DoesNotContain("Button(\"RECALL\")", source);
+        Assert.DoesNotContain("Button(\"MARK WASTE\")", source);
+        Assert.Contains("DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25))", source);
+        Assert.Contains("kitchenWritesInProgress > 0", source);
+        Assert.Contains("DesktopUiWork.RunAsync(async () =>", source);
         Assert.Contains("pollTimer.Start();", source);
         Assert.Contains("ageTimer.Start();", source);
+    }
+
+    [Fact]
+    public void Ready_only_kot_is_the_only_visible_kitchen_mode_with_legacy_api_compatibility()
+    {
+        var root = RepositoryRoot();
+        var view = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
+        var service = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.LocalServer", "LocalRestaurantSettingsService.cs"));
+        var kitchen = File.ReadAllText(Path.Combine(root, "desktop", "src",
+            "BusinessOS.Restaurant.LocalServer", "LocalKitchenService.cs"));
+
+        Assert.Contains("SettingsReadyOnlyKot", view);
+        Assert.Contains("One-touch KOT: READY alerts the waiter (always enabled)", view);
+        Assert.Contains("false, // Ready-only KOT has no START action.", view);
+        Assert.Contains("false, // Expo is not part of the restaurant's workflow.", view);
+        Assert.DoesNotContain("var preparing = new CheckBox", view);
+        Assert.DoesNotContain("var expo = new CheckBox", view);
+        Assert.Contains("public bool ReadyOnlyKotEnabled", service);
+        Assert.Contains("PreparingStageEnabled: true", service);
+        Assert.Contains("round.PreparingEnabled", kitchen);
+        Assert.Contains("transferToExpo", kitchen);
+        Assert.Contains("next_step = transferToExpo ? \"expo\" : \"waiter_pickup\"", kitchen);
     }
 
     [Fact]
@@ -44,14 +77,18 @@ public sealed class KitchenBoardPresentationTests
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
         Assert.Contains("label.Text = currentStatus == \"ready\" ? \"PICKUP\" : \"SERVED\"", source);
-        Assert.Contains("Ready for pickup. The waiter delivers the food", source);
+        // Ready cards are intentionally lean: the long pickup instruction was
+        // removed as extra text; the handoff lives once in the board panel and
+        // the duplicate READY chip is skipped inside the ready column.
+        Assert.DoesNotContain("Ready for pickup. The waiter delivers the food", source);
+        Assert.Contains("if (row.Status != \"ready\")", source);
         Assert.Contains("OPEN POS & ORDERS · MARK SERVED", source);
         Assert.Contains("row.Status == \"ready\"", source);
         Assert.Contains("role", source, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("workflow.PassExpoItemAsync(row.ItemId)", source);
-        Assert.Contains("workflow.RecallKitchenItemAsync(", source);
-        Assert.Contains("workflow.RecordKitchenWasteAsync(", source);
-        Assert.Contains("workflow.RefireKitchenItemAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(row.ItemId, token)", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
+        Assert.Contains("workflow.MarkKitchenItemReadyDirectAsync(", source);
     }
 
     [Fact]
@@ -66,6 +103,32 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("_save.IsEnabled = available && _hasValidBranch", source);
         Assert.Contains("if (!_cloudAvailable)", source);
         Assert.Contains("No active branch on the tenant", source);
+    }
+
+    [Fact]
+    public void Order_placed_and_ready_play_distinct_alerts()
+    {
+        var root = Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop");
+        var sounds = File.ReadAllText(Path.Combine(root, "OperationalAlertSounds.cs"));
+        // Two clearly different tones so staff never confuse a new order with
+        // a ready-for-pickup dish.
+        Assert.Contains("public static void OrderPlaced()", sounds);
+        Assert.Contains("public static void OrderReady()", sounds);
+        Assert.Contains("SystemSounds.Exclamation", sounds);
+        Assert.Contains("SystemSounds.Asterisk", sounds);
+
+        // Sending an order to the kitchen is audible on the floor...
+        var workflow = File.ReadAllText(Path.Combine(root,
+            "DesktopRestaurantWorkflowService.cs"));
+        Assert.Contains("OperationalAlertSounds.OrderPlaced()", workflow);
+
+        // ...and a dish becoming ready (locally or from another LAN terminal)
+        // rings the pickup cue on the kitchen board exactly once.
+        var views = File.ReadAllText(Path.Combine(root, "OperationalActionViews.cs"));
+        Assert.Contains("OperationalAlertSounds.OrderReady()", views);
+        Assert.Contains("knownReadyIds", views);
+        Assert.Contains("!knownReadyIds.Contains(row.ItemId)", views);
     }
 
     private static string RepositoryRoot()

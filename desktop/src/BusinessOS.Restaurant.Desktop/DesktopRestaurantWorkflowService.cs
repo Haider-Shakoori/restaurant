@@ -32,6 +32,12 @@ public sealed class DesktopRestaurantWorkflowService
         var session = await _sessions.LoadAsync(token)
             ?? throw new InvalidOperationException("Sign in to the Restaurant desktop before running operational actions.");
 
+        var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync(token)
+            ?? throw new UnauthorizedAccessException("Activation is missing.");
+        var lease = new BusinessOS.Restaurant.Licensing.SignedLeaseVerifier().Verify(activation.Lease, activation.PublicKey);
+        if (session.TenantId != lease.TenantId || lease.OfflineValidUntil <= DateTimeOffset.UtcNow ||
+            lease.SubscriptionEndsAt <= DateTimeOffset.UtcNow)
+            throw new UnauthorizedAccessException("Session does not match a valid licensed restaurant.");
         return new LocalTerminalPrincipal(
             $"desktop-{Environment.MachineName}".ToLowerInvariant(),
             session.User.Id,
@@ -135,6 +141,18 @@ public sealed class DesktopRestaurantWorkflowService
         return clientOrderId;
     }
 
+    public async Task UpdateGuestsAsync(string clientOrderId, int totalGuests, CancellationToken token = default)
+    {
+        if (totalGuests is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(totalGuests), "Guest count must be between 1 and 100.");
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            client_order_id = clientOrderId,
+            guest_count = totalGuests,
+        });
+        await PushSingleAsync("order.guests.update", payload, token);
+    }
+
     public async Task AddItemAsync(string clientOrderId, string menuItemId, int quantity, string? notes = null, CancellationToken token = default)
         => await AddItemAsync(
             clientOrderId,
@@ -228,6 +246,12 @@ public sealed class DesktopRestaurantWorkflowService
     {
         var payload = JsonSerializer.SerializeToElement(new { client_order_id = clientOrderId });
         await PushSingleAsync("order.kot.send", payload, token);
+        // Audible confirmation that the floor sent an order to the kitchen.
+        // Honors the restaurant's KOT sound setting and never blocks the send.
+        if ((await _settings.GetAsync(token)).KotSoundEnabled)
+        {
+            OperationalAlertSounds.OrderPlaced();
+        }
     }
 
     public async Task FireCourseAsync(
@@ -282,6 +306,9 @@ public sealed class DesktopRestaurantWorkflowService
 
     public async Task MarkKitchenItemReadyAsync(string itemId, CancellationToken token = default)
         => _ = await _kitchen.ReadyItemAsync(itemId, await CurrentPrincipalAsync(token), token);
+
+    public async Task MarkKitchenItemReadyDirectAsync(string itemId, CancellationToken token = default)
+        => _ = await _kitchen.ReadyItemDirectAsync(itemId, await CurrentPrincipalAsync(token), token);
 
     public async Task PassExpoItemAsync(string itemId, CancellationToken token = default)
         => _ = await _kitchen.PassExpoItemAsync(itemId, await CurrentPrincipalAsync(token), token);

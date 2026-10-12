@@ -14,8 +14,13 @@ public sealed class RecipeWorkspaceNavigationTests
         var recipes = shell.Descendants().Single(x =>
             x.Name.LocalName == "Button" &&
             (string?)x.Attribute("CommandParameter") == "recipes");
-        Assert.Equal("▤   Recipes & Food Cost",
-            (string?)recipes.Attribute("Content"));
+        Assert.Equal("Recipes & Food Cost", (string?)recipes.Attribute("AutomationProperties.Name"));
+        Assert.Contains(recipes.Descendants(), element =>
+            element.Name.LocalName == "TextBlock" &&
+            (string?)element.Attribute("Text") == "Recipes & Food Cost");
+        Assert.Contains(recipes.Descendants(), element =>
+            element.Name.LocalName == "TextBlock" &&
+            (string?)element.Attribute("FontFamily") == "Segoe MDL2 Assets");
         Assert.Contains("CanViewRecipes", (string?)recipes.Attribute("Visibility"));
     }
 
@@ -27,7 +32,9 @@ public sealed class RecipeWorkspaceNavigationTests
             "BusinessOS.Restaurant.Desktop", "RestaurantOperationalPages.cs"));
         Assert.Contains("\"recipes\" => await MenuAsync(recipesOnly: true)", source);
         Assert.Contains("route == \"recipes\" && !modules.RecipesEnabled", source);
-        Assert.Contains("var recipeRows = await (from version in db.Recipes.AsNoTracking()", source);
+        Assert.Contains("var recipeRows = await DesktopUiWork.RunAsync(async () =>", source);
+        Assert.Contains("await using var recipeDb = factory.Create();", source);
+        Assert.Contains("from version in recipeDb.Recipes.AsNoTracking()", source);
         Assert.Contains("panel.Children.Add(recipeGrid)", source);
         Assert.Contains("View Recipes", source);
         Assert.Contains("+ Create Recipe Version", source);

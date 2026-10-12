@@ -3,6 +3,7 @@ namespace BusinessOS.Restaurant.Authentication;
 public static class RestaurantRoles
 {
     public const string Owner = "owner";
+    public const string Admin = "admin";
     public const string Manager = "manager";
     public const string Cashier = "cashier";
     public const string Waiter = "waiter";

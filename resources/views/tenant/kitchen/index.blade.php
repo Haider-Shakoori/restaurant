@@ -158,19 +158,9 @@
                             @endif
 
                             <div class="mt-3 flex flex-wrap gap-2">
-                                @if ($restaurantSettings['preparing_stage_enabled'] && in_array($item->status, ['queued', 'active'], true))
-                                    <form method="POST" action="/kitchen/items/{{ $item->id }}/start">
-                                        @csrf
-                                        <button class="rounded-lg bg-amber-500 px-3 py-2 text-xs font-black text-slate-950 hover:bg-amber-400">
-                                            Start
-                                        </button>
-                                    </form>
-                                @endif
-
-                                @if (
-                                    ($restaurantSettings['preparing_stage_enabled'] && $item->status === 'preparing')
-                                    || (! $restaurantSettings['preparing_stage_enabled'] && in_array($item->status, ['queued', 'active'], true))
-                                )
+                                {{-- One-step KOT. Kitchen staff only tap Ready; the waiter
+                                     pickup push is queued by the existing ready endpoint. --}}
+                                @if (in_array($item->status, ['queued', 'active', 'preparing'], true))
                                     <form method="POST" action="/kitchen/items/{{ $item->id }}/ready">
                                         @csrf
                                         <button class="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-black text-slate-950 hover:bg-emerald-400">

@@ -20,7 +20,10 @@ class MenuItemImageController extends Controller
             $menuItem->image_path,
             null,
             [
-                'Cache-Control' => 'public, max-age=86400',
+                // Menu image URLs are content-versioned (?v=); a replaced image
+                // changes the path and URL, so old bytes stay cached safely.
+                'Cache-Control' => 'public, max-age=31536000, immutable',
+                'ETag' => '"'.substr(sha1($menuItem->image_path), 0, 20).'"',
                 'X-Content-Type-Options' => 'nosniff',
             ],
         );

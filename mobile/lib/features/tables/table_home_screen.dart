@@ -53,6 +53,12 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     if (widget.dependencies.pushNotifications.tappedOrderId.value != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _handlePushTap());
     }
+    widget.dependencies.localNotifications.tappedOrderId.addListener(
+      _handleLocalTap,
+    );
+    if (widget.dependencies.localNotifications.tappedOrderId.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _handleLocalTap());
+    }
     // SyncCoordinator pulls LAN/cloud changes every 30 seconds; read the
     // committed SQLite snapshots more frequently to surface new READY events
     // promptly without starting another network connection per refresh.
@@ -66,6 +72,9 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   void dispose() {
     widget.dependencies.pushNotifications.tappedOrderId.removeListener(
       _handlePushTap,
+    );
+    widget.dependencies.localNotifications.tappedOrderId.removeListener(
+      _handleLocalTap,
     );
     _readyRefreshTimer?.cancel();
     super.dispose();
@@ -130,6 +139,9 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     if (freshAlerts.isNotEmpty && session != null) {
       unawaited(SystemSound.play(SystemSoundType.alert));
       unawaited(HapticFeedback.heavyImpact());
+      unawaited(
+        widget.dependencies.localNotifications.showReadyPickup(freshAlerts),
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 8),
@@ -272,6 +284,15 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     if (serverId == null || !mounted) return;
     widget.dependencies.pushNotifications.clearTappedOrder();
     unawaited(_openPushedOrder(serverId));
+  }
+
+  void _handleLocalTap() {
+    // Local ready reminders carry the app's own local_order_id, so the order is
+    // already in SQLite and can be opened without another sync round trip.
+    final orderId = widget.dependencies.localNotifications.tappedOrderId.value;
+    if (orderId == null || !mounted) return;
+    widget.dependencies.localNotifications.clearTappedOrder();
+    unawaited(_showOrder(orderId));
   }
 
   Future<void> _openPushedOrder(String serverId) async {

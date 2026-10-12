@@ -16,6 +16,8 @@ public sealed record RestaurantWorkflowSettings(
     bool RequireManagerApprovalForPostKotVoid,
     string NegativeStockPolicy)
 {
+    public bool ReadyOnlyKotEnabled => !PreparingStageEnabled && !ExpoEnabled;
+
     public static RestaurantWorkflowSettings Defaults { get; } = new(
         KitchenQueueEnabled: true,
         PreparingStageEnabled: true,
@@ -172,6 +174,10 @@ public sealed class LocalRestaurantSettingsService
                 "Kitchen late minutes must be at least the warning threshold and no more than 480.");
         }
 
+        if (update.ExpoEnabled && !update.PreparingStageEnabled)
+            throw new LocalSyncConflictException("invalid_payload",
+                "Enable the Preparing stage before enabling Expo.");
+
         var negativeStockPolicy = NormalizeStockPolicy(update.NegativeStockPolicy);
 
         await _databaseFactory.EnsureCreatedAsync(cancellationToken);
@@ -239,6 +245,7 @@ public sealed class LocalRestaurantSettingsService
     {
         kitchen_queue_enabled = settings.KitchenQueueEnabled,
         preparing_stage_enabled = settings.PreparingStageEnabled,
+        ready_only_kot_enabled = settings.ReadyOnlyKotEnabled,
         expo_enabled = settings.ExpoEnabled,
         courses_enabled = settings.CoursesEnabled,
         kot_sound_enabled = settings.KotSoundEnabled,

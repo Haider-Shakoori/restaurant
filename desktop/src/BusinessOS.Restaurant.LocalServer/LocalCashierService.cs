@@ -692,7 +692,7 @@ public sealed class LocalCashierService
 
         order.DiningTableId = targetTable.Id;
         order.UpdatedAtUtc = DateTimeOffset.UtcNow;
-        sourceTable.Status = "available";
+        sourceTable.Status = await ResolveTableStatusAsync(db, sourceTable.Id, order.Id, cancellationToken);
         targetTable.Status = "occupied";
 
         await db.SaveChangesAsync(cancellationToken);
@@ -700,6 +700,14 @@ public sealed class LocalCashierService
         AddChange(db, "order", order.Id, order.WaiterId, await OrderSnapshotAsync(db, order, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
         AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+        // Offline-first: the tenant master reconciles the transfer when the
+        // outbox next reaches the cloud; retries reuse this mutation id.
+        LocalCloudOutboxWriter.Enqueue(db, actor, "order.table.transfer", "order", order.Id, new
+        {
+            client_order_id = order.ClientOrderId,
+            target_table_id = targetTable.Id,
+            local_target_table_id = targetTable.Id,
+        });
 
         var targetArea = await db.DiningAreas.AsNoTracking().SingleAsync(
             value => value.Id == targetTable.DiningAreaId,
@@ -829,7 +837,7 @@ public sealed class LocalCashierService
         source.Total = 0m;
         source.ClosedAt = now;
         source.UpdatedAtUtc = now;
-        sourceTable.Status = "available";
+        sourceTable.Status = await ResolveTableStatusAsync(db, sourceTable.Id, source.Id, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
 
@@ -864,6 +872,12 @@ public sealed class LocalCashierService
                 source_kot_rewritten = false,
                 released_table_id = sourceTable.Id,
             });
+
+        LocalCloudOutboxWriter.Enqueue(db, actor, "order.merge", "order", target.Id, new
+        {
+            source_order_id = source.ClientOrderId,
+            target_order_id = target.ClientOrderId,
+        });
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -957,11 +971,19 @@ public sealed class LocalCashierService
         }
 
         var now = DateTimeOffset.UtcNow;
+        var movedLines = new List<object>();
         foreach (var item in items)
         {
+            var originalLineId = item.ClientLineId;
             item.OrderId = target.Id;
-            item.ClientLineId = $"{source.ClientOrderId}-{item.ClientLineId}";
+            item.ClientLineId = $"{source.ClientOrderId}-{originalLineId}";
             item.UpdatedAtUtc = now;
+            movedLines.Add(new
+            {
+                client_line_id = originalLineId,
+                target_client_line_id = item.ClientLineId,
+                quantity = item.Quantity,
+            });
         }
 
         source.UpdatedAtUtc = now;
@@ -1001,13 +1023,20 @@ public sealed class LocalCashierService
         {
             source.Status = "closed";
             source.ClosedAt = now;
-            sourceTable.Status = "available";
+            sourceTable.Status = await ResolveTableStatusAsync(db, sourceTable.Id, source.Id, cancellationToken);
         }
 
         AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
         AddChange(db, "order", target.Id, target.WaiterId, await OrderSnapshotAsync(db, target, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
         AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+
+        LocalCloudOutboxWriter.Enqueue(db, actor, "order.item.move", "order", target.Id, new
+        {
+            source_order_id = source.ClientOrderId,
+            target_order_id = target.ClientOrderId,
+            lines = movedLines,
+        });
 
         LocalOperationsControlService.AddAudit(
             db,
@@ -1135,11 +1164,19 @@ public sealed class LocalCashierService
         };
         db.Orders.Add(target);
 
+        var movedSplitLines = new List<object>();
         foreach (var item in items)
         {
+            var originalLineId = item.ClientLineId;
             item.OrderId = target.Id;
-            item.ClientLineId = $"{target.ClientOrderId}-{item.ClientLineId}";
+            item.ClientLineId = $"{target.ClientOrderId}-{originalLineId}";
             item.UpdatedAtUtc = now;
+            movedSplitLines.Add(new
+            {
+                client_line_id = originalLineId,
+                target_client_line_id = item.ClientLineId,
+                quantity = item.Quantity,
+            });
         }
 
         target.Subtotal = Money(items.Sum(value => value.LineTotal));
@@ -1170,13 +1207,22 @@ public sealed class LocalCashierService
         {
             source.Status = "closed";
             source.ClosedAt = now;
-            sourceTable.Status = "available";
+            sourceTable.Status = await ResolveTableStatusAsync(db, sourceTable.Id, source.Id, cancellationToken);
         }
 
         AddChange(db, "order", source.Id, source.WaiterId, await OrderSnapshotAsync(db, source, cancellationToken));
         AddChange(db, "order", target.Id, target.WaiterId, await OrderSnapshotAsync(db, target, cancellationToken));
         AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
         AddChange(db, "dining_table", targetTable.Id, null, TableSnapshot(db, targetTable));
+
+        LocalCloudOutboxWriter.Enqueue(db, actor, "order.split", "order", target.Id, new
+        {
+            source_order_id = source.ClientOrderId,
+            target_order_id = target.ClientOrderId,
+            target_table_id = targetTable.Id,
+            local_target_table_id = targetTable.Id,
+            lines = movedSplitLines,
+        });
 
         LocalOperationsControlService.AddAudit(
             db,
@@ -1285,6 +1331,277 @@ public sealed class LocalCashierService
         return result.ToArray();
     }
 
+    /// <summary>
+    /// Housekeeping: a table marked occupied with no active order is stale
+    /// occupancy. Release it (audited) without touching any order.
+    /// </summary>
+    public async Task<int> ReconcileOccupancyAsync(
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        var occupiedTables = await db.DiningTables
+            .Where(x => x.IsActive && x.Status == "occupied")
+            .ToArrayAsync(cancellationToken);
+
+        var released = 0;
+        foreach (var table in occupiedTables)
+        {
+            var busy = await db.Orders.AnyAsync(
+                x => x.DiningTableId == table.Id &&
+                     x.Status != "closed" && x.Status != "cancelled",
+                cancellationToken);
+            if (busy)
+            {
+                continue;
+            }
+
+            table.Status = "available";
+            released++;
+            var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+            LocalOperationsControlService.AddAudit(db, actor, "tables", "table.occupancy_reconciled",
+                area.BranchId, "dining_table", table.Id,
+                new { previous_status = "occupied", status = table.Status, reason = "No active order" });
+            AddChange(db, "dining_table", table.Id, null, TableSnapshot(db, table));
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return released;
+    }
+
+    /// <summary>Reserve a free table with an optional guest/time note.</summary>
+    public async Task<object> ReserveTableAsync(
+        string tableId,
+        string? note,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureManagerOrCashier(actor);
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var table = await db.DiningTables.SingleOrDefaultAsync(x => x.Id == tableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("not_found", "Table not found.");
+
+        if (await db.Orders.AnyAsync(
+                x => x.DiningTableId == tableId && x.Status != "closed" && x.Status != "cancelled",
+                cancellationToken))
+        {
+            throw new LocalSyncConflictException("active_order",
+                "This table has an active order; settle or cancel it before reserving.");
+        }
+
+        if (table.Status == "disabled")
+        {
+            throw new LocalSyncConflictException("invalid_payload", "This table is disabled.");
+        }
+
+        var previous = table.Status;
+        table.Status = "reserved";
+        table.ReservationNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+        LocalOperationsControlService.AddAudit(db, actor, "tables", "table.reserved",
+            area.BranchId, "dining_table", table.Id,
+            new { previous_status = previous, reservation_note = table.ReservationNote });
+        var snapshot = TableSnapshot(db, table);
+        AddChange(db, "dining_table", table.Id, null, snapshot);
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    /// <summary>Release a reservation back to free.</summary>
+    public async Task<object> CancelReservationAsync(
+        string tableId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureManagerOrCashier(actor);
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var table = await db.DiningTables.SingleOrDefaultAsync(x => x.Id == tableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("not_found", "Table not found.");
+
+        if (table.Status != "reserved")
+        {
+            return TableSnapshot(db, table);
+        }
+
+        table.Status = "available";
+        table.ReservationNote = null;
+        var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+        LocalOperationsControlService.AddAudit(db, actor, "tables", "table.reservation_cancelled",
+            area.BranchId, "dining_table", table.Id, new { previous_status = "reserved", status = table.Status });
+        var snapshot = TableSnapshot(db, table);
+        AddChange(db, "dining_table", table.Id, null, snapshot);
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    public async Task<object> MarkTableAvailableAsync(
+        string tableId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken,
+        string? reason = null)
+    {
+        if (actor.UserRole is not ("owner" or "admin" or "manager"))
+            throw new LocalSyncConflictException("forbidden", "Only management can override table occupancy.");
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var table = await db.DiningTables.SingleOrDefaultAsync(x => x.Id == tableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("not_found", "Table not found.");
+        if (await db.Orders.AnyAsync(x => x.DiningTableId == tableId && x.Status != "closed" && x.Status != "cancelled", cancellationToken))
+            throw new LocalSyncConflictException("active_order", "This table has an active or unpaid order. Settle, transfer or explicitly cancel it before marking the table available. No order was changed.");
+        if (table.Status == "available") return TableSnapshot(db, table);
+        var previous = table.Status;
+        table.Status = "available";
+        var overrideReason = string.IsNullOrWhiteSpace(reason)
+            ? "Management availability override" : reason.Trim();
+        var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+        LocalOperationsControlService.AddAudit(db, actor, "tables", "table.availability_override",
+            area.BranchId, "dining_table", table.Id,
+            new { previous_status = previous, status = table.Status, reason = overrideReason });
+        var snapshot = TableSnapshot(db, table);
+        AddChange(db, "dining_table", table.Id, null, snapshot);
+        // Keep the tenant master in step so POS, web, waiter devices and the
+        // dashboard stop showing stale occupancy after a manual override.
+        LocalCloudOutboxWriter.Enqueue(db, actor, "table.mark_available", "dining_table", table.Id, new
+        {
+            table_id = table.Id,
+            previous_status = previous,
+            reason = overrideReason,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Keep a settled table occupied until the crew clears it. Settlement
+    /// releases occupancy automatically, so an explicit hold restores it; the
+    /// vacant button is then the only way back to a free table.
+    /// </summary>
+    public async Task<object> HoldTableAsync(
+        string tableId,
+        string? note,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken)
+    {
+        EnsureManagerOrCashier(actor);
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var table = await db.DiningTables.SingleOrDefaultAsync(x => x.Id == tableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("not_found", "Table not found.");
+
+        if (await db.Orders.AnyAsync(
+                x => x.DiningTableId == tableId && x.Status != "closed" && x.Status != "cancelled",
+                cancellationToken))
+        {
+            return TableSnapshot(db, table);
+        }
+
+        if (table.Status == "disabled")
+        {
+            throw new LocalSyncConflictException("invalid_payload", "This table is disabled.");
+        }
+
+        var previous = table.Status;
+        table.Status = "occupied";
+        table.ReservationNote = string.IsNullOrWhiteSpace(note) ? "Awaiting clearing" : note.Trim();
+        var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+        LocalOperationsControlService.AddAudit(db, actor, "tables", "table.held_for_clearing",
+            area.BranchId, "dining_table", table.Id,
+            new { previous_status = previous, status = table.Status, note = table.ReservationNote });
+        var snapshot = TableSnapshot(db, table);
+        AddChange(db, "dining_table", table.Id, null, snapshot);
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Mark a cleared table vacant. Only possible while no active order
+    /// references it; audited and pushed to the tenant so POS, waiter devices
+    /// and the dashboard stop showing the table as occupied.
+    /// </summary>
+    public async Task<object> ClearTableAsync(
+        string tableId,
+        LocalTerminalPrincipal actor,
+        CancellationToken cancellationToken,
+        string? reason = null)
+    {
+        EnsureManagerOrCashier(actor);
+
+        await _databaseFactory.EnsureCreatedAsync(cancellationToken);
+        await using var db = _databaseFactory.Create();
+        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+        var table = await db.DiningTables.SingleOrDefaultAsync(x => x.Id == tableId, cancellationToken)
+            ?? throw new LocalSyncConflictException("not_found", "Table not found.");
+
+        if (await db.Orders.AnyAsync(
+                x => x.DiningTableId == tableId && x.Status != "closed" && x.Status != "cancelled",
+                cancellationToken))
+        {
+            throw new LocalSyncConflictException("active_order",
+                "This table still has an active or unpaid order. Settle or cancel it before marking the table vacant.");
+        }
+
+        if (table.Status == "available")
+        {
+            return TableSnapshot(db, table);
+        }
+
+        var previous = table.Status;
+        table.Status = "available";
+        table.ReservationNote = null;
+        var clearReason = string.IsNullOrWhiteSpace(reason) ? "Table cleared" : reason.Trim();
+        var area = await db.DiningAreas.SingleAsync(x => x.Id == table.DiningAreaId, cancellationToken);
+        LocalOperationsControlService.AddAudit(db, actor, "tables", "table.cleared",
+            area.BranchId, "dining_table", table.Id,
+            new { previous_status = previous, status = table.Status, reason = clearReason });
+        var snapshot = TableSnapshot(db, table);
+        AddChange(db, "dining_table", table.Id, null, snapshot);
+        LocalCloudOutboxWriter.Enqueue(db, actor, "table.mark_available", "dining_table", table.Id, new
+        {
+            table_id = table.Id,
+            previous_status = previous,
+            reason = clearReason,
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return snapshot;
+    }
+
+    /// <summary>
+    /// Occupancy follows active orders: a table is freed only when no other
+    /// open order still references it.
+    /// </summary>
+    private static async Task<string> ResolveTableStatusAsync(
+        RestaurantDbContext db,
+        string tableId,
+        string exceptOrderId,
+        CancellationToken cancellationToken)
+    {
+        var busy = await db.Orders.AnyAsync(
+            value => value.DiningTableId == tableId &&
+                     value.Id != exceptOrderId &&
+                     value.Status != "closed" &&
+                     value.Status != "cancelled",
+            cancellationToken);
+        return busy ? "occupied" : "available";
+    }
+
     private async Task SettleBillAsync(
         RestaurantDbContext db,
         LocalBill bill,
@@ -1309,13 +1626,35 @@ public sealed class LocalCashierService
         order.UpdatedAtUtc = DateTimeOffset.UtcNow;
         if (table is not null)
         {
-            table.Status = "available";
+            table.Status = await db.Orders.AnyAsync(x => x.DiningTableId == table.Id && x.Id != order.Id &&
+                x.Status != "closed" && x.Status != "cancelled", cancellationToken) ? "occupied" : "available";
         }
 
         var splits = await db.BillSplits.Where(value => value.BillId == bill.Id).ToArrayAsync(cancellationToken);
         if (splits.Length > 0 && splits.Any(value => value.BalanceDue != 0m))
         {
             throw new LocalSyncConflictException("bill_state_conflict", "All split balances must be paid before closing the bill.");
+        }
+
+        // Settling a bill finishes the order: any kitchen ticket still open
+        // must leave the live board so a paid order can never strand a KOT.
+        var strandedTickets = await db.KitchenTickets
+            .Where(value => value.OrderId == order.Id &&
+                            value.Status != "completed" &&
+                            value.Status != "cancelled")
+            .ToArrayAsync(cancellationToken);
+        foreach (var ticket in strandedTickets)
+        {
+            ticket.Status = "completed";
+            ticket.CompletedAt = DateTimeOffset.UtcNow;
+            ticket.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            await db.KitchenTicketItems
+                .Where(value => value.KitchenTicketId == ticket.Id)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(value => value.Status, "completed"),
+                    cancellationToken);
+            AddChange(db, "kitchen_ticket", ticket.Id, null,
+                await LocalKitchenService.TicketSnapshotAsync(db, ticket, cancellationToken));
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -1580,6 +1919,7 @@ public sealed class LocalCashierService
             name = table.Name,
             capacity = table.Capacity,
             status = table.Status,
+            reservation_note = table.ReservationNote,
             is_active = table.IsActive,
             area = new { id = area.Id, name = area.Name },
             branch = new { id = branch.Id, name = branch.Name },

@@ -21,10 +21,10 @@ public sealed class VisualFloorBoardTests
         Assert.Contains("grid.Visibility = Visibility.Collapsed", source);
 
         // Retain the underlying service operations, rather than rebuilding their logic.
-        Assert.Contains("await workflow.TransferOrderAsync(", source);
-        Assert.Contains("await workflow.MergeDraftOrdersAsync(", source);
-        Assert.Contains("await workflow.MoveUnsentItemsAsync(", source);
-        Assert.Contains("await workflow.SplitUnsentItemsAsync(", source);
+        Assert.Contains("DesktopUiWork.RunAsync(() => workflow.TransferOrderAsync(", source);
+        Assert.Contains("DesktopUiWork.RunAsync(() => workflow.MergeDraftOrdersAsync(", source);
+        Assert.Contains("DesktopUiWork.RunAsync(() => workflow.MoveUnsentItemsAsync(", source);
+        Assert.Contains("DesktopUiWork.RunAsync(() => workflow.SplitUnsentItemsAsync(", source);
     }
 
     private static string RepositoryRoot()

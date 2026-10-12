@@ -5,6 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -156,6 +157,9 @@ jobs:
         working-directory: mobile
         run: flutter test
 
+      # Source-only local Windows testing: even the mobile APK is built only
+      # when explicitly requested, never as an automatic installer artifact.
       - name: Build Android debug APK
+        if: github.event_name == 'workflow_dispatch'
         working-directory: mobile
         run: flutter build apk --debug

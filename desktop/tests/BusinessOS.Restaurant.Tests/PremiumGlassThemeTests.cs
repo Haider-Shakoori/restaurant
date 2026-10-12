@@ -84,6 +84,60 @@ public sealed class PremiumGlassThemeTests
     }
 
     [Fact]
+    public void Top_navigation_is_orange_branded_with_account_menu_and_all_modules_shortcut()
+    {
+        foreach (var theme in new[] { Load("Themes", "Classic.xaml"), Load("Themes", "Glass.xaml") })
+        {
+            Assert.Equal("#F97316", BrushColor(theme, "BrandPrimaryBrush"));
+            Assert.DoesNotContain(theme.Descendants(), x =>
+                (string?)x.Attribute(X + "Key") == "SidebarBrush");
+        }
+
+        var main = Load("MainWindow.xaml");
+        Assert.DoesNotContain(main.Descendants(), x =>
+            (string?)x.Attribute(X + "Name") is "SidebarContainer" or "SidebarColumn");
+        var topNav = main.Descendants().Single(x =>
+            (string?)x.Attribute(X + "Name") == "TopNavigationBar");
+        var descendants = topNav.Descendants().ToList();
+
+        var allModules = descendants.Single(x =>
+            (string?)x.Attribute(X + "Name") == "AllModulesButton");
+        Assert.Equal("modules", (string?)allModules.Attribute("CommandParameter"));
+        Assert.Contains("CanViewModules", (string?)allModules.Attribute("Visibility"));
+        Assert.Contains("⊞", allModules.ToString()); // grid icon
+        var userMenu = descendants.Single(x =>
+            (string?)x.Attribute(X + "Name") == "UserMenuButton");
+        Assert.True(descendants.IndexOf(allModules) > descendants.IndexOf(userMenu),
+            "All Modules keeps the far-right position in the top navigation");
+
+        var accountPopup = descendants.Single(x =>
+            x.Name.LocalName == "Popup" && (string?)x.Attribute(X + "Name") == "UserMenuPopup");
+        Assert.Contains(accountPopup.Descendants(), x =>
+            x.Name.LocalName == "TextBlock" && (string?)x.Attribute("Text") == "{Binding TenantLabel}");
+        Assert.Contains(accountPopup.Descendants(), x =>
+            (string?)x.Attribute(X + "Name") == "SwitchOperatorButton" &&
+            (string?)x.Attribute("Click") == "OnSwitchOperatorClick");
+    }
+
+    [Fact]
+    public void Narrow_windows_collapse_primary_links_into_a_compact_menu()
+    {
+        var main = Load("MainWindow.xaml");
+        Assert.Contains(main.Descendants(), x =>
+            (string?)x.Attribute(X + "Name") == "TopNavCompactButton");
+        Assert.Contains(main.Descendants(), x =>
+            (string?)x.Attribute(X + "Name") == "TopNavCompactMenu");
+
+        var desktop = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop", "MainWindow.xaml.cs"));
+        Assert.Contains("TopNavLinks.Visibility = compact", desktop, StringComparison.Ordinal);
+        Assert.Contains("TopNavCompactButton.Visibility = compact", desktop, StringComparison.Ordinal);
+        Assert.Contains("TopNavCompactMenu.IsOpen = false", desktop, StringComparison.Ordinal);
+        Assert.Contains("OnNavMenuClick", desktop, StringComparison.Ordinal);
+        Assert.Contains("OnUserMenuClick", desktop, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Kitchen_and_settings_use_theme_aware_white_glass_workspace()
     {
         var classic = Load("Themes", "Classic.xaml");
@@ -139,9 +193,9 @@ public sealed class PremiumGlassThemeTests
         var classic = Load("Themes", "Classic.xaml");
         var glass = Load("Themes", "Glass.xaml");
 
-        Assert.Equal("#2563EB", BrushColor(classic, "ButtonPrimaryBrush"));
-        Assert.Equal("#F3C969", BrushColor(glass, "ButtonPrimaryBrush"));
-        Assert.Equal("#FFFFFF", BrushColor(classic, "ButtonForegroundBrush"));
+        Assert.Equal("#F97316", BrushColor(classic, "ButtonPrimaryBrush"));
+        Assert.Equal("#F97316", BrushColor(glass, "ButtonPrimaryBrush"));
+        Assert.Equal("#111827", BrushColor(classic, "ButtonForegroundBrush"));
         Assert.Equal("#111827", BrushColor(glass, "ButtonForegroundBrush"));
 
         foreach (var theme in new[] { classic, glass })
@@ -198,6 +252,13 @@ public sealed class PremiumGlassThemeTests
         Assert.Contains("Content = new ScrollViewer", settings, StringComparison.Ordinal);
         Assert.Contains("RestaurantSettingsTabItemStyle", app);
         Assert.Contains("BrandPrimarySoftBrush", app);
+
+        // Network & Sync uses the shared metric strip and compact action buttons
+        // instead of full-width orange bars.
+        Assert.Contains("DashboardMetrics(16,", settings, StringComparison.Ordinal);
+        Assert.Contains("(\"●\", \"LAN STATUS\", diagnostics.NetworkMode", settings, StringComparison.Ordinal);
+        Assert.Contains("MinWidth = 340, HorizontalAlignment = HorizontalAlignment.Left", settings, StringComparison.Ordinal);
+        Assert.Contains("Content = \"Refresh status\", MinWidth = 150", settings, StringComparison.Ordinal);
     }
 
     private static double ColorContrast(string background, string foreground)

@@ -4,19 +4,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Mobile APK/IPA packaging is opt-in. Ordinary PRs only run Flutter
+# analyze/tests through ci.yml; no distributable installers are built.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/restaurant-mobile-release.yml'
-      - 'tools/generate_restaurant_icons.py'
-  push:
-    branches: [main]
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/restaurant-mobile-release.yml'
-      - 'tools/generate_restaurant_icons.py'
 
 permissions:
   contents: read

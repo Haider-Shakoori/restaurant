@@ -137,6 +137,9 @@ internal static class Program
         // on this disposable runner; production startup remains unchanged.
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
+        await CheckPersistentMenuPhotoCacheAsync();
+        CheckPhotoCatalogIncrementalRendering();
+        CheckDashboardProfitLossCalculation();
 
         // Reproduce a real offline tenant with a branch previously synchronized
         // into the disposable CI SQLite snapshot; never seed user databases.
@@ -169,6 +172,11 @@ internal static class Program
         CheckNavigation(owner, "pos");
         CheckNavigation(owner, "kitchen");
         await NavigateAsync(owner, "pos");
+        CheckOptionalFullScreen(owner, "pos");
+        var currentPosWorkspace = vm.CurrentPage;
+        await vm.NavigateCommand.ExecuteAsync("pos");
+        Assert(ReferenceEquals(currentPosWorkspace, vm.CurrentPage),
+            "Re-selecting open POS does not redo menu, SQLite queries or tile layout");
         await CheckPosInteractionsAsync(owner);
 
         // The reported issue was inside the Glass-mode cloud-management dialog.
@@ -192,18 +200,32 @@ internal static class Program
         await CheckRecipeEditorSaveAsync(app, owner);
         await NavigateAsync(owner, "inventory");
         CheckInventoryFilters(owner);
+        await CheckFormAsync(app, owner, "+ Adjust Stock Quantity",
+            "Audited stock adjustment", "Post audited adjustment", "Enter a nonzero stock change.");
         await CheckFormAsync(app, owner, "+ Add Ingredient", "Add Ingredient", "Save Ingredient",
             "Enter ingredient name and SKU.");
+        await CheckDuplicateIngredientAndRetryAsync(app, owner);
 
         await NavigateAsync(owner, "purchases");
         await CheckFormAsync(app, owner, "+ Add Supplier", "Add Supplier", "Save Supplier",
             "Supplier code and name are required.");
+        await CheckSupplierDuplicateAndRetryAsync(app, owner);
         await CheckFormAsync(app, owner, "+ New Purchase & Receive", "Purchase & Receive Inventory",
             "Create PO and Receive Stock", "Select branch, supplier and at least one purchase line.");
 
         await NavigateAsync(owner, "expenses");
         Assert(FindButton(owner, "+ Create Expense") is not null, "Create Expense is clickable");
         await CheckFormAsync(app, owner, "+ Create Expense", "Create Expense", "Save Expense", null);
+
+        // One-tap READY on an isolated KOT must notify the waiter without
+        // forcing a separate Start or Expo stage.
+        await SeedKitchenStartFixtureAsync();
+        await NavigateAsync(owner, "kitchen");
+        CheckOptionalFullScreen(owner, "kitchen");
+        await CheckKitchenReadyResponsiveAsync(owner);
+        await SeedCashierPaymentFixtureAsync();
+        await NavigateAsync(owner, "pos");
+        await CheckPartialPaymentsWithoutPageRefreshAsync(owner);
 
         foreach (var route in new[] { "pos", "tables", "kitchen", "closing", "users" })
             await NavigateAsync(owner, route);
@@ -231,7 +253,7 @@ internal static class Program
             "Waiter cannot open Purchases by directly invoking route command");
 
         await NavigateAsync(waiter, "pos");
-        Assert(FindButton(waiter, "Show cashier & billing") is null,
+        Assert(Descendants<Button>(waiter).All(x => x.Name != "PosOpenPaymentModal"),
             "Waiter POS never reveals cashier or payment controls");
 
         waiter.Close();
@@ -502,6 +524,142 @@ internal static class Program
         Console.WriteLine($"SCREENSHOT: {Path.GetRelativePath(GalleryDirectory, destination)} ({width}x{height})");
     }
 
+    private static void CheckDashboardProfitLossCalculation()
+    {
+        // Real financial arithmetic, not a snapshot string assertion. Raw
+        // material RECEIPTS must not be counted as consumed food inventory.
+        var type = typeof(MainWindow).Assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.DashboardProfitLoss", throwOnError: true)!;
+        var calculate = type.GetMethod("Compute",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)
+            ?? throw new InvalidOperationException("Dashboard P&L calculation missing");
+        (string Source, decimal QuantityDelta, decimal? UnitCost)[] movements =
+        [
+            ("goods_receipt", 20m, 100m),  // purchased raw meat: NOT a P&L cost
+            ("manual_stock_count", -12m, 100m), // 12 kg actually used
+            ("kitchen_production", -2m, 50m), // explicit recipe consumption
+        ];
+        var result = calculate.Invoke(null, [2200m, movements, 300m, 1800m, "Manual physical count"])!;
+        decimal Get(string field) => (decimal)type.GetProperty(field)!.GetValue(result)!;
+        Assert(Get("Revenue") == 2200m &&
+               Get("CostedFoodConsumption") == 1300m &&
+               Get("GrossProfit") == 900m &&
+               Get("OperatingExpenses") == 300m &&
+               Get("NetOperatingProfit") == 600m &&
+               Get("CashCollected") == 1800m,
+               "P&L excludes purchases, costs actual consumption and separates cash from sales");
+
+        (string, decimal, decimal?)[] unvalued = [("kitchen_production", -1m, null)];
+        var provisional = calculate.Invoke(null, [100m, unvalued, 0m, 100m, "Recipe"])!;
+        Assert(type.GetProperty("IsComplete")!.GetValue(provisional) is false,
+            "Historical unpriced kitchen consumption makes reported profit provisional");
+    }
+
+    private static void IgnoreSyntheticPhotoSelection<T>(T _) { }
+
+    private static void CheckPhotoCatalogIncrementalRendering()
+    {
+        // Prove a large food catalog no longer creates hundreds of WPF cards
+        // when POS opens. Search still traverses every product and Load More
+        // can reveal the remaining inventory without server round-trips.
+        var assembly = typeof(MainWindow).Assembly;
+        var itemType = assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.PhotoPosItem", throwOnError: true)!;
+        var catalogType = assembly.GetType(
+            "BusinessOS.Restaurant.Desktop.RestaurantPhotoPosCatalog", throwOnError: true)!;
+        var listType = typeof(List<>).MakeGenericType(itemType);
+        var items = (System.Collections.IList)Activator.CreateInstance(listType)!;
+        for (var i = 1; i <= 130; i++)
+        {
+            items.Add(Activator.CreateInstance(itemType,
+                "ci-photo-" + i, "Dish " + i.ToString("000"), "Meals", 100m, null)!);
+        }
+        var actionType = typeof(Action<>).MakeGenericType(itemType);
+        var ignore = typeof(Program).GetMethod(nameof(IgnoreSyntheticPhotoSelection),
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+            .MakeGenericMethod(itemType);
+        var select = Delegate.CreateDelegate(actionType, ignore);
+        var search = new TextBox();
+        var build = catalogType.GetMethod("Build",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!;
+        var view = (FrameworkElement)build.Invoke(null, new object[] { items, search, select })!;
+        var cards = Descendants<WrapPanel>(view).Single(x => x.Name == "PosPhotoMenuTiles");
+        var more = Descendants<Button>(view).Single(x => x.Name == "PosPhotoLoadMore");
+        Assert(cards.Children.Count == 48 && more.Visibility == Visibility.Visible,
+            "Large POS menu initially builds only 48 controls");
+        search.Text = "Dish 129";
+        Assert(cards.Children.Count == 1 && more.Visibility == Visibility.Collapsed,
+            "Search immediately finds products beyond initial 48 cards");
+        search.Clear();
+        Click(more);
+        Assert(cards.Children.Count == 96, "Load More reveals the next 48 dishes");
+        Click(more);
+        Assert(cards.Children.Count == 130 && more.Visibility == Visibility.Collapsed,
+            "Every cached dish is still accessible after incremental rendering");
+    }
+
+    private static async Task CheckPersistentMenuPhotoCacheAsync()
+    {
+        // A 90-day-old downloaded tenant photo must be returned from the same
+        // disk location without an HTTP request, even though its age greatly
+        // exceeds the prior 15-minute re-download policy.
+        var origin = "https://restaurant-ci.example.test";
+        var url = origin + "/media/menu-items/ci-offline-photo.png";
+        var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(url)));
+        var root = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BusinessOS", "Restaurant", "menu-photos");
+        var file = Path.Combine(root, key + ".img");
+        Directory.CreateDirectory(root);
+        var png = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/xCkAAAAASUVORK5CYII=");
+        await File.WriteAllBytesAsync(file, png);
+        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddDays(-90));
+        try
+        {
+            var type = typeof(MainWindow).Assembly.GetType(
+                "BusinessOS.Restaurant.Desktop.RestaurantPhotoPosCatalog", throwOnError: true)!;
+            var cacheMethod = type.GetMethod("CacheMenuPhotoAsync",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("Tenant photo cache method missing.");
+            var task = (Task<Uri?>)cacheMethod.Invoke(null, new object[] { url, origin })!;
+            var result = await task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert(result?.LocalPath == file,
+                "90-day-old downloaded menu photo is reused from local disk with no server connection");
+            Assert(File.Exists(file) && new FileInfo(file).Length == png.Length,
+                "Cached menu image remains intact after repeated offline access");
+        }
+        finally { if (File.Exists(file)) File.Delete(file); }
+    }
+
+    private static void CheckOptionalFullScreen(MainWindow window, string route)
+    {
+        var fullscreen = Descendants<Button>(window)
+            .Single(x => x.Name == "WorkspaceFullScreenButton");
+        var restore = Descendants<Button>(window)
+            .Single(x => x.Name == "ExitPosButton");
+        var shortcuts = Descendants<Button>(window)
+            .Single(x => x.Name == "WorkspaceShortcutsButton");
+        var topNav = Descendants<Border>(window)
+            .Single(x => x.Name == "TopNavigationBar");
+        Assert(fullscreen.Visibility == Visibility.Visible &&
+            shortcuts.Visibility == Visibility.Visible &&
+            topNav.Visibility == Visibility.Visible &&
+            restore.Visibility == Visibility.Collapsed,
+            route + " opens in a normal navigable Windows window by default");
+        Click(fullscreen);
+        Assert(restore.Visibility == Visibility.Visible &&
+            topNav.Visibility == Visibility.Collapsed &&
+            fullscreen.Visibility == Visibility.Collapsed,
+            route + " enters optional full-screen mode by top toolbar");
+        Click(restore);
+        Assert(fullscreen.Visibility == Visibility.Visible &&
+            topNav.Visibility == Visibility.Visible &&
+            restore.Visibility == Visibility.Collapsed,
+            route + " restores the normal window and navigation without leaving the page");
+    }
+
     private static async Task CheckPosInteractionsAsync(MainWindow window)
     {
         // Test the real WPF page on the isolated GitHub runner, not a screenshot mock.
@@ -533,12 +691,60 @@ internal static class Program
         var grid = Descendants<DataGrid>(window).Single(x => x.Name == "PosActiveOrdersGrid");
         Assert(grid.IsReadOnly && grid.SelectionMode == DataGridSelectionMode.Single,
             "Active orders list safely selects one read-only order");
-        Assert(FindButton(window, "Show cashier & billing") is not null,
-            "Owner can reveal cashier and billing");
-        Click(FindButton(window, "Show cashier & billing")!);
+        var toolbar = Descendants<StackPanel>(window)
+            .Single(x => x.Name == "PosFullscreenTopToolbar");
+        var toolbarActions = Descendants<WrapPanel>(toolbar)
+            .Single(x => x.Name == "PosTopActions");
+        Assert(toolbarActions.Children.OfType<Button>().Count() >= 6,
+            "POS action buttons are all grouped in the top toolbar");
+        var menuPane = Descendants<Border>(window)
+            .Single(x => x.Name == "PosPhotoFirstPane");
+        var rootLayout = Descendants<Grid>(window)
+            .Single(x => x.Name == "FullscreenPosWorkspace");
+        Assert(!rootLayout.Children.OfType<ScrollViewer>()
+            .Any(x => x.Name == "PosTicketIndependentScroll") &&
+            menuPane.Visibility == Visibility.Visible,
+            "Full screen is reserved for menu photography; no permanent narrow ticket rail");
+        var overlay = Descendants<Grid>(window)
+            .Single(x => x.Name == "PosGlassModalOverlay");
+        var glass = Descendants<Border>(window)
+            .Single(x => x.Name == "PosGlassModalCard");
+        var contentSurface = Descendants<Grid>(window)
+            .Single(x => x.Name == "FullscreenPosWorkspace");
+        Assert(contentSurface.Tag is Func<bool>, "POS has a modal-aware Escape handler");
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "POS starts full-screen with photo menu and ticket, no blocking modal");
+        Assert(FindButton(window, "Show cashier & billing") is null,
+            "Old expanding cashier panel is replaced with a focused dialog");
+        var billingTrigger = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenPaymentModal");
+        Click(billingTrigger);
+        Assert(overlay.Visibility == Visibility.Visible && glass.CornerRadius.TopLeft >= 20,
+            "Owner can open the rounded iOS-style glass billing modal");
+        Assert(Descendants<TextBlock>(overlay).Any(x => x.Name == "PosLivePaymentBalance"),
+            "Payment dialog always displays current balance");
+        Assert(Descendants<Button>(overlay).Any(x => x.Content?.ToString() == "Check current balances"),
+            "Payment dialog can check balances without page reload");
         Assert(FindButton(window, "Post payment") is { IsEnabled: true },
-            "Owner cashier controls remain interactive after expansion");
-        Click(FindButton(window, "Hide cashier & billing")!);
+            "Owner cashier controls remain interactive in modal");
+        Assert(Descendants<Grid>(window).Single(x => x.Name == "PosGlassModalOverlay")
+            .Visibility == Visibility.Visible, "Payment modal keeps background covered");
+        var close = Descendants<Button>(window).Single(x => x.Name == "PosGlassModalClose");
+        Click(close);
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "Closing a modal returns to the POS without navigating away");
+        var viewTicket = Descendants<Button>(toolbar)
+            .Single(x => x.Name == "PosOpenTicketModal");
+        Click(viewTicket);
+        Assert(overlay.Visibility == Visibility.Visible &&
+            Descendants<StackPanel>(overlay).Any(x => x.Name == "PosFullscreenOrderTicket"),
+            "Ticket is accessible via top-bar button without shrinking the menu");
+        Click(close);
+        var openSetup = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenNewOrderModal");
+        Click(openSetup);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "New order opens in an independently scrolling modal");
 
         // Select and resume a real locally persisted counter order using the
         // cached CI-only branch. No tenant cloud, payments, or printing involved.
@@ -552,6 +758,18 @@ internal static class Program
         await WaitUntilAsync(() => !string.IsNullOrEmpty(currentOrder.Text),
             "offline counter order appears in POS");
         var id = currentOrder.Text;
+        Click(close);
+        Assert(overlay.Visibility == Visibility.Collapsed,
+            "New-order flow returns to full-screen ticket without navigation");
+        var ordersTrigger = Descendants<Button>(window)
+            .Single(x => x.Name == "PosOpenActiveOrdersModal");
+        Click(ordersTrigger);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Active orders opens in its own searchable modal");
+        // SQLite state refresh now runs on the worker thread; the order ID
+        // appears before the complete active-order grid has been reloaded.
+        await WaitUntilAsync(() => grid.Items.Count > 0,
+            "active POS orders list refresh completes asynchronously");
         Assert(grid.Items.Cast<object>().OfType<object>().Any(),
             "New order refreshes the active order list without navigating away");
 
@@ -607,12 +825,17 @@ internal static class Program
         var button = FindNavigation(window, route)
             ?? throw new InvalidOperationException($"Navigation button '{route}' not found.");
         var previousPage = vm.CurrentPage;
+        var alreadyDisplayed = vm.CurrentRoute == route && previousPage is not null;
         await WaitUntilAsync(() => button.Command?.CanExecute(button.CommandParameter) == true,
             $"'{route}' navigation command becomes available");
         Click(button);
         await WaitUntilAsync(() => vm.HasWorkspaceError ||
             (vm.CurrentRoute == route && vm.CurrentPage is not null &&
-             !ReferenceEquals(previousPage, vm.CurrentPage)), $"click-to-navigate '{route}'");
+             (alreadyDisplayed || !ReferenceEquals(previousPage, vm.CurrentPage))),
+            $"click-to-navigate '{route}'");
+        if (alreadyDisplayed)
+            Assert(ReferenceEquals(previousPage, vm.CurrentPage),
+                $"Re-selecting {route} keeps the existing page without an expensive rebuild");
 
         Assert(!vm.HasWorkspaceError, $"Navigation '{route}' renders without errors: {vm.WorkspaceErrorMessage}");
         Assert(vm.CurrentRoute == route && vm.CurrentPage is not null,
@@ -645,6 +868,10 @@ internal static class Program
         {
             await WaitUntilAsync(() => modal is not null, $"'{dialogTitle}' modal opened");
             var opened = modal!;
+            Assert(opened.Content is Border { Name: "DesktopGlassModalBody" },
+                "Operational modal uses the shared frosted iOS-style surface");
+            Assert((main.Content as UIElement)?.Effect is System.Windows.Media.Effects.BlurEffect,
+                "Each operational modal blurs its owning workspace");
             await CaptureWindowAsync(opened, Path.Combine(
                 GalleryDirectory, "dialogs",
                 ThemeManager.Current.ToString().ToLowerInvariant() + "-" +
@@ -693,6 +920,338 @@ internal static class Program
             timer.Stop();
             if (modal?.IsVisible == true) modal.Close();
         }
+    }
+
+    private static async Task CheckDuplicateIngredientAndRetryAsync(
+        System.Windows.Application app, MainWindow owner)
+    {
+        // User regression: duplicate SKU showed an error and the modal became
+        // unresponsive. Verify a real error, editable SKU and one successful
+        // retry against temporary CI SQLite with no production credentials.
+        var create = FindButton(owner, "+ Add Ingredient")
+            ?? throw new InvalidOperationException("Inventory Add Ingredient action not found.");
+        var existingWindows = app.Windows.Cast<Window>().ToHashSet();
+        Window? modal = null;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(70) };
+        timer.Tick += (_, _) =>
+        {
+            modal = app.Windows.Cast<Window>().FirstOrDefault(window =>
+                !existingWindows.Contains(window) && window.IsVisible &&
+                window.Title == "Add Ingredient");
+            if (modal is not null) timer.Stop();
+        };
+        timer.Start();
+        _ = owner.Dispatcher.BeginInvoke(new Action(() => Click(create)),
+            DispatcherPriority.Normal);
+        try
+        {
+            await WaitUntilAsync(() => modal is not null, "Add Ingredient modal opened");
+            var opened = modal!;
+            var name = Descendants<TextBox>(opened).Single(x => x.Name == "IngredientNameInput");
+            var sku = Descendants<TextBox>(opened).Single(x => x.Name == "IngredientSkuInput");
+            var feedback = Descendants<TextBlock>(opened).Single(x => x.Name == "IngredientSaveFeedback");
+            var save = FindButton(opened, "Save Ingredient")!;
+            name.Text = "CI Test Meat";
+            sku.Text = "ci-rice"; // already seeded; case-normalized duplicate.
+            Click(save);
+
+            await WaitUntilAsync(() => feedback.Text.Contains("already exists", StringComparison.Ordinal),
+                "duplicate ingredient SKU is rejected without blocking the UI");
+            Assert(opened.IsVisible && save.IsEnabled && save.Content?.ToString() == "Save Ingredient",
+                "Duplicate SKU keeps Add Ingredient modal open with retry enabled");
+            await opened.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+            Assert(sku.IsFocused && sku.Text.Equals("ci-rice", StringComparison.OrdinalIgnoreCase),
+                "Duplicate SKU focuses the editable SKU input instead of freezing");
+
+            await CaptureWindowAsync(opened,
+                Path.Combine(GalleryDirectory, "dialogs", "add-ingredient-duplicate-recovery.png"));
+
+            sku.Text = "ci-meat-new";
+            Click(save);
+            await WaitUntilAsync(() => !opened.IsVisible,
+                "corrected ingredient SKU saves and closes the dialog");
+            await using var db = new LocalDatabaseFactory().Create();
+            var inserted = await db.InventoryItems.AsNoTracking()
+                .Where(item => item.Sku == "CI-MEAT-NEW").ToArrayAsync();
+            Assert(inserted.Length == 1 && inserted[0].Name == "CI Test Meat",
+                "Exactly one corrected ingredient is persisted to SQLite");
+            Assert(await db.InventoryItems.CountAsync(item => item.Sku == "CI-RICE") == 1,
+                "Duplicate attempt did not alter the existing SKU");
+            Assert(!await db.InventoryBalances.AnyAsync(balance =>
+                balance.InventoryItemId == inserted[0].Id),
+                "Creating a new ingredient never fabricates a stock balance");
+        }
+        finally
+        {
+            timer.Stop();
+            if (modal?.IsVisible == true) modal.Close();
+        }
+    }
+
+    private static async Task CheckSupplierDuplicateAndRetryAsync(
+        System.Windows.Application app, MainWindow main)
+    {
+        // Source-only CI runner: test two local supplier writes and the
+        // recoverable duplicate-code path. No live restaurant data is used.
+        async Task<Window> OpenAsync()
+        {
+            var create = FindButton(main, "+ Add Supplier")
+                ?? throw new InvalidOperationException("Supplier create action not found.");
+            var before = app.Windows.Cast<Window>().ToHashSet();
+            Window? modal = null;
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+            timer.Tick += (_, _) =>
+            {
+                modal = app.Windows.Cast<Window>().FirstOrDefault(w =>
+                    !before.Contains(w) && w.IsVisible && w.Title == "Add Supplier");
+                if (modal is not null) timer.Stop();
+            };
+            timer.Start();
+            _ = main.Dispatcher.BeginInvoke(new Action(() => Click(create)), DispatcherPriority.Normal);
+            try
+            {
+                await WaitUntilAsync(() => modal is not null, "supplier modal opened");
+                return modal!;
+            }
+            finally { timer.Stop(); }
+        }
+        Button Submit(Window dialog, string supplierCode)
+        {
+            // Supplier form currently uses ordered fields (code/name/phone/email).
+            var fields = Descendants<TextBox>(dialog).ToArray();
+            Assert(fields.Length >= 4, "supplier editor includes code and name");
+            fields[0].Text = supplierCode;
+            fields[1].Text = "CI Supply Partner";
+            var save = FindButton(dialog, "Save Supplier")!;
+            Click(save);
+            return save;
+        }
+
+        var first = await OpenAsync();
+        try
+        {
+            Submit(first, "CI-SUP-1");
+            await WaitUntilAsync(() => !first.IsVisible, "supplier create completes without UI freeze");
+        }
+        finally { if (first.IsVisible) first.Close(); }
+
+        var second = await OpenAsync();
+        try
+        {
+            var save = Submit(second, "CI-SUP-1");
+            await WaitUntilAsync(() => save.IsEnabled &&
+                Descendants<TextBlock>(second).Any(t => t.Text.Contains("already", StringComparison.OrdinalIgnoreCase)),
+                "duplicate supplier stays editable and reports existing code");
+            Assert(second.IsVisible, "supplier dialog remains open after rejected duplicate");
+            var fields = Descendants<TextBox>(second).ToArray();
+            fields[0].Text = "CI-SUP-2";
+            Click(save);
+            await WaitUntilAsync(() => !second.IsVisible, "corrected supplier saves and closes");
+            await using var db = new LocalDatabaseFactory().Create();
+            Assert(await db.Suppliers.CountAsync(s => s.Code == "CI-SUP-1") == 1,
+                "duplicate supplier not persisted twice");
+            Assert(await db.Suppliers.CountAsync(s => s.Code == "CI-SUP-2") == 1,
+                "corrected supplier saved exactly once");
+        }
+        finally { if (second.IsVisible) second.Close(); }
+    }
+
+    private static async Task SeedKitchenStartFixtureAsync()
+    {
+        var factory = new LocalDatabaseFactory();
+        await using var db = factory.Create();
+        var when = DateTimeOffset.UtcNow;
+        var branchId = "ci-synced-branch";
+        const string orderId = "ci-kot-start-order";
+        const string itemId = "ci-kot-start-item";
+        const string kitchenId = "ci-kot-start-kitchen";
+        const string roundId = "ci-kot-start-round";
+
+        db.DiningAreas.Add(new LocalDiningArea
+        {
+            Id = "ci-kot-area", BranchId = branchId,
+            Name = "CI Kitchen Test Area", IsActive = true,
+        });
+        db.DiningTables.Add(new LocalDiningTable
+        {
+            Id = "ci-kot-table", DiningAreaId = "ci-kot-area",
+            Code = "CI-KOT-T1", Name = "CI KOT Table",
+            Status = "occupied", Capacity = 2, IsActive = true,
+        });
+        db.KitchenStations.Add(new LocalKitchenStation
+        {
+            Id = "ci-kot-station", BranchId = branchId,
+            Code = "CI-KOT", Name = "CI Kitchen Station", IsActive = true,
+        });
+        // This item has NO recipe: it tests KOT state transitions without
+        // needing or consuming any real stock.
+        db.MenuItems.Add(new LocalMenuItem
+        {
+            Id = "ci-kot-menu", Sku = "CI-KOT-MENU", Name = "CI Kitchen Test Dish",
+            Price = 100m, Currency = "AFN", IsAvailable = true,
+        });
+        db.Orders.Add(new LocalOrder
+        {
+            Id = orderId, ClientOrderId = "CI-KOT-START",
+            BranchId = branchId, DiningTableId = "ci-kot-table",
+            WaiterId = 901, WaiterPublicId = "ci-test-operator",
+            WaiterName = "CI owner", Status = "submitted",
+            GuestCount = 2, CreatedAtUtc = when, UpdatedAtUtc = when,
+            SubmittedAt = when,
+        });
+        db.OrderItems.Add(new LocalOrderItem
+        {
+            Id = itemId, OrderId = orderId, MenuItemId = "ci-kot-menu",
+            ClientLineId = "ci-kot-line", ItemName = "CI Kitchen Test Dish",
+            UnitPrice = 100m, LineTotal = 100m, Quantity = 1,
+            Status = "queued", KotRoundId = roundId, RoundNumber = 1,
+            CreatedAtUtc = when, UpdatedAtUtc = when,
+        });
+        db.KotRounds.Add(new LocalKotRound
+        {
+            Id = roundId, OrderId = orderId, BranchId = branchId,
+            RoundNumber = 1, DisplayNumber = 1,
+            KotNumber = "CI-KOT-0001", BusinessDate = DateOnly.FromDateTime(DateTime.Today),
+            MutationId = "ci-start-kot-round",
+            QueueEnabled = true, PreparingEnabled = false, SentAt = when,
+        });
+        db.KitchenTickets.Add(new LocalKitchenTicket
+        {
+            Id = kitchenId, OrderId = orderId, KotRoundId = roundId,
+            RoundNumber = 1, KitchenStationId = "ci-kot-station",
+            TicketNumber = "CI-KOT-TICKET", KotNumber = "CI-KOT-0001",
+            Status = "queued", QueuedAt = when,
+            CreatedAtUtc = when, UpdatedAtUtc = when,
+        });
+        db.KitchenTicketItems.Add(new LocalKitchenTicketItem
+        {
+            Id = "ci-kot-ticket-item", KitchenTicketId = kitchenId,
+            OrderItemId = itemId, ItemName = "CI Kitchen Test Dish",
+            Quantity = 1, Status = "queued",
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task CheckKitchenReadyResponsiveAsync(MainWindow owner)
+    {
+        var ready = Descendants<Button>(owner)
+            .FirstOrDefault(button => button.Name == "KotTopReadyButton")
+            ?? throw new InvalidOperationException("KOT toolbar READY action missing.");
+        Assert(FindButton(owner, "START") is null,
+            "No KOT Start step is exposed: kitchen action is READY only.");
+        Click(ready);
+        // The dispatcher must process unrelated input while the SQLite
+        // transaction is in flight (UI must not appear hung).
+        await owner.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
+        Assert(!ready.IsEnabled, "KOT READY disables repeat clicks while saving");
+
+        await WaitUntilAsync(() =>
+            Descendants<TextBlock>(owner).Any(x =>
+                x.Text.Contains("CI Kitchen Test Dish ready for waiter pickup.", StringComparison.OrdinalIgnoreCase)),
+            "Kitchen READY finishes SQLite write and reports exact dish pickup confirmation");
+        // Even the assertion must not perform synchronous SQLite work on the
+        // WPF dispatcher during an in-flight transaction.
+        var persisted = await DesktopUiTestKitchenStatusAsync();
+        Assert(persisted == "ready",
+            "One-tap READY persists the correct kitchen item state");
+        var waiterChange = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            var changes = await db.Changes.AsNoTracking()
+                .Where(x => x.EntityType == "order" && x.EntityId == "ci-kot-start-order")
+                .ToArrayAsync();
+            return changes.Any(x => x.OwnerUserId == 901 &&
+                (x.DataJson?.Contains("ready", StringComparison.OrdinalIgnoreCase) ?? false));
+        });
+        Assert(waiterChange,
+            "Kitchen READY publishes a waiter-scoped order/ticket snapshot for LAN mobile pickup alerts");
+        Assert(FindButton(owner, "PASS EXPO") is null,
+            "No unnecessary Start or Expo approval steps remain");
+    }
+
+    private static Task<string?> DesktopUiTestKitchenStatusAsync() =>
+        Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            return await db.KitchenTicketItems.AsNoTracking()
+                .Where(x => x.Id == "ci-kot-ticket-item")
+                .Select(x => x.Status)
+                .SingleOrDefaultAsync();
+        });
+
+    private static async Task SeedCashierPaymentFixtureAsync()
+    {
+        // The test KOT was made ready with a single tap; serve that order,
+        // then test a genuine local bill and payment without mocking results.
+        await Task.Run(async () =>
+        {
+            var workflow = new DesktopRestaurantWorkflowService();
+            await workflow.ServeOrderAsync("ci-kot-start-order");
+
+            await workflow.CreateBillAsync("ci-kot-start-order");
+        });
+    }
+
+    private static async Task CheckPartialPaymentsWithoutPageRefreshAsync(MainWindow owner)
+    {
+        var overlay = Descendants<Grid>(owner)
+            .Single(x => x.Name == "PosGlassModalOverlay");
+        var launch = Descendants<Button>(owner)
+            .Single(x => x.Name == "PosOpenPaymentModal");
+        Click(launch);
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Partial payment workflow opens as an iOS-style blurred modal");
+
+        var billPicker = Descendants<ComboBox>(overlay)
+            .Single(x => x.Name == "PosBillPicker");
+
+        var amount = Descendants<TextBox>(overlay)
+            .Single(x => x.Name == "PosPaymentAmount");
+        var balance = Descendants<TextBlock>(overlay)
+            .Single(x => x.Name == "PosLivePaymentBalance");
+        var pay = FindButton(overlay, "Post payment")
+            ?? throw new InvalidOperationException("Payment action missing from modal");
+        Assert(billPicker.SelectedItem is not null &&
+               !Descendants<ComboBox>(overlay).Any(x => x.Name == "PosCashierSessionPicker") &&
+               FindButton(overlay, "Open cashier session") is null,
+            "Checkout preselects the bill without a cashier-session or opening-cash form");
+        Assert(balance.Text.Contains("100.00", StringComparison.Ordinal),
+            "Open bill displays original 100 AFN balance without refreshing the page");
+
+        amount.Text = "40";
+        Click(pay);
+        await WaitUntilAsync(() =>
+            balance.Text.Contains("60.00", StringComparison.Ordinal) && pay.IsEnabled,
+            "First payment updates the live balance and safely allows another payment");
+        Assert(overlay.Visibility == Visibility.Visible,
+            "Payment modal stays open for the remaining partial payment");
+
+        amount.Text = "60";
+        Click(pay);
+        await WaitUntilAsync(() => billPicker.SelectedItem is null &&
+            balance.Text.Contains("No outstanding bill", StringComparison.Ordinal),
+            "Final payment settles the bill in-place without reloading the POS");
+        Assert(!pay.IsEnabled, "POS disables payments when no balance is due");
+
+        var persisted = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            var bill = await db.Bills.SingleAsync(x => x.OrderId == "ci-kot-start-order");
+            var payments = await db.Payments.AsNoTracking().Where(x => x.BillId == bill.Id)
+                .OrderBy(x => x.Amount).Select(x => x.Amount).ToArrayAsync();
+            return (bill.Status, bill.PaidAmount, bill.BalanceDue, Payments: payments);
+        });
+        Assert(persisted.Status == "paid" && persisted.PaidAmount == 100m &&
+               persisted.BalanceDue == 0m && persisted.Payments.SequenceEqual(new[] { 40m, 60m }),
+            "Exactly two distinct local payments settle 100 AFN; no duplicate charge or refresh");
+        var localShifts = await Task.Run(async () =>
+        {
+            await using var db = new LocalDatabaseFactory().Create();
+            return await db.CashierSessions.CountAsync(x => x.BranchId == "ci-synced-branch");
+        });
+        Assert(localShifts == 1, "Single signed-in cashier shift is automatically opened exactly once");
+
+        Click(Descendants<Button>(owner).Single(x => x.Name == "PosGlassModalClose"));
     }
 
     private static async Task SeedRecipeFixtureAsync()

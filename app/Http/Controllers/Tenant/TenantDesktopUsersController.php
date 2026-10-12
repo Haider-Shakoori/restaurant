@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Tenant;
 
 use App\Http\Controllers\Controller;
 use App\Models\TenantUser;
+use App\Services\Tenant\TenantRoleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -12,13 +13,23 @@ use Illuminate\Validation\ValidationException;
 
 class TenantDesktopUsersController extends Controller
 {
-    private const ROLES = ['owner', 'admin', 'manager', 'cashier', 'waiter', 'kitchen', 'inventory'];
+    public function __construct(
+        private readonly TenantRoleService $roles,
+    ) {}
 
     public function index(): JsonResponse
     {
-        return response()->json(['data' => TenantUser::query()
+        $roleNames = $this->roles->roleNamesByKey();
+
+        $data = TenantUser::query()
             ->orderBy('name')
-            ->get(['id', 'name', 'email', 'phone', 'role', 'is_active'])]);
+            ->get(['id', 'name', 'email', 'phone', 'role', 'is_active'])
+            ->map(fn (TenantUser $user): array => [
+                ...$user->only(['id', 'name', 'email', 'phone', 'role', 'is_active']),
+                'role_name' => $roleNames[$user->role] ?? Str::headline($user->role),
+            ]);
+
+        return response()->json(['data' => $data]);
     }
 
     public function store(Request $request): JsonResponse
@@ -27,9 +38,11 @@ class TenantDesktopUsersController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
             'phone' => ['nullable', 'string', 'max:50'],
-            'role' => ['required', Rule::in(self::ROLES)],
+            'role' => ['required', Rule::in($this->roles->assignableRoleKeys())],
             'password' => ['required', 'string', 'min:8', 'max:255'],
         ]);
+
+        $this->roles->assertCanAssignRole($request->user(), $data['role']);
 
         $user = TenantUser::query()->create([
             'public_id' => (string) Str::ulid(),
@@ -41,7 +54,7 @@ class TenantDesktopUsersController extends Controller
             'is_active' => true,
         ]);
 
-        return response()->json(['data' => $user->only(['id', 'name', 'email', 'phone', 'role', 'is_active'])], 201);
+        return response()->json(['data' => $this->userPayload($user)], 201);
     }
 
     public function update(Request $request, string $user): JsonResponse
@@ -51,12 +64,15 @@ class TenantDesktopUsersController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'phone' => ['nullable', 'string', 'max:50'],
-            'role' => ['required', Rule::in(self::ROLES)],
+            'role' => ['required', Rule::in($this->roles->assignableRoleKeys())],
             'is_active' => ['required', 'boolean'],
             'password' => ['nullable', 'string', 'min:8', 'max:255'],
         ]);
 
         $actor = $request->user();
+        $this->roles->assertCanManageUser($actor, $user);
+        $this->roles->assertCanAssignRole($actor, $data['role']);
+
         if ((int) $actor->id === (int) $user->id &&
             ($data['role'] !== $user->role || ! (bool) $data['is_active'])) {
             throw ValidationException::withMessages(['role' => 'You cannot change your own role or disable your own account.']);
@@ -85,6 +101,17 @@ class TenantDesktopUsersController extends Controller
             $user->tokens()->delete();
         }
 
-        return response()->json(['data' => $user->only(['id', 'name', 'email', 'phone', 'role', 'is_active'])]);
+        return response()->json(['data' => $this->userPayload($user)]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function userPayload(TenantUser $user): array
+    {
+        return [
+            ...$user->only(['id', 'name', 'email', 'phone', 'role', 'is_active']),
+            'role_name' => $this->roles->roleNameFor($user->role),
+        ];
     }
 }

@@ -362,13 +362,16 @@ class KitchenService
         $item->loadMissing('ticket.round');
         $workflow = $this->workflowForTicket($item->ticket);
 
-        $allowed = $workflow['preparing_stage_enabled']
-            ? [KitchenTicketItem::STATUS_PREPARING]
-            : ($workflow['kitchen_queue_enabled']
-                ? [KitchenTicketItem::STATUS_QUEUED]
-                : [KitchenTicketItem::STATUS_ACTIVE]);
+        // READY is the one-tap kitchen action. Allow historical tickets
+        // captured with Preparing enabled to skip START without mutating
+        // their snapshot or charging recipe stock twice.
+        $allowed = [
+            KitchenTicketItem::STATUS_QUEUED,
+            KitchenTicketItem::STATUS_ACTIVE,
+            KitchenTicketItem::STATUS_PREPARING,
+        ];
 
-        if (! $workflow['preparing_stage_enabled']) {
+        if ($item->status !== KitchenTicketItem::STATUS_PREPARING) {
             $this->inventory->commitProduction($item, $actor);
         }
 

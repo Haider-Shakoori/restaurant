@@ -13,7 +13,7 @@ public sealed class LocalBackupRestoreUiTests
         Assert.Contains("await BackupRestorePanelAsync()", pages);
         Assert.Contains("await maintenance.CreateBackupAsync()", pages);
         Assert.Contains("await maintenance.StageRestoreAsync(picker.FileName)", pages);
-        Assert.Contains("MessageBoxButton.YesNo", pages);
+        Assert.Contains("DesktopGlassDialog.Confirm(", pages);
         Assert.Contains("Restart Restaurant Desktop", pages);
         Assert.Contains("diagnostics.PendingRestore", pages);
     }

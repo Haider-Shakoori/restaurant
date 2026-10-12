@@ -72,6 +72,8 @@ public sealed class LocalDatabaseFactory
             await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;", cancellationToken);
             await EnsureOrderingSchemaAsync(db, cancellationToken);
             await EnsureMenuImageColumnAsync(cancellationToken);
+            await EnsureOrderDisplayNumberColumnAsync(cancellationToken);
+            await EnsureTableReservationColumnAsync(cancellationToken);
             await EnsureKotRealignmentSchemaAsync(cancellationToken);
             await BackfillOrderServiceContextAsync(cancellationToken);
             await BackfillLegacyKotRoundsAsync(cancellationToken);
@@ -132,6 +134,74 @@ public sealed class LocalDatabaseFactory
 
         await using var alter = connection.CreateCommand();
         alter.CommandText = "ALTER TABLE menu_items ADD COLUMN ImageUrl TEXT NULL;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task EnsureOrderDisplayNumberColumnAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(orders);";
+
+        var hasDisplayNumber = false;
+        await using (var reader = await pragma.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(
+                        reader.GetString(1),
+                        "DisplayNumber",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    hasDisplayNumber = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasDisplayNumber)
+        {
+            return;
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE orders ADD COLUMN DisplayNumber INTEGER NOT NULL DEFAULT 0;";
+        await alter.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task EnsureTableReservationColumnAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA table_info(dining_tables);";
+
+        var hasReservationNote = false;
+        await using (var reader = await pragma.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (string.Equals(
+                        reader.GetString(1),
+                        "ReservationNote",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    hasReservationNote = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasReservationNote)
+        {
+            return;
+        }
+
+        await using var alter = connection.CreateCommand();
+        alter.CommandText = "ALTER TABLE dining_tables ADD COLUMN ReservationNote TEXT NULL;";
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -271,6 +341,14 @@ public sealed class LocalDatabaseFactory
                 ON kot_rounds (SentAt);
 
             CREATE TABLE IF NOT EXISTS kot_counters (
+                BranchId TEXT NOT NULL,
+                BusinessDate TEXT NOT NULL,
+                LastNumber INTEGER NOT NULL,
+                UpdatedAtUtc TEXT NOT NULL,
+                PRIMARY KEY (BranchId, BusinessDate)
+            );
+
+            CREATE TABLE IF NOT EXISTS order_counters (
                 BranchId TEXT NOT NULL,
                 BusinessDate TEXT NOT NULL,
                 LastNumber INTEGER NOT NULL,
@@ -753,6 +831,7 @@ public sealed class LocalDatabaseFactory
             CREATE UNIQUE INDEX IF NOT EXISTS IX_bills_OrderId ON bills (OrderId);
             CREATE UNIQUE INDEX IF NOT EXISTS IX_bills_BillNumber ON bills (BillNumber);
             CREATE INDEX IF NOT EXISTS IX_bills_BranchId_Status ON bills (BranchId, Status);
+            CREATE INDEX IF NOT EXISTS IX_bills_IssuedAt ON bills (IssuedAt);
 
             CREATE TABLE IF NOT EXISTS bill_lines (
                 Id TEXT NOT NULL PRIMARY KEY,
@@ -794,6 +873,7 @@ public sealed class LocalDatabaseFactory
             CREATE UNIQUE INDEX IF NOT EXISTS IX_tenant_payments_ClientPaymentId ON tenant_payments (ClientPaymentId);
             CREATE INDEX IF NOT EXISTS IX_tenant_payments_CashierSessionId_Status ON tenant_payments (CashierSessionId, Status);
             CREATE INDEX IF NOT EXISTS IX_tenant_payments_BillId ON tenant_payments (BillId);
+            CREATE INDEX IF NOT EXISTS IX_tenant_payments_Status_ReceivedAt ON tenant_payments (Status, ReceivedAt);
 
             CREATE TABLE IF NOT EXISTS receipt_printer_settings (
                 Id INTEGER NOT NULL PRIMARY KEY,
@@ -951,6 +1031,7 @@ public sealed class LocalDatabaseFactory
             CREATE UNIQUE INDEX IF NOT EXISTS IX_stock_movements_IdempotencyKey ON stock_movements (IdempotencyKey);
             CREATE INDEX IF NOT EXISTS IX_stock_movements_BranchId_InventoryItemId_OccurredAt ON stock_movements (BranchId, InventoryItemId, OccurredAt);
             CREATE INDEX IF NOT EXISTS IX_stock_movements_SourceType_SourceId ON stock_movements (SourceType, SourceId);
+            CREATE INDEX IF NOT EXISTS IX_stock_movements_MovementType_OccurredAt ON stock_movements (MovementType, OccurredAt);
 
             CREATE TABLE IF NOT EXISTS recipes (
                 Id TEXT NOT NULL PRIMARY KEY,

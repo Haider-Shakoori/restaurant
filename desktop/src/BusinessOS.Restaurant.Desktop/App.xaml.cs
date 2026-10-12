@@ -64,7 +64,7 @@ public partial class App : System.Windows.Application
         if (!licenseStatus.IsValid)
         {
             var activation = new ActivationWindow(licensing);
-            var activated = activation.ShowDialog();
+            var activated = DesktopGlassDialog.ShowDialog(activation);
 
             if (activated != true)
             {
@@ -105,7 +105,8 @@ public partial class App : System.Windows.Application
             WriteCrashLog(exception, "operator-session-load");
         }
 
-        var licenseTenant = activationState.Snapshot.TenantId;
+        var license = new SignedLeaseVerifier().Verify(activationState.Lease, activationState.PublicKey);
+        var licenseTenant = license.TenantId;
         if (session is not null &&
             (!string.Equals(session.TenantId, licenseTenant, StringComparison.Ordinal) ||
              session.User is null ||
@@ -117,9 +118,8 @@ public partial class App : System.Windows.Application
 
         if (session is null)
         {
-            var configured = await new ConnectionSettingsStore().LoadAsync();
-            var signIn = new OperatorSignInWindow(licenseTenant, configured?.TenantBaseUrl);
-            if (signIn.ShowDialog() != true || signIn.SignedInSession is null)
+            var signIn = new OperatorSignInWindow(licenseTenant, activationState.TenantBaseUrl, license.TenantName);
+            if (DesktopGlassDialog.ShowDialog(signIn) != true || signIn.SignedInSession is null)
             {
                 Shutdown();
                 return;

@@ -27,6 +27,8 @@ public sealed class LocalOrder
     public required string WaiterName { get; set; }
     public required string Status { get; set; }
     public int GuestCount { get; set; }
+    /// <summary>Short daily order number shown to staff (e.g. #0007).</summary>
+    public int DisplayNumber { get; set; }
     public string? Notes { get; set; }
     public decimal Subtotal { get; set; }
     public decimal Total { get; set; }
@@ -613,6 +615,15 @@ public sealed class LocalKotRound
 }
 
 public sealed class LocalKotCounter
+{
+    public required string BranchId { get; set; }
+    public DateOnly BusinessDate { get; set; }
+    public int LastNumber { get; set; }
+    public DateTimeOffset UpdatedAtUtc { get; set; }
+}
+
+/// <summary>Daily per-branch sequence for short, memorable order numbers.</summary>
+public sealed class LocalOrderCounter
 {
     public required string BranchId { get; set; }
     public DateOnly BusinessDate { get; set; }

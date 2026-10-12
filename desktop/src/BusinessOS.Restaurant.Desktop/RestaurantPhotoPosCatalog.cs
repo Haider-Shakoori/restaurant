@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Http;
 using System.Security.Cryptography;
@@ -20,6 +21,14 @@ internal sealed record PhotoPosItem(string Id, string Name, string Category, dec
 internal static class RestaurantPhotoPosCatalog
 {
     private static readonly SemaphoreSlim DownloadSlots = new(3);
+    // Cache decoded thumbnails only while they are referenced by the UI;
+    // the durable source of truth is always the per-user disk cache.
+    private static readonly ConcurrentDictionary<string, WeakReference<BitmapImage>> DecodedImages = new();
+    private static readonly HttpClient PhotosClient = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+        UseCookies = false,
+    }) { Timeout = TimeSpan.FromSeconds(8) };
     private const int MaximumImageBytes = 3 * 1024 * 1024;
 
     public static FrameworkElement Build(
@@ -35,18 +44,66 @@ internal static class RestaurantPhotoPosCatalog
         var categoryFilters = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         var cards = new WrapPanel { Name = "PosPhotoMenuTiles" };
         var activeCategory = "All items";
-        var tileControls = new List<(PhotoPosItem Item, Button Tile)>();
+        // Capture the tenant origin AND operating mode once for the whole
+        // photo catalogue. The old path repeatedly read the encrypted
+        // activation file (once for each image), even on an offline cache hit.
+        var photoContextTask = Task.Run(async () =>
+        {
+            var session = await new WindowsSessionStore().LoadAsync().ConfigureAwait(false);
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore()
+                .LoadAsync().ConfigureAwait(false);
+            return (Origin: session?.TenantBaseUrl,
+                    Standalone: BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation));
+        });
+        const int BatchSize = 48;
+        var limit = BatchSize;
+        var rendered = new Dictionary<string, Button>(StringComparer.Ordinal);
+        var showMore = new Button
+        {
+            Name = "PosPhotoLoadMore",
+            Content = "Load more dishes",
+            MinHeight = 40,
+            Margin = new Thickness(0, 10, 0, 5),
+        };
+        showMore.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        var showing = new TextBlock
+        {
+            Name = "PosPhotoResultsCount",
+            Margin = new Thickness(4, 8, 4, 0),
+        };
+        showing.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
 
         void Filter()
         {
             var text = search.Text.Trim();
-            foreach (var (item, tile) in tileControls)
-                tile.Visibility = (activeCategory == "All items" ||
-                    string.Equals(item.Category, activeCategory, StringComparison.OrdinalIgnoreCase)) &&
-                    (item.Name.Contains(text, StringComparison.OrdinalIgnoreCase) ||
-                     item.Category.Contains(text, StringComparison.OrdinalIgnoreCase))
-                    ? Visibility.Visible : Visibility.Collapsed;
+            var matching = items.Where(item =>
+                (activeCategory == "All items" ||
+                 string.Equals(item.Category, activeCategory, StringComparison.OrdinalIgnoreCase)) &&
+                (item.Name.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                 item.Category.Contains(text, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            // WPF WrapPanel is not virtualized. Materialize only the first
+            // page of tiles, then add more as the operator requests them.
+            // Filtering still searches ALL products, including those not yet
+            // represented by UI controls.
+            cards.Children.Clear();
+            foreach (var item in matching.Take(limit))
+            {
+                if (!rendered.TryGetValue(item.Id, out var tile))
+                {
+                    tile = CreateTile(item);
+                    rendered[item.Id] = tile;
+                }
+                cards.Children.Add(tile);
+            }
+            showing.Text = $"Showing {Math.Min(limit, matching.Count)} of {matching.Count} dishes";
+            showMore.Visibility = matching.Count > limit ? Visibility.Visible : Visibility.Collapsed;
         }
+        showMore.Click += (_, _) =>
+        {
+            limit += BatchSize;
+            Filter();
+        };
 
         foreach (var category in new[] { "All items" }
             .Concat(items.Select(x => x.Category).Distinct(StringComparer.OrdinalIgnoreCase)))
@@ -57,13 +114,14 @@ internal static class RestaurantPhotoPosCatalog
             filter.Click += (_, _) =>
             {
                 activeCategory = category;
+                limit = BatchSize;
                 Filter();
             };
             categoryFilters.Children.Add(filter);
         }
         root.Children.Add(categoryFilters);
 
-        foreach (var item in items)
+        Button CreateTile(PhotoPosItem item)
         {
             var stack = new StackPanel();
             var imageFrame = new Grid { Height = 104, Background = new SolidColorBrush(Color.FromRgb(232, 238, 244)) };
@@ -75,19 +133,37 @@ internal static class RestaurantPhotoPosCatalog
             {
                 var image = new Image { Stretch = Stretch.UniformToFill, Visibility = Visibility.Collapsed };
                 imageFrame.Children.Add(image);
+                var loading = false;
                 image.Loaded += async (_, _) =>
                 {
+                    if (loading || image.Source is not null) return;
+                    loading = true;
                     try
                     {
-                        var origin = (await new WindowsSessionStore().LoadAsync())?.TenantBaseUrl;
-                        var location = await CacheMenuPhotoAsync(item.ImageUrl, origin);
-                        if (location is null) return;
-                        var bitmap = new BitmapImage();
-                        bitmap.BeginInit();
-                        bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                        bitmap.UriSource = location;
-                        bitmap.EndInit();
-                        bitmap.Freeze();
+                        var context = await photoContextTask;
+                        var location = await CacheMenuPhotoWithModeAsync(
+                            item.ImageUrl, context.Origin, context.Standalone);
+                        if (location is null || !image.IsLoaded) return;
+                        var key = location.LocalPath;
+                        if (!DecodedImages.TryGetValue(key, out var weak) ||
+                            !weak.TryGetTarget(out var bitmap))
+                        {
+                            bitmap = await Task.Run(() =>
+                            {
+                                // Decode from the durable file; OnLoad releases
+                                // its handle and allows an offline restart.
+                                var loaded = new BitmapImage();
+                                loaded.BeginInit();
+                                loaded.CacheOption = BitmapCacheOption.OnLoad;
+                                loaded.DecodePixelWidth = 320;
+                                loaded.UriSource = location;
+                                loaded.EndInit();
+                                loaded.Freeze();
+                                return loaded;
+                            });
+                            DecodedImages[key] = new WeakReference<BitmapImage>(bitmap);
+                        }
+                        if (!image.IsLoaded) return;
                         image.Source = bitmap;
                         image.Visibility = Visibility.Visible;
                     }
@@ -95,6 +171,7 @@ internal static class RestaurantPhotoPosCatalog
                     {
                         // Missing internet or corrupt image: a usable dish tile remains.
                     }
+                    finally { loading = false; }
                 };
             }
             stack.Children.Add(imageFrame);
@@ -118,11 +195,17 @@ internal static class RestaurantPhotoPosCatalog
                 Margin = new Thickness(0, 0, 9, 9),
                 ToolTip = $"Select {item.Name} · AFN {item.Price:N2}" };
             tile.Click += (_, _) => onSelect(item);
-            cards.Children.Add(tile);
-            tileControls.Add((item, tile));
+            return tile;
         }
-        search.TextChanged += (_, _) => Filter();
+        search.TextChanged += (_, _) =>
+        {
+            limit = BatchSize;
+            Filter();
+        };
+        Filter();
+        root.Children.Add(showing);
         root.Children.Add(cards);
+        root.Children.Add(showMore);
 
         if (items.Count == 0)
         {
@@ -146,8 +229,15 @@ internal static class RestaurantPhotoPosCatalog
 
     private static async Task<Uri?> CacheMenuPhotoAsync(string url, string? tenantUrl)
     {
+        // Kept as the stable public-to-test private entry point. The gallery
+        // uses the batched activation lookup instead.
         var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
-        var standalone = BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation);
+        return await CacheMenuPhotoWithModeAsync(
+            url, tenantUrl, BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation));
+    }
+
+    private static async Task<Uri?> CacheMenuPhotoWithModeAsync(string url, string? tenantUrl, bool standalone)
+    {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "BusinessOS", "Restaurant", "menu-photos");
 
@@ -164,8 +254,10 @@ internal static class RestaurantPhotoPosCatalog
         if (!IsAllowedTenantMediaUrl(url, tenantUrl)) return null;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(url)));
         var file = Path.Combine(root, hash + ".img");
-        if (File.Exists(file) && new FileInfo(file).Length > 0 &&
-            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
+        // Download once, retain on disk indefinitely. The old 15-minute
+        // TTL caused unnecessary repeat network traffic after every refresh.
+        // An explicitly changed image URL gets a distinct SHA-256 key.
+        if (File.Exists(file) && new FileInfo(file).Length > 0)
             return new Uri(file);
 
         // Standalone mode must not fetch menu photos from a remote URL.
@@ -176,12 +268,9 @@ internal static class RestaurantPhotoPosCatalog
         await DownloadSlots.WaitAsync();
         try
         {
-            if (File.Exists(file) && new FileInfo(file).Length > 0 &&
-            File.GetLastWriteTimeUtc(file) > DateTime.UtcNow.AddMinutes(-15))
+            if (File.Exists(file) && new FileInfo(file).Length > 0)
                 return new Uri(file);
-            using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
-            { Timeout = TimeSpan.FromSeconds(8) };
-            using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            using var response = await PhotosClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
             if (!response.IsSuccessStatusCode ||
                 response.Content.Headers.ContentType?.MediaType is not ("image/jpeg" or "image/png" or "image/webp") ||
                 response.Content.Headers.ContentLength > MaximumImageBytes)

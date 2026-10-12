@@ -902,6 +902,16 @@ public static class LocalEndpointMappings
             }
         });
 
+        app.MapPost("/api/v1/tables/{tableId}/mark-available", async (
+            string tableId, HttpRequest request, LocalServerOptions options,
+            LocalTerminalAuthenticator authenticator, LocalCashierService cashier, CancellationToken token) =>
+        {
+            var principal = await authenticator.AuthenticateAsync(request, options, true, token);
+            if (principal is null) return Results.Unauthorized();
+            try { return Results.Ok(new { data = await cashier.MarkTableAvailableAsync(tableId, principal, token) }); }
+            catch (LocalSyncConflictException conflict) { return CashierConflict(conflict); }
+        });
+
         app.MapPost("/api/v1/orders/{orderId}/transfer", async (
             string orderId,
             LocalTransferOrderRequest body,

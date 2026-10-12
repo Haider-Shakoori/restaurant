@@ -26,6 +26,7 @@ public sealed class LocalDiningTable
     public int Capacity { get; set; }
     public required string Status { get; set; }
     public bool IsActive { get; set; }
+    public string? ReservationNote { get; set; }
 }
 
 public sealed class LocalMenuCategory
