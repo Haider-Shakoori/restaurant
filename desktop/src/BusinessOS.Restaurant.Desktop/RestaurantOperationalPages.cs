@@ -41,7 +41,7 @@ internal static class RestaurantOperationalPages
             "users" => await UsersAsync(),
             "expenses" => await ExpensesAsync(),
             "closing" => await OperationalActionViews.ClosingAsync(),
-            "reports" => Reports(diagnostics),
+            "reports" => await ReportsAsync(),
             "settings" => await SettingsAsync(diagnostics),
             _ => Placeholder(route),
         };
@@ -2374,92 +2374,287 @@ internal static class RestaurantOperationalPages
         return Scroll(panel);
     }
 
-    private static FrameworkElement Reports(LanDiagnosticsViewModel diagnostics)
+    private static async Task<FrameworkElement> ReportsAsync()
     {
-        var panel = Stack();
-        panel.DataContext = diagnostics.Reports;
-        panel.Children.Add(Card(
-            "Reports & accounting",
-            "Financial and kitchen performance data stay local-first. Kitchen metrics use KOT/item timestamps and the same warning/late thresholds configured in Restaurant Settings."));
+        // Reports read the same local SQLite store as the rest of the
+        // workstation, so the page is complete offline and on the LAN. The
+        // LocalReportingService is shared with the local HTTP API and is what
+        // the reporting tests exercise.
+        var factory = new LocalDatabaseFactory();
+        await factory.EnsureCreatedAsync();
+        var reports = new LocalReportingService(factory);
 
-        var filters = new WrapPanel { Margin = new Thickness(0, 12, 0, 12) };
-        var branch = new TextBox { Width = 180, Height = 34, Margin = new Thickness(0, 4, 8, 6) };
-        branch.SetBinding(TextBox.TextProperty, new Binding(nameof(ReportsViewModel.BranchId))
+        var branches = await DesktopUiWork.RunAsync(async () =>
         {
-            Mode = BindingMode.TwoWay,
-            UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged,
+            await using var db = factory.Create();
+            return await db.Branches.AsNoTracking()
+                .Where(x => x.IsActive)
+                .OrderBy(x => x.Name)
+                .Select(x => new ReportBranchChoice(x.Id, x.Name))
+                .ToListAsync();
         });
-        var from = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
-        from.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.From)) { Mode = BindingMode.TwoWay });
-        var to = new DatePicker { Width = 150, Margin = new Thickness(0, 4, 8, 6) };
-        to.SetBinding(DatePicker.SelectedDateProperty, new Binding(nameof(ReportsViewModel.To)) { Mode = BindingMode.TwoWay });
-        var button = new Button { Content = "Run report", Width = 140, Height = 38, Margin = new Thickness(0, 2, 0, 0) };
-        button.SetBinding(Button.CommandProperty, new Binding(nameof(ReportsViewModel.RefreshReportsCommand)));
-        filters.Children.Add(branch);
-        filters.Children.Add(from);
-        filters.Children.Add(to);
-        filters.Children.Add(button);
-        panel.Children.Add(filters);
 
-        var metrics = new UniformGrid { Columns = 4, Margin = new Thickness(0, 0, 0, 16) };
-        foreach (var metric in new[]
-        {
-            ("KOT ROUNDS", nameof(ReportsViewModel.KitchenRounds)),
-            ("AVG KITCHEN", nameof(ReportsViewModel.KitchenAverage)),
-            ("LATE ITEMS", nameof(ReportsViewModel.KitchenLateItems)),
-            ("RUSH ITEMS", nameof(ReportsViewModel.KitchenRushItems)),
-        })
-        {
-            var stack = new StackPanel();
-            var label = new TextBlock
-            {
-                Text = metric.Item1,
-                FontSize = 11,
-                FontWeight = FontWeights.Bold,
-            };
-            label.SetResourceReference(TextBlock.ForegroundProperty, "TextMutedBrush");
-            var value = new TextBlock
-            {
-                FontSize = 22,
-                FontWeight = FontWeights.Bold,
-                Margin = new Thickness(0, 4, 0, 0),
-            };
-            value.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-            value.SetBinding(TextBlock.TextProperty, new Binding(metric.Item2));
-            stack.Children.Add(label);
-            stack.Children.Add(value);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var root = new StackPanel();
 
-            var metricCard = new Border
-            {
-                Child = stack,
-                Padding = new Thickness(14),
-                Margin = new Thickness(0, 0, 10, 0),
-                CornerRadius = new CornerRadius(12),
-                BorderThickness = new Thickness(1),
-            };
-            metricCard.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
-            metricCard.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
-            metrics.Children.Add(metricCard);
+        var title = new TextBlock
+        {
+            Text = "Reports & accounting",
+            FontSize = 22,
+            FontWeight = FontWeights.Bold,
+        };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+        root.Children.Add(title);
+
+        var toolbar = new WrapPanel { Margin = new Thickness(0, 12, 0, 14) };
+
+        var branchBox = new ComboBox
+        {
+            Width = 220,
+            Height = 34,
+            Margin = new Thickness(0, 4, 10, 6),
+            DisplayMemberPath = nameof(ReportBranchChoice.Name),
+        };
+        foreach (var branch in branches) branchBox.Items.Add(branch);
+        if (branches.Count > 0) branchBox.SelectedIndex = 0;
+
+        var fromBox = new DatePicker
+        {
+            Width = 150,
+            Height = 34,
+            Margin = new Thickness(0, 4, 8, 6),
+            SelectedDate = today.ToDateTime(TimeOnly.MinValue),
+        };
+        var toBox = new DatePicker
+        {
+            Width = 150,
+            Height = 34,
+            Margin = new Thickness(0, 4, 8, 6),
+            SelectedDate = today.ToDateTime(TimeOnly.MinValue),
+        };
+        var run = new Button
+        {
+            Content = "Run report",
+            Height = 38,
+            MinWidth = 130,
+            Margin = new Thickness(0, 2, 10, 6),
+        };
+
+        toolbar.Children.Add(branchBox);
+        toolbar.Children.Add(fromBox);
+        toolbar.Children.Add(toBox);
+        toolbar.Children.Add(run);
+        root.Children.Add(toolbar);
+
+        var contentHost = new StackPanel();
+        root.Children.Add(contentHost);
+
+        if (branches.Count == 0)
+        {
+            contentHost.Children.Add(EmptyState("No active branch is configured. Add a branch before running reports."));
+            return Scroll(root);
         }
-        panel.Children.Add(metrics);
 
-        var kitchenGrid = GridFor(diagnostics.Reports.KitchenStations);
-        kitchenGrid.MinHeight = 240;
-        kitchenGrid.Columns.Add(Column("Station", nameof(ReportKitchenStationRow.Station), 180));
-        kitchenGrid.Columns.Add(Column("Items", nameof(ReportKitchenStationRow.Items), 80));
-        kitchenGrid.Columns.Add(Column("Active", nameof(ReportKitchenStationRow.ActiveItems), 80));
-        kitchenGrid.Columns.Add(Column("Rush", nameof(ReportKitchenStationRow.RushItems), 80));
-        kitchenGrid.Columns.Add(Column("Late", nameof(ReportKitchenStationRow.LateItems), 80));
-        kitchenGrid.Columns.Add(Column("Queue min", nameof(ReportKitchenStationRow.AverageQueueMinutes), 110));
-        kitchenGrid.Columns.Add(Column("Prep min", nameof(ReportKitchenStationRow.AveragePreparationMinutes), 110));
-        kitchenGrid.Columns.Add(Column("Total min", nameof(ReportKitchenStationRow.AverageTotalMinutes), 110));
-        kitchenGrid.Columns.Add(Column("Utilization %", nameof(ReportKitchenStationRow.UtilizationPercent), 110));
-        panel.Children.Add(Section(
+        async Task RenderAsync()
+        {
+            if (branchBox.SelectedItem is not ReportBranchChoice branch) return;
+            var from = fromBox.SelectedDate is { } f ? DateOnly.FromDateTime(f) : today;
+            var to = toBox.SelectedDate is { } t ? DateOnly.FromDateTime(t) : today;
+            if (to < from) (from, to) = (to, from);
+
+            run.IsEnabled = false;
+            var previous = run.Content;
+            run.Content = "Loading…";
+            try
+            {
+                var data = await DesktopUiWork.RunAsync(async () =>
+                {
+                    var summary = await reports.SummaryAsync(branch.Id, from, to);
+                    var payments = await reports.PaymentsAsync(branch.Id, from, to);
+                    var items = await reports.TopItemsAsync(branch.Id, from, to, 10);
+                    var kitchen = await reports.KitchenPerformanceAsync(branch.Id, from, to);
+                    var closings = await reports.ClosingsAsync(branch.Id, from, to);
+                    return (summary, payments, items, kitchen, closings);
+                });
+
+                contentHost.Children.Clear();
+                contentHost.Children.Add(BuildReportsContent(
+                    data.summary, data.payments, data.items, data.kitchen, data.closings, from, to));
+            }
+            catch (Exception ex)
+            {
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, ex.Message);
+            }
+            finally
+            {
+                run.Content = previous ?? "Run report";
+                run.IsEnabled = true;
+            }
+        }
+
+        void UseRange(DateOnly from, DateOnly to)
+        {
+            fromBox.SelectedDate = from.ToDateTime(TimeOnly.MinValue);
+            toBox.SelectedDate = to.ToDateTime(TimeOnly.MinValue);
+        }
+
+        Button Preset(string label, Func<DateOnly> from, Func<DateOnly> to)
+        {
+            var button = new Button { Content = label, Height = 38, MinWidth = 92, Margin = new Thickness(0, 2, 8, 6) };
+            UseSecondaryStyle(button);
+            button.Click += async (_, _) =>
+            {
+                UseRange(from(), to());
+                await RenderAsync();
+            };
+            return button;
+        }
+
+        toolbar.Children.Add(Preset("Today", () => today, () => today));
+        toolbar.Children.Add(Preset("Yesterday", () => today.AddDays(-1), () => today.AddDays(-1)));
+        toolbar.Children.Add(Preset("Last 7 days", () => today.AddDays(-6), () => today));
+        toolbar.Children.Add(Preset("This month", () => new DateOnly(today.Year, today.Month, 1), () => today));
+
+        run.Click += async (_, _) => await RenderAsync();
+        await RenderAsync();
+        return Scroll(root);
+    }
+
+    private static UIElement BuildReportsContent(
+        LocalReportSummary summary,
+        IReadOnlyList<LocalPaymentBreakdown> payments,
+        IReadOnlyList<LocalTopItem> items,
+        LocalKitchenPerformanceReport kitchen,
+        IReadOnlyList<LocalClosingReport> closings,
+        DateOnly from,
+        DateOnly to)
+    {
+        var period = $"{from:dd MMM yyyy} – {to:dd MMM yyyy}";
+        var positive = Color.FromRgb(34, 160, 94);
+        var negative = Color.FromRgb(220, 70, 70);
+
+        var container = new StackPanel();
+        container.Children.Add(DashboardCards(
+            ("▥", "NET SALES", $"AFN {summary.NetSales:N2}", $"{summary.BillCount} bill(s) in period", Color.FromRgb(34, 197, 94)),
+            ("↑", "GROSS PROFIT", $"AFN {summary.GrossProfit:N2}", "Net sales less material usage", summary.GrossProfit >= 0m ? positive : negative),
+            ("▣", "PAYMENTS COLLECTED", $"AFN {summary.Payments:N2}", "Recorded customer payments", Color.FromRgb(14, 165, 233)),
+            ("=", "CASH VARIANCE", $"AFN {summary.CashVariance:N2}", "Finalized cash difference", summary.CashVariance == 0m ? positive : negative)));
+
+        container.Children.Add(DashboardMetrics(18,
+            ("+", "GROSS SALES", $"AFN {summary.GrossSales:N2}", "Before discounts", Color.FromRgb(100, 116, 139)),
+            ("−", "DISCOUNTS", $"AFN {summary.Discounts:N2}", "Applied to bills", Color.FromRgb(245, 158, 11)),
+            ("↓", "COST OF GOODS", $"AFN {summary.CostOfGoods:N2}", "Consumed ingredient cost", negative),
+            ("▦", "INVENTORY VALUE", $"AFN {summary.InventoryValue:N2}", "Current on-hand value", Color.FromRgb(236, 72, 153))));
+
+        // Payments and top items share one row, collapsing to a single column
+        // on compact cashier displays.
+        var breakdown = new Grid();
+        breakdown.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        breakdown.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        breakdown.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var paymentsPanel = DashboardPanel("Payments", $"{payments.Count} method(s) · {period}", BuildPaymentsPanel(payments));
+        Grid.SetColumn(paymentsPanel, 0);
+        breakdown.Children.Add(paymentsPanel);
+
+        var itemsPanel = DashboardPanel("Top items", $"Best sellers · {period}", BuildTopItemsPanel(items));
+        Grid.SetColumn(itemsPanel, 2);
+        breakdown.Children.Add(itemsPanel);
+
+        breakdown.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        breakdown.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        breakdown.SizeChanged += (_, _) =>
+        {
+            var narrow = breakdown.ActualWidth < 820;
+            breakdown.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 14);
+            breakdown.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(itemsPanel, narrow ? 0 : 2);
+            Grid.SetRow(itemsPanel, narrow ? 1 : 0);
+        };
+        container.Children.Add(breakdown);
+
+        container.Children.Add(DashboardPanel(
             "Kitchen performance",
-            "Stations are ordered by total preparation time so bottlenecks surface first.",
-            kitchenGrid));
+            $"{kitchen.KotRounds} round(s) · {period}",
+            BuildKitchenPanel(kitchen)));
 
-        return Scroll(panel);
+        container.Children.Add(DashboardPanel(
+            "Daily closings",
+            $"Finalized business dates · {period}",
+            BuildClosingsPanel(closings)));
+
+        return container;
+    }
+
+    private static UIElement BuildPaymentsPanel(IReadOnlyList<LocalPaymentBreakdown> payments)
+    {
+        if (payments.Count == 0) return EmptyState("No payments were recorded in this period.");
+        var grid = GridFor(payments);
+        grid.MinHeight = 160;
+        grid.MaxHeight = 320;
+        grid.Columns.Add(Column("Method", nameof(LocalPaymentBreakdown.Method), 150));
+        grid.Columns.Add(Column("Count", nameof(LocalPaymentBreakdown.Count), 80));
+        grid.Columns.Add(Column("Amount", nameof(LocalPaymentBreakdown.Amount), 160));
+        return grid;
+    }
+
+    private static UIElement BuildTopItemsPanel(IReadOnlyList<LocalTopItem> items)
+    {
+        if (items.Count == 0) return EmptyState("No items were billed in this period.");
+        var grid = GridFor(items);
+        grid.MinHeight = 160;
+        grid.MaxHeight = 320;
+        grid.Columns.Add(Column("Item", nameof(LocalTopItem.ItemName), 260));
+        grid.Columns.Add(Column("Qty", nameof(LocalTopItem.Quantity), 80));
+        grid.Columns.Add(Column("Sales", nameof(LocalTopItem.Sales), 150));
+        return grid;
+    }
+
+    private static UIElement BuildKitchenPanel(LocalKitchenPerformanceReport kitchen)
+    {
+        var panel = new StackPanel();
+        panel.Children.Add(DashboardMetrics(18,
+            ("☷", "KOT ROUNDS", kitchen.KotRounds.ToString(), "Rounds sent to kitchen", Color.FromRgb(245, 158, 11)),
+            ("▦", "TICKETS", kitchen.Tickets.ToString(), "Kitchen tickets", Color.FromRgb(14, 165, 233)),
+            ("▥", "ITEMS", kitchen.Items.ToString(), "Preparation items", Color.FromRgb(34, 197, 94)),
+            ("▣", "RUSH", kitchen.RushItems.ToString(), "Priority items", Color.FromRgb(236, 72, 153)),
+            ("!", "LATE", kitchen.LateItems.ToString(), "Beyond late threshold", Color.FromRgb(220, 70, 70)),
+            ("~", "AVG TOTAL", $"{kitchen.AverageTotalMinutes:N2} min", "Queue to ready", Color.FromRgb(100, 116, 139))));
+
+        if (kitchen.Stations.Count == 0)
+        {
+            panel.Children.Add(EmptyState("No kitchen production was recorded in this period."));
+            return panel;
+        }
+
+        var grid = GridFor(kitchen.Stations);
+        grid.MinHeight = 200;
+        grid.MaxHeight = 400;
+        grid.Columns.Add(Column("Station", nameof(LocalKitchenStationPerformance.Station), 180));
+        grid.Columns.Add(Column("Items", nameof(LocalKitchenStationPerformance.Items), 80));
+        grid.Columns.Add(Column("Active", nameof(LocalKitchenStationPerformance.ActiveItems), 80));
+        grid.Columns.Add(Column("Rush", nameof(LocalKitchenStationPerformance.RushItems), 80));
+        grid.Columns.Add(Column("Late", nameof(LocalKitchenStationPerformance.LateItems), 80));
+        grid.Columns.Add(Column("Queue min", nameof(LocalKitchenStationPerformance.AverageQueueMinutes), 100));
+        grid.Columns.Add(Column("Prep min", nameof(LocalKitchenStationPerformance.AveragePreparationMinutes), 100));
+        grid.Columns.Add(Column("Total min", nameof(LocalKitchenStationPerformance.AverageTotalMinutes), 100));
+        grid.Columns.Add(Column("Util %", nameof(LocalKitchenStationPerformance.UtilizationPercent), 90));
+        panel.Children.Add(grid);
+        return panel;
+    }
+
+    private static UIElement BuildClosingsPanel(IReadOnlyList<LocalClosingReport> closings)
+    {
+        if (closings.Count == 0) return EmptyState("No finalized business dates were closed in this period.");
+        var grid = GridFor(closings);
+        grid.MinHeight = 160;
+        grid.MaxHeight = 360;
+        grid.Columns.Add(Column("Business date", nameof(LocalClosingReport.BusinessDate), 150));
+        grid.Columns.Add(Column("Version", nameof(LocalClosingReport.Version), 80));
+        grid.Columns.Add(Column("Net sales", nameof(LocalClosingReport.NetSales), 150));
+        grid.Columns.Add(Column("Payments", nameof(LocalClosingReport.Payments), 150));
+        grid.Columns.Add(Column("Cash variance", nameof(LocalClosingReport.CashVariance), 140));
+        return grid;
     }
 
     private static async Task<FrameworkElement> SettingsAsync(LanDiagnosticsViewModel diagnostics)
@@ -4142,4 +4337,5 @@ internal static class RestaurantOperationalPages
     private sealed record ShiftRow(string Name, string Role, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt, int BreakMinutes);
     private sealed record ExpenseBranchChoice(string Id, string Name);
     private sealed record ExpenseRow(DateOnly Date, string Branch, string Category, string Description, decimal Amount, string Currency, string Method, string? Reference);
+    private sealed record ReportBranchChoice(string Id, string Name);
 }
