@@ -50,6 +50,11 @@ public sealed class TableOrderModalTests
         Assert.Contains("Add one guest to this table", source);
         Assert.Contains("workflow.UpdateGuestsAsync(clientOrderId, next, token)", source);
         Assert.Contains("workflow.VoidOrderItemAsync(", source);
+        // Lines already sent to the kitchen can be cancelled from the table
+        // modal too (post-KOT void with an audited reason); only billed orders
+        // hide the action.
+        Assert.Contains("voids its kitchen ticket item", source);
+        Assert.Contains("PromptAuditReason(", source);
         Assert.Contains("Removed while ordering at the table", source);
         Assert.Contains("guests < capacity", source);
         Assert.Contains("guests > 1", source);

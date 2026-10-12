@@ -246,6 +246,12 @@ public sealed class DesktopRestaurantWorkflowService
     {
         var payload = JsonSerializer.SerializeToElement(new { client_order_id = clientOrderId });
         await PushSingleAsync("order.kot.send", payload, token);
+        // Audible confirmation that the floor sent an order to the kitchen.
+        // Honors the restaurant's KOT sound setting and never blocks the send.
+        if ((await _settings.GetAsync(token)).KotSoundEnabled)
+        {
+            OperationalAlertSounds.OrderPlaced();
+        }
     }
 
     public async Task FireCourseAsync(

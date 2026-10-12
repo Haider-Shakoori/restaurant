@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Media;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -2665,11 +2664,23 @@ internal static class OperationalActionViews
                 panel.Children.Add(empty);
             }
 
+            // A dish can be cancelled one by one even after it reached the
+            // kitchen: the order.item.void workflow voids its KOT item (started
+            // production becomes waste), releases reserved stock and
+            // recalculates the order total. Hidden once the order is billed.
+            var cancellableOrderId = order is not null &&
+                order.Status is not ("billed" or "closed" or "cancelled")
+                ? order.ClientOrderId
+                : null;
             foreach (var line in lines)
             {
                 var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                if (cancellableOrderId is not null)
+                {
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                }
                 var text = new TextBlock
                 {
                     Text = $"{line.Quantity} × {line.ItemName}{(line.Unsent ? "  · not sent" : "")}",
@@ -2688,6 +2699,60 @@ internal static class OperationalActionViews
                 };
                 Grid.SetColumn(amount, 1);
                 row.Children.Add(amount);
+                if (cancellableOrderId is not null)
+                {
+                    var cancelLine = Button("Cancel");
+                    cancelLine.Name = "DiningRoomCancelLineButton";
+                    cancelLine.MinWidth = 74;
+                    cancelLine.Height = 28;
+                    cancelLine.Margin = new Thickness(10, 0, 0, 0);
+                    cancelLine.Padding = new Thickness(8, 0, 8, 0);
+                    cancelLine.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+                    cancelLine.ToolTip = line.Unsent
+                        ? $"Cancel {line.ItemName} before it is sent"
+                        : $"Cancel {line.ItemName} — voids its kitchen ticket item";
+                    var captured = line;
+                    cancelLine.Click += async (_, _) =>
+                    {
+                        if (busy)
+                        {
+                            return;
+                        }
+
+                        var reason = PromptAuditReason(
+                            $"Cancel {captured.ItemName}",
+                            captured.Unsent
+                                ? $"Cancel {captured.Quantity} × {captured.ItemName}? It has not been sent to the kitchen yet."
+                                : $"Cancel {captured.Quantity} × {captured.ItemName}? It was already sent to the kitchen:\n" +
+                                  "the KOT item is voided and any started production is recorded as waste.",
+                            captured.Unsent ? "Cancelled before kitchen send" : "Cancelled at the table");
+                        if (reason is null)
+                        {
+                            return;
+                        }
+
+                        busy = true;
+                        try
+                        {
+                            await DesktopUiWork.RunBoundedAsync(
+                                token => workflow.VoidOrderItemAsync(
+                                    cancellableOrderId, captured.ClientLineId, reason, token),
+                                TimeSpan.FromSeconds(25));
+                            statusText.Text = $"{captured.ItemName} cancelled.";
+                            await RefreshAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            statusText.Text = ex.Message;
+                        }
+                        finally
+                        {
+                            busy = false;
+                        }
+                    };
+                    Grid.SetColumn(cancelLine, 2);
+                    row.Children.Add(cancelLine);
+                }
                 panel.Children.Add(row);
             }
 
@@ -2730,11 +2795,22 @@ internal static class OperationalActionViews
             vacant.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
             vacant.Visibility = order is null && table.Status == "occupied"
                 ? Visibility.Visible : Visibility.Collapsed;
+            // Whole-order cancellation: voids every line (KOT history kept,
+            // produced food becomes waste) and frees the table. Hidden once
+            // the order is billed — then payment is the only way forward.
+            var cancelOrder = Button("Cancel order");
+            cancelOrder.Name = "DiningRoomCancelOrderButton";
+            cancelOrder.MinHeight = 44;
+            cancelOrder.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            cancelOrder.Visibility = order is not null &&
+                order.Status is not ("billed" or "closed" or "cancelled")
+                ? Visibility.Visible : Visibility.Collapsed;
             panel.Children.Add(addDishes);
             panel.Children.Add(reserve);
             panel.Children.Add(vacant);
             panel.Children.Add(send);
             panel.Children.Add(pay);
+            panel.Children.Add(cancelOrder);
 
             addDishes.Click += async (_, _) =>
             {
@@ -2854,6 +2930,41 @@ internal static class OperationalActionViews
                     await RefreshAsync();
                 }
             };
+            cancelOrder.Click += async (_, _) =>
+            {
+                if (busy || order is null)
+                {
+                    return;
+                }
+
+                var reason = PromptAuditReason(
+                    $"Cancel {table.Name}'s order",
+                    $"Cancel the whole order for {table.Name} ({order.ShortNumber})?\n" +
+                    "Every line is voided, kitchen history is preserved, produced food is recorded as waste and the table is freed.",
+                    "Cancelled at the table");
+                if (reason is null)
+                {
+                    return;
+                }
+
+                busy = true;
+                try
+                {
+                    await DesktopUiWork.RunBoundedAsync(
+                        token => workflow.CancelOrderAsync(order.ClientOrderId, reason, token),
+                        TimeSpan.FromSeconds(25));
+                    statusText.Text = $"{table.Name}: order cancelled.";
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally
+                {
+                    busy = false;
+                }
+            };
             vacant.Click += async (_, _) =>
             {
                 if (busy)
@@ -2963,6 +3074,13 @@ internal static class OperationalActionViews
         var settingsService = new LocalRestaurantSettingsService(factory);
         var settings = await DesktopUiWork.RunAsync(() => settingsService.GetAsync());
         var rows = await DesktopUiWork.RunAsync(() => LoadKitchenBoardRowsAsync(factory));
+
+        // Item ids already announced as ready so a LAN/tablet change or a local
+        // tap plays the pickup cue exactly once per dish.
+        var knownReadyIds = rows
+            .Where(row => row.Status == "ready")
+            .Select(row => row.ItemId)
+            .ToHashSet(StringComparer.Ordinal);
 
         var workflow = new DesktopRestaurantWorkflowService();
         var principal = await DesktopUiWork.RunAsync(() => workflow.CurrentPrincipalAsync());
@@ -3270,7 +3388,12 @@ internal static class OperationalActionViews
             panel.Children.Add(itemTitle);
 
             var chips = new WrapPanel();
-            chips.Children.Add(stateChip);
+            // The ready column already says "Ready for pickup"; repeating a
+            // READY chip on every pickup card is extra text, so it is skipped.
+            if (row.Status != "ready")
+            {
+                chips.Children.Add(stateChip);
+            }
             if (row.Priority == "rush") chips.Children.Add(KitchenChip("RUSH"));
             if (row.SeatNumber.HasValue) chips.Children.Add(KitchenChip($"Seat {row.SeatNumber.Value}"));
             if (row.CourseNumber.HasValue)
@@ -3280,21 +3403,10 @@ internal static class OperationalActionViews
             }
             panel.Children.Add(chips);
 
-            if (row.Status == "ready")
-            {
-                var pickup = KitchenDetail(
-                    "NEXT STEP",
-                    "Ready for pickup. The waiter delivers the food, then marks the complete order SERVED in POS & Orders. Billing follows service.");
-                pickup.FontWeight = FontWeights.SemiBold;
-                pickup.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
-                panel.Children.Add(pickup);
-            }
-            else if (row.Status == "completed")
-            {
-                panel.Children.Add(KitchenDetail(
-                    "SERVED",
-                    "The order was marked served in POS. Keep this ticket for its audit history."));
-            }
+            // Ready cards stay lean: the column header ("Ready for pickup") and
+            // the READY chip already say everything the runner needs, and the
+            // pickup handoff lives once in the board's handoff panel above.
+            // (Completed tickets never load on the live board.)
 
             if (!string.IsNullOrWhiteSpace(row.Modifiers))
                 panel.Children.Add(KitchenDetail("Modifiers", row.Modifiers));
@@ -3356,6 +3468,11 @@ internal static class OperationalActionViews
                         await DesktopUiWork.RunBoundedAsync(primaryAction, TimeSpan.FromSeconds(25));
                         statusText.Text = success ?? "Kitchen item updated.";
                         DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
+                        knownReadyIds.Add(row.ItemId);
+                        if (settings.KotSoundEnabled)
+                        {
+                            OperationalAlertSounds.OrderReady();
+                        }
                     }
                     catch (OperationCanceledException ex)
                     {
@@ -3530,6 +3647,8 @@ internal static class OperationalActionViews
             RefreshStationChoices();
             RefreshSelectedDishes();
             RenderBoard();
+            knownReadyIds.UnionWith(
+                rows.Where(row => row.Status == "ready").Select(row => row.ItemId));
         }
 
         markReady.Click += async (_, _) =>
@@ -3546,6 +3665,11 @@ internal static class OperationalActionViews
                 if (action.Action is null) return;
                 await DesktopUiWork.RunBoundedAsync(action.Action, TimeSpan.FromSeconds(25));
                 statusText.Text = action.Success;
+                knownReadyIds.Add(dish.ItemId);
+                if (settings.KotSoundEnabled)
+                {
+                    OperationalAlertSounds.OrderReady();
+                }
                 await ReloadKitchenBoardAsync();
             }
             catch (Exception ex)
@@ -3584,7 +3708,7 @@ internal static class OperationalActionViews
             rows.Any(row => (row.Status is "queued" or "active") &&
                             DateTimeOffset.UtcNow - row.QueuedAt < TimeSpan.FromMinutes(1)))
         {
-            SystemSounds.Exclamation.Play();
+            OperationalAlertSounds.OrderPlaced();
         }
 
         var ageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -3635,11 +3759,21 @@ internal static class OperationalActionViews
                         .Where(row => !knownIds.Contains(row.ItemId) &&
                                       row.Status is "queued" or "active")
                         .ToArray();
+                    // A dish marked ready on another LAN terminal (tablet or a
+                    // second desktop) must alert the expo/runner on this board.
+                    var newlyReady = latestRows
+                        .Where(row => row.Status == "ready" &&
+                                      !knownReadyIds.Contains(row.ItemId))
+                        .ToArray();
 
                     rows.Clear();
                     rows.AddRange(latestRows);
                     settings = latestSettings;
                     knownIds = rows.Select(row => row.ItemId).ToHashSet(StringComparer.Ordinal);
+                    knownReadyIds = rows
+                        .Where(row => row.Status == "ready")
+                        .Select(row => row.ItemId)
+                        .ToHashSet(StringComparer.Ordinal);
                     boardSignature = latestSignature;
 
                     RefreshStationChoices();
@@ -3648,7 +3782,12 @@ internal static class OperationalActionViews
 
                     if (settings.KotSoundEnabled && newProduction.Length > 0)
                     {
-                        SystemSounds.Exclamation.Play();
+                        OperationalAlertSounds.OrderPlaced();
+                    }
+
+                    if (settings.KotSoundEnabled && newlyReady.Length > 0)
+                    {
+                        OperationalAlertSounds.OrderReady();
                     }
                 }
             }
@@ -4045,22 +4184,38 @@ internal static class OperationalActionViews
                     FontWeight = FontWeights.SemiBold,
                     VerticalAlignment = VerticalAlignment.Center,
                 });
-                if (line.Unsent && !billed)
+                if (!billed)
                 {
                     var remove = Button("×");
                     remove.MinWidth = 30;
                     remove.Height = 26;
                     remove.Margin = new Thickness(0);
                     remove.Padding = new Thickness(0);
-                    remove.ToolTip = $"Remove {line.ItemName} (audited void)";
+                    remove.ToolTip = line.Unsent
+                        ? $"Remove {line.ItemName} (audited void)"
+                        : $"Cancel {line.ItemName} — voids its kitchen ticket item";
                     remove.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
                     var captured = line;
-                    remove.Click += async (_, _) => await RunActionAsync(
-                        remove,
-                        token => workflow.VoidOrderItemAsync(
-                            clientOrderId!, captured.ClientLineId,
-                            "Removed while ordering at the table", token),
-                        $"Removed {captured.ItemName}.");
+                    remove.Click += async (_, _) =>
+                    {
+                        var reason = captured.Unsent
+                            ? "Removed while ordering at the table"
+                            : PromptAuditReason(
+                                $"Cancel {captured.ItemName}",
+                                $"Cancel {captured.Quantity} × {captured.ItemName}? It was already sent to the kitchen:\n" +
+                                "the KOT item is voided and any started production is recorded as waste.",
+                                "Cancelled at the table");
+                        if (reason is null)
+                        {
+                            return;
+                        }
+
+                        await RunActionAsync(
+                            remove,
+                            token => workflow.VoidOrderItemAsync(
+                                clientOrderId!, captured.ClientLineId, reason, token),
+                            captured.Unsent ? $"Removed {captured.ItemName}." : $"Cancelled {captured.ItemName}.");
+                    };
                     right.Children.Add(remove);
                 }
                 Grid.SetColumn(right, 1);
@@ -4662,6 +4817,74 @@ internal static class OperationalActionViews
         return (keys, fullScreen);
     }
 
+    /// <summary>
+    /// Audited reason prompt used when cancelling a single dish. Works for
+    /// items still waiting to be sent and for items already sent to the kitchen
+    /// (post-KOT void). Returns null when the operator keeps the item, closes
+    /// the prompt or leaves the reason empty.
+    /// </summary>
+    private static string? PromptAuditReason(string title, string prompt, string initialReason)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 470,
+            SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize,
+            Owner = System.Windows.Application.Current?.MainWindow,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+        };
+        var content = new StackPanel { Margin = new Thickness(22) };
+        var message = new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap };
+        content.Children.Add(message);
+        var reason = new TextBox
+        {
+            Text = initialReason,
+            Margin = new Thickness(0, 12, 0, 0),
+            MinHeight = 36,
+        };
+        System.Windows.Automation.AutomationProperties.SetName(reason, "Cancellation reason");
+        content.Children.Add(reason);
+        var actions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+        var confirm = Button("Cancel item");
+        confirm.Name = "VoidReasonConfirmButton";
+        confirm.MinWidth = 140;
+        confirm.IsDefault = true;
+        var keep = Button("Keep item");
+        keep.IsCancel = true;
+        keep.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+        actions.Children.Add(confirm);
+        actions.Children.Add(keep);
+        content.Children.Add(actions);
+
+        var accepted = false;
+        confirm.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(reason.Text))
+            {
+                message.Text = "Enter a short reason so the cancellation is auditable.";
+                reason.Focus();
+                return;
+            }
+
+            accepted = true;
+            dialog.DialogResult = true;
+        };
+        keep.Click += (_, _) => dialog.DialogResult = false;
+        dialog.Loaded += (_, _) =>
+        {
+            reason.Focus();
+            reason.SelectAll();
+        };
+        dialog.Content = new ScrollViewer
+        {
+            Content = content,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        DesktopGlassDialog.ShowDialog(dialog);
+        return accepted ? reason.Text.Trim() : null;
+    }
+
     private static Border Card(UIElement child)
     {
         var border = new Border
@@ -4814,7 +5037,9 @@ internal static class OperationalActionViews
                 _ when order is not null &&
                        !string.IsNullOrWhiteSpace(order.DiningTableId) &&
                        tables.TryGetValue(order.DiningTableId, out var table)
-                    => $"Table {table.Name}",
+                    => table.Name.StartsWith("Table", StringComparison.OrdinalIgnoreCase)
+                        ? table.Name
+                        : $"Table {table.Name}",
                 _ => "Dine-in",
             };
 

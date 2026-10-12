@@ -77,7 +77,11 @@ public sealed class KitchenBoardPresentationTests
         var source = File.ReadAllText(Path.Combine(RepositoryRoot(), "desktop", "src",
             "BusinessOS.Restaurant.Desktop", "OperationalActionViews.cs"));
         Assert.Contains("label.Text = currentStatus == \"ready\" ? \"PICKUP\" : \"SERVED\"", source);
-        Assert.Contains("Ready for pickup. The waiter delivers the food", source);
+        // Ready cards are intentionally lean: the long pickup instruction was
+        // removed as extra text; the handoff lives once in the board panel and
+        // the duplicate READY chip is skipped inside the ready column.
+        Assert.DoesNotContain("Ready for pickup. The waiter delivers the food", source);
+        Assert.Contains("if (row.Status != \"ready\")", source);
         Assert.Contains("OPEN POS & ORDERS · MARK SERVED", source);
         Assert.Contains("row.Status == \"ready\"", source);
         Assert.Contains("role", source, StringComparison.OrdinalIgnoreCase);
@@ -99,6 +103,32 @@ public sealed class KitchenBoardPresentationTests
         Assert.Contains("_save.IsEnabled = available && _hasValidBranch", source);
         Assert.Contains("if (!_cloudAvailable)", source);
         Assert.Contains("No active branch on the tenant", source);
+    }
+
+    [Fact]
+    public void Order_placed_and_ready_play_distinct_alerts()
+    {
+        var root = Path.Combine(RepositoryRoot(), "desktop", "src",
+            "BusinessOS.Restaurant.Desktop");
+        var sounds = File.ReadAllText(Path.Combine(root, "OperationalAlertSounds.cs"));
+        // Two clearly different tones so staff never confuse a new order with
+        // a ready-for-pickup dish.
+        Assert.Contains("public static void OrderPlaced()", sounds);
+        Assert.Contains("public static void OrderReady()", sounds);
+        Assert.Contains("SystemSounds.Exclamation", sounds);
+        Assert.Contains("SystemSounds.Asterisk", sounds);
+
+        // Sending an order to the kitchen is audible on the floor...
+        var workflow = File.ReadAllText(Path.Combine(root,
+            "DesktopRestaurantWorkflowService.cs"));
+        Assert.Contains("OperationalAlertSounds.OrderPlaced()", workflow);
+
+        // ...and a dish becoming ready (locally or from another LAN terminal)
+        // rings the pickup cue on the kitchen board exactly once.
+        var views = File.ReadAllText(Path.Combine(root, "OperationalActionViews.cs"));
+        Assert.Contains("OperationalAlertSounds.OrderReady()", views);
+        Assert.Contains("knownReadyIds", views);
+        Assert.Contains("!knownReadyIds.Contains(row.ItemId)", views);
     }
 
     private static string RepositoryRoot()

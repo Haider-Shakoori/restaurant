@@ -10,7 +10,14 @@ internal static class ModuleHome
 {
     public static FrameworkElement Create(string role, ICommand navigate)
     {
-        var cards = new WrapPanel { Margin = new Thickness(22, 18, 12, 18) };
+        // Centered grid of module cards: the wrap panel reports its natural
+        // (widest-line) width and is centered inside the scroll viewport, so
+        // the tiles sit in the middle of the page instead of hugging the left.
+        var cards = new WrapPanel
+        {
+            Margin = new Thickness(22, 18, 22, 18),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
         // Large native Windows glyphs: crisp at any size, no extra downloads.
         (string Route, string Glyph, string Title)[] modules =
         [

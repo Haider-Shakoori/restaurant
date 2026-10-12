@@ -100,6 +100,11 @@ public sealed class TableOccupancyWorkspaceTests
         Assert.Contains("ClearTableAsync", views);
         Assert.Contains("Name = \"DiningRoomVacantButton\"", views);
         Assert.Contains("Awaiting clearing", views);
+        // A single dish (even after it reached the kitchen) and the whole
+        // order can be cancelled from the dining room with an audited reason.
+        Assert.Contains("Name = \"DiningRoomCancelLineButton\"", views);
+        Assert.Contains("Name = \"DiningRoomCancelOrderButton\"", views);
+        Assert.Contains("PromptAuditReason(", views);
         Assert.Contains("Name = \"DiningRoomReserveButton\"", views);
         Assert.Contains("ReserveTableAsync", views);
         Assert.Contains("CancelReservationAsync", views);

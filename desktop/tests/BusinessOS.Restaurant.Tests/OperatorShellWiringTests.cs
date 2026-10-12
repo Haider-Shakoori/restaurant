@@ -84,6 +84,8 @@ public sealed class OperatorShellWiringTests
         Assert.Contains("RestaurantWorkspaceRoutes.CanOpen(role, m.Route)", home);
         Assert.Contains("\"dashboard\"", home);
         Assert.Contains("\"settings\"", home);
+        // The module cards are centered in the middle of the page.
+        Assert.Contains("HorizontalAlignment = HorizontalAlignment.Center", home);
     }
 
     [Fact]
