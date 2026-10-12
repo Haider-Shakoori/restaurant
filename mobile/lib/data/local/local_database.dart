@@ -16,7 +16,7 @@ class LocalDatabase implements SyncStore {
         p.join(await getDatabasesPath(), 'businessos_restaurant_waiter.db');
     final database = await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -137,6 +137,15 @@ class LocalDatabase implements SyncStore {
             created_at TEXT NOT NULL
           )
         ''');
+        await db.execute('''
+          CREATE TABLE submit_rollback (
+            mutation_id TEXT PRIMARY KEY,
+            local_order_id TEXT NOT NULL,
+            order_status TEXT NOT NULL,
+            lines_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )
+        ''');
         await db.execute(
           'CREATE INDEX outbox_ready_idx ON outbox(status, next_attempt_at, id)',
         );
@@ -213,6 +222,17 @@ class LocalDatabase implements SyncStore {
           // only when necessary, preserving orders and the durable outbox.
           await _upgradeNullableOrderTable(db);
         }
+        if (oldVersion < 8) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS submit_rollback (
+              mutation_id TEXT PRIMARY KEY,
+              local_order_id TEXT NOT NULL,
+              order_status TEXT NOT NULL,
+              lines_json TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          ''');
+        }
       },
     );
 
@@ -267,31 +287,45 @@ class LocalDatabase implements SyncStore {
 
   @override
   Future<List<OutboxMutation>> pendingMutations({int limit = 50}) async {
-    final now = DateTime.now().toUtc().toIso8601String();
+    final now = DateTime.now().toUtc();
     final rows = await _db.query(
       'outbox',
-      where:
-          "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-      whereArgs: <Object?>[now],
+      where: "status = 'pending'",
       orderBy: 'id ASC',
       limit: limit,
     );
 
-    return rows
-        .map((row) {
-          return OutboxMutation(
-            id: row['id']! as int,
-            mutationId: row['mutation_id']! as String,
-            operation: row['operation']! as String,
-            payload: Map<String, Object?>.from(
-              jsonDecode(row['payload_json']! as String)
-                  as Map<String, dynamic>,
-            ),
-            occurredAt: DateTime.parse(row['occurred_at']! as String),
-            attempts: row['attempts']! as int,
-          );
-        })
-        .toList(growable: false);
+    final ready = <OutboxMutation>[];
+
+    for (final row in rows) {
+      final nextAttemptAt = row['next_attempt_at'] as String?;
+
+      // Preserve creation order: never let a later mutation overtake an
+      // earlier one that is still backing off. Dependent mutations (for
+      // example order.item.add after order.open) rely on this FIFO contract.
+      if (nextAttemptAt != null) {
+        final retryAt = DateTime.tryParse(nextAttemptAt);
+        if (retryAt != null && retryAt.isAfter(now)) {
+          break;
+        }
+      }
+
+      ready.add(
+        OutboxMutation(
+          id: row['id']! as int,
+          mutationId: row['mutation_id']! as String,
+          operation: row['operation']! as String,
+          payload: Map<String, Object?>.from(
+            jsonDecode(row['payload_json']! as String)
+                as Map<String, dynamic>,
+          ),
+          occurredAt: DateTime.parse(row['occurred_at']! as String),
+          attempts: row['attempts']! as int,
+        ),
+      );
+    }
+
+    return ready;
   }
 
   @override
@@ -439,6 +473,11 @@ class LocalDatabase implements SyncStore {
         where: 'mutation_id = ?',
         whereArgs: <Object?>[mutationId],
       );
+      await txn.delete(
+        'submit_rollback',
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
       await _reapplyLocalOccupancy(txn);
     });
   }
@@ -449,6 +488,13 @@ class LocalDatabase implements SyncStore {
     Map<String, Object?> result,
   ) async {
     await _db.transaction((txn) async {
+      // A rejected/conflicted submit must not leave the order optimistically
+      // marked as sent. Restore the pre-submit local state so the waiter can
+      // correct the order and retry it.
+      if (mutation.operation == 'order.submit') {
+        await _rollbackSubmit(txn, mutation.mutationId);
+      }
+
       await txn.update(
         'outbox',
         <String, Object?>{
@@ -466,6 +512,102 @@ class LocalDatabase implements SyncStore {
         'payload_json': jsonEncode(mutation.payload),
         'created_at': DateTime.now().toUtc().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await _reapplyLocalOccupancy(txn);
+    });
+  }
+
+  Future<void> _rollbackSubmit(
+    DatabaseExecutor txn,
+    String mutationId,
+  ) async {
+    final rows = await txn.query(
+      'submit_rollback',
+      where: 'mutation_id = ?',
+      whereArgs: <Object?>[mutationId],
+      limit: 1,
+    );
+
+    if (rows.isEmpty) {
+      return;
+    }
+
+    final snapshot = rows.first;
+    final localOrderId = snapshot['local_order_id']!.toString();
+    final rawLines = jsonDecode(snapshot['lines_json']! as String);
+    final lines = rawLines is List<Object?> ? rawLines : const <Object?>[];
+
+    for (final rawLine in lines) {
+      if (rawLine is! Map<Object?, Object?>) {
+        continue;
+      }
+      final line = Map<String, Object?>.from(rawLine);
+      await txn.update(
+        'order_items',
+        <String, Object?>{
+          'dispatched_quantity':
+              (line['dispatched_quantity'] as num?)?.toInt() ?? 0,
+          'status': 'pending',
+        },
+        where: 'local_line_id = ?',
+        whereArgs: <Object?>[line['local_line_id']],
+      );
+    }
+
+    await txn.update(
+      'orders',
+      <String, Object?>{
+        'status': snapshot['order_status']!.toString(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'local_order_id = ?',
+      whereArgs: <Object?>[localOrderId],
+    );
+
+    await txn.delete(
+      'submit_rollback',
+      where: 'mutation_id = ?',
+      whereArgs: <Object?>[mutationId],
+    );
+  }
+
+  Future<void> retryMutation(String mutationId) async {
+    await _db.transaction((txn) async {
+      await txn.update(
+        'outbox',
+        <String, Object?>{
+          'status': 'pending',
+          'attempts': 0,
+          'next_attempt_at': null,
+          'last_error': null,
+        },
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
+      await txn.delete(
+        'conflicts',
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
+    });
+  }
+
+  Future<void> discardMutation(String mutationId) async {
+    await _db.transaction((txn) async {
+      await txn.delete(
+        'outbox',
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
+      await txn.delete(
+        'conflicts',
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
+      await txn.delete(
+        'submit_rollback',
+        where: 'mutation_id = ?',
+        whereArgs: <Object?>[mutationId],
+      );
     });
   }
 
@@ -1072,6 +1214,34 @@ class LocalDatabase implements SyncStore {
       }
 
       final now = DateTime.now().toUtc().toIso8601String();
+
+      // Record the pre-submit local state so a rejected/conflicted
+      // order.submit can be rolled back instead of stranding the order.
+      final orderRow = await txn.query(
+        'orders',
+        columns: const <String>['status'],
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[localOrderId],
+        limit: 1,
+      );
+      final priorStatus = orderRow.isEmpty
+          ? 'draft'
+          : orderRow.first['status']!.toString();
+      final priorLines = await txn.query(
+        'order_items',
+        columns: const <String>['local_line_id', 'dispatched_quantity'],
+        where:
+            "local_order_id = ? AND dispatched_quantity < quantity AND course_state != 'held'",
+        whereArgs: <Object?>[localOrderId],
+      );
+      await txn.insert('submit_rollback', <String, Object?>{
+        'mutation_id': mutationId,
+        'local_order_id': localOrderId,
+        'order_status': priorStatus,
+        'lines_json': jsonEncode(priorLines),
+        'created_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
       await txn.update(
         'orders',
         <String, Object?>{
@@ -1475,12 +1645,16 @@ class LocalDatabase implements SyncStore {
   }
 
   int _toMinor(String amount) {
-    final parts = amount.split('.');
-    final whole = int.parse(parts.first);
+    final normalized = amount.trim();
+    final negative = normalized.startsWith('-');
+    final unsigned = negative ? normalized.substring(1) : normalized;
+    final parts = unsigned.split('.');
+    final whole = int.parse(parts.first.isEmpty ? '0' : parts.first);
     final fraction = parts.length > 1
         ? parts[1].padRight(2, '0').substring(0, 2)
         : '00';
-    return (whole * 100) + int.parse(fraction);
+    final minor = (whole * 100) + int.parse(fraction);
+    return negative ? -minor : minor;
   }
 
   String _fromMinor(int amount) {

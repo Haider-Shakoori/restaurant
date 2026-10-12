@@ -772,3 +772,49 @@ class _FakeProbe implements ServerProbe {
     return health;
   }
 }
+
+  test('cloud fallback rejects a different tenant', () async {
+    final store = _MemorySyncStore(pending: const <OutboxMutation>[]);
+    final credentials = _MemoryCredentials(
+      _session(
+        connectionMode: ConnectionMode.automatic,
+        activeChannel: ConnectionChannel.local,
+        baseUrl: 'http://192.168.1.20:8787',
+        localBaseUrl: 'http://192.168.1.20:8787',
+        cloudBaseUrl: 'https://restaurant.test',
+        tenantId: 'tenant-1',
+      ),
+    );
+    final api = _FakeApi(
+      heartbeatError: const ApiException(
+        code: 'offline',
+        message: 'Local unreachable.',
+      ),
+      pullResponses: const <Map<String, Object?>>[],
+    );
+    final resolver = ConnectionResolver(
+      probe: _FakeProbe(<String, ServerHealth>{
+        'http://192.168.1.20:8787': const ServerHealth(
+          baseUrl: 'http://192.168.1.20:8787',
+          tenantId: 'tenant-1',
+          service: 'BusinessOS Restaurant Desktop',
+        ),
+        'https://restaurant.test': const ServerHealth(
+          baseUrl: 'https://restaurant.test',
+          tenantId: 'wrong-tenant',
+          service: 'BusinessOS Restaurant Cloud',
+        ),
+      }),
+    );
+
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: credentials,
+      leaseVerifier: const _AlwaysValidLease(),
+      connectionResolver: resolver,
+    );
+
+    await expectLater(engine.syncNow(), throwsA(isA<ApiException>()));
+    expect(store.states['last_sync_error'], 'tenant_mismatch');
+  });

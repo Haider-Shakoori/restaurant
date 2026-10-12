@@ -50,6 +50,8 @@ The server returns deterministic conflict codes including:
 
 The local outbox remains inspectable until the mutation is accepted or explicitly classified as a conflict/rejection.
 
+Conflicts are surfaced in the Conflicts screen, where the waiter can either retry the mutation (returning it to the outbox) or discard it. A conflicted `order.submit` also rolls the order back to its pre-submit local state so it is not left stranded as if it had been sent.
+
 ## Incremental pull
 
 The tenant server emits a monotonic sync change sequence for mobile-visible menu, table and order data.

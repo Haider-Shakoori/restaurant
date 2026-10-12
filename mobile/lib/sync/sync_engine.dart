@@ -104,6 +104,15 @@ class SyncEngine {
       localUrl: session.localBaseUrl,
       cloudUrl: session.cloudBaseUrl,
     );
+
+    final expectedTenant = session.tenantId;
+    if (expectedTenant != null && target.tenantId != expectedTenant) {
+      throw const ApiException(
+        code: 'tenant_mismatch',
+        message: 'The Restaurant cloud endpoint belongs to another tenant.',
+      );
+    }
+
     final switched = session.copyWith(
       baseUrl: target.baseUrl,
       activeChannel: ConnectionChannel.cloud,
