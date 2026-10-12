@@ -1566,11 +1566,12 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
                           final optionId = option['id']!.toString();
                           final selected =
                               _selected[id]?.contains(optionId) ?? false;
+                          final delta = option['price_delta']!.toString();
+                          final deltaLabel =
+                              delta.startsWith('-') ? delta : '+$delta';
                           final label =
                               option['name']!.toString() +
-                              ' (+' +
-                              option['price_delta']!.toString() +
-                              ' AFN)';
+                              ' ($deltaLabel AFN)';
 
                           return FilterChip(
                             selected: selected,

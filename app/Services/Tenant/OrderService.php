@@ -8,6 +8,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\RestaurantBranch;
 use App\Models\TenantUser;
+use App\Support\Money;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -455,10 +456,7 @@ class OrderService
 
     private function toMinor(string $amount): int
     {
-        [$whole, $fraction] = array_pad(explode('.', $amount, 2), 2, '0');
-        $fraction = substr(str_pad($fraction, 2, '0'), 0, 2);
-
-        return ((int) $whole * 100) + (int) $fraction;
+        return Money::toMinor($amount);
     }
 
     private function fromMinor(int $amount): string
