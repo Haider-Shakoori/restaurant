@@ -8,12 +8,18 @@ concurrency:
 # analyze/tests through ci.yml; no distributable installers are built.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - build/restaurant-ipa-20261013
+    paths:
+      - .github/workflows/restaurant-mobile-release.yml
 
 permissions:
   contents: read
 
 jobs:
   android-release:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -131,11 +137,16 @@ jobs:
             --dart-define=RESTAURANT_FIREBASE_SENDER_ID="$RESTAURANT_FIREBASE_SENDER_ID" \
             --dart-define=RESTAURANT_FIREBASE_PROJECT_ID="$RESTAURANT_FIREBASE_PROJECT_ID"
 
-      - name: Validate built iOS permissions
+      - name: Validate built iOS permissions and Restaurant app name
         shell: bash
         run: |
           PLIST="build/ios/iphoneos/Runner.app/Info.plist"
           test -f "$PLIST"
+
+          DISPLAY_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST")
+          BUNDLE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "$PLIST")
+          test "$DISPLAY_NAME" = "Restaurant"
+          test "$BUNDLE_NAME" = "Restaurant"
 
           CAMERA=$(/usr/libexec/PlistBuddy -c "Print :NSCameraUsageDescription" "$PLIST")
           LOCAL=$(/usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" "$PLIST")
@@ -156,12 +167,12 @@ jobs:
           mkdir -p build/unsigned-ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/unsigned-ipa/Payload/
           cd build/unsigned-ipa
-          zip -qry ../BusinessOS-Restaurant-Waiter-unsigned.ipa Payload
+          zip -qry ../Restaurant.ipa Payload
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: BusinessOS-Restaurant-Waiter-unsigned-ipa
-          path: mobile/build/BusinessOS-Restaurant-Waiter-unsigned.ipa
+          name: Restaurant-iOS-unsigned
+          path: mobile/build/Restaurant.ipa
           if-no-files-found: error
           retention-days: 30
