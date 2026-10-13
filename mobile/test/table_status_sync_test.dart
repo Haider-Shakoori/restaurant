@@ -52,6 +52,9 @@ void main() {
       }, cursorScope: 'local');
 
       expect((await db.tables()).single['status'], 'available');
+      // A server-owned draft missing from the bootstrap's active list is no
+      // longer an open order, even if the phone last saw it as a draft.
+      expect(await db.activeOrders(), isEmpty);
 
       await db.applyPull(<String, Object?>{
         'cursor': 9,
