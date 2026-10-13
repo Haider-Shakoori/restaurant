@@ -32,11 +32,40 @@ class SyncEngine {
     var session = await _requireSession();
     session = await _resolveActiveChannel(session);
     final refreshed = await _refreshLeaseIfNeeded(session);
-    final data = await _api.syncBootstrap(refreshed);
-    await _store.applyBootstrap(
-      data,
-      cursorScope: refreshed.activeChannel.name,
-    );
+    try {
+      final data = await _api.syncBootstrap(refreshed);
+      final expectedTenant = refreshed.tenantId;
+      final receivedTenant = data['tenant_id']?.toString();
+      if (expectedTenant != null &&
+          expectedTenant.isNotEmpty &&
+          receivedTenant != expectedTenant) {
+        throw const ApiException(
+          code: 'tenant_mismatch',
+          message: 'The active Restaurant server belongs to a different tenant.',
+        );
+      }
+
+      await _store.applyBootstrap(
+        data,
+        cursorScope: refreshed.activeChannel.name,
+      );
+      await _store.setSystemState('last_sync_error', '');
+      await _store.setSystemState(
+        'last_sync_at',
+        DateTime.now().toUtc().toIso8601String(),
+      );
+    } on ApiException catch (error) {
+      await _store.setSystemState('last_sync_error', error.code);
+      rethrow;
+    }
+  }
+
+  /// Reconcile a full authoritative server snapshot after sending local work.
+  /// An ordinary incremental pull cannot repair a missed server change or an
+  /// old cached order. Never delete queued work when refreshing the snapshot.
+  Future<void> syncAndRefresh() async {
+    await syncNow();
+    await bootstrap();
   }
 
   Future<void> syncNow() async {

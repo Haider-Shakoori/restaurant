@@ -1,0 +1,161 @@
+name: Restaurant Mobile Sync Recovery Release
+# Final validation includes authoritative table roster and delivery diagnostics.
+# Retry after isolated SQLite regression fixture correction
+
+on:
+  push:
+    branches:
+      - fix/restaurant-mobile-sync-recovery-20261014
+    paths:
+      - .github/workflows/restaurant-mobile-sync-recovery-release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Scaffold and configure Android
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          data,n=re.subn(r'android:label="[^"]+"', 'android:label="Restaurant"', p.read_text(), count=1)
+          assert n==1
+          p.write_text(data)
+          PY
+      - name: Generate icons
+        working-directory: .
+        run: |
+          python3 -m pip install pillow
+          python3 tools/generate_restaurant_icons.py --repo-root . --android
+      - run: flutter pub get
+      - name: Analyze and test sync recovery
+        run: |
+          flutter analyze
+          flutter test
+      - name: Build APK
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk build/Restaurant-sync-fixed.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-Android-Sync-Fixed-1.0.2
+          path: mobile/build/Restaurant-sync-fixed.apk
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Scaffold and configure iOS
+        run: |
+          flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_ios.dart
+      - name: Generate icons
+        working-directory: .
+        run: |
+          python3 -m venv .icon-venv
+          source .icon-venv/bin/activate
+          python -m pip install pillow
+          python tools/generate_restaurant_icons.py --repo-root . --ios
+      - name: Use compatible iOS networking plugin
+        run: flutter pub add connectivity_plus:7.0.0
+      - name: Analyze and test table status fix
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign
+      - name: Verify Restaurant display name
+        run: |
+          plist=build/ios/iphoneos/Runner.app/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")" = Restaurant
+      - name: Package IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          cd build/ipa
+          zip -qry ../Restaurant-sync-fixed.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-iOS-Sync-Fixed-1.0.2-unsigned
+          path: mobile/build/Restaurant-sync-fixed.ipa
+          if-no-files-found: error
+
+  windows:
+    name: Restaurant Windows desktop unsigned
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Generate Restaurant desktop icons
+        working-directory: .
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python tools/generate_restaurant_icons.py --repo-root . --desktop
+      - name: Compile and test desktop
+        shell: pwsh
+        run: |
+          dotnet restore BusinessOS.Restaurant.Desktop.slnx
+          if ($LASTEXITCODE -ne 0) { throw "Restore failed" }
+          dotnet build BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+          dotnet test BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build
+          if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
+      - name: Publish unsigned self-contained Windows app
+        shell: pwsh
+        run: |
+          ./installer/Build-Release.ps1 -CertificatePath '' -CertificatePassword ''
+          if ($LASTEXITCODE -ne 0) { throw "Publish failed" }
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          if (!(Test-Path $exe)) { throw "EXE missing" }
+          if ((Get-AuthenticodeSignature -FilePath $exe).Status -ne 'NotSigned') {
+            throw "Windows EXE must be unsigned"
+          }
+          Get-FileHash $exe -Algorithm SHA256
+      - name: Smoke-test Windows EXE startup
+        shell: pwsh
+        run: |
+          $exe = "artifacts/publish/BusinessOS.Restaurant.Desktop.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) { throw "Desktop application exited on startup" }
+          }
+          finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-Windows-Sync-Fixed-unsigned
+          path: desktop/artifacts/publish/
+          if-no-files-found: error
+          retention-days: 30

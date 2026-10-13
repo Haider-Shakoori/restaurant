@@ -315,6 +315,13 @@ class LocalDatabase implements SyncStore {
       await txn.delete('menu_items');
       await txn.delete('menu_categories');
       await txn.delete('branches');
+      // A full bootstrap is the authoritative active table roster. Keep
+      // inactive rows for any pending offline order's history, but never
+      // display orphaned/renamed rows from a prior server snapshot or login.
+      await txn.update(
+        'dining_tables',
+        <String, Object?>{'is_active': 0},
+      );
 
       for (final rawBranch in data['branches'] as List<Object?>? ?? const []) {
         final branch = Map<String, Object?>.from(
@@ -353,11 +360,40 @@ class LocalDatabase implements SyncStore {
         );
       }
 
-      for (final rawOrder in data['orders'] as List<Object?>? ?? const []) {
-        await _upsertOrderSnapshot(
-          txn,
-          Map<String, Object?>.from(rawOrder! as Map<Object?, Object?>),
+      final serverOrders = data['orders'] as List<Object?>? ?? const [];
+      final activeServerOrderIds = <String>{};
+      for (final rawOrder in serverOrders) {
+        final order = Map<String, Object?>.from(
+          rawOrder! as Map<Object?, Object?>,
         );
+        activeServerOrderIds.add(order['id']!.toString());
+        await _upsertOrderSnapshot(txn, order);
+      }
+
+      // Bootstrap is the server's authoritative ACTIVE order list for this
+      // signed-in waiter. Stale server-backed drafts must not stay open forever
+      // after a desktop cashier closes/cancels them or reassigns the waiter.
+      // Preserve every order while ANY local mutation still awaits delivery:
+      // that work must never be discarded by a server snapshot.
+      final outstanding = Sqflite.firstIntValue(await txn.rawQuery(
+        "SELECT COUNT(*) FROM outbox WHERE status IN ('pending', 'conflict')",
+      )) ?? 0;
+      if (outstanding == 0) {
+        final cached = await txn.query(
+          'orders',
+          columns: <String>['local_order_id', 'server_id'],
+          where: "server_id IS NOT NULL AND status NOT IN ('closed', 'cancelled')",
+        );
+        for (final row in cached) {
+          if (!activeServerOrderIds.contains(row['server_id']?.toString())) {
+            await txn.update(
+              'orders',
+              <String, Object?>{'status': 'closed'},
+              where: 'local_order_id = ?',
+              whereArgs: <Object?>[row['local_order_id']],
+            );
+          }
+        }
       }
 
       final restaurantSettings = data['restaurant_settings'];
@@ -1317,11 +1353,34 @@ class LocalDatabase implements SyncStore {
   }
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
-    final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+    // Only a *pending order.open mutation* may override the server's table
+    // status. A forgotten local draft or a rejected mutation is not evidence
+    // of a real occupied table, and must not lock all the phone's tables.
+    final pending = await txn.query(
+      'outbox',
+      columns: <String>['payload_json'],
+      where: "status = 'pending' AND operation = 'order.open'",
+    );
+    final awaitingServer = <String>{};
+    for (final entry in pending) {
+      final payload = jsonDecode(entry['payload_json']! as String);
+      if (payload is Map<String, dynamic>) {
+        final id = payload['client_order_id']?.toString();
+        if (id != null) awaitingServer.add(id);
+      }
+    }
+    if (awaitingServer.isEmpty) return;
+
+    final drafts = await txn.rawQuery(
+      "SELECT local_order_id, table_id FROM orders "
+      "WHERE server_id IS NULL AND table_id IS NOT NULL "
+      "AND status IN ('draft', 'submitted_pending_sync')",
     );
 
-    for (final row in rows) {
+    for (final row in drafts) {
+      if (!awaitingServer.contains(row['local_order_id']?.toString())) {
+        continue;
+      }
       await txn.update(
         'dining_tables',
         <String, Object?>{'status': 'occupied'},

@@ -10,6 +10,50 @@ import 'package:businessos_restaurant_waiter/sync/sync_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('explicit refresh performs full bootstrap after pulling changes', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 7, 'has_more': false, 'changes': <Object?>[],
+        },
+      ],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+    await engine.syncAndRefresh();
+    expect(api.pullCursors, <int>[0]);
+    // The authoritative bootstrap reset the pull cursor after the stale
+    // incremental snapshot. A subsequent pull starts from this cursor.
+    expect(store.cursors['cloud'], 0);
+    expect(store.states['last_sync_error'], '');
+    expect(store.states['last_sync_at'], isNotEmpty);
+  });
+
+  test('bootstrap rejects a different restaurant tenant', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(pullResponses: <Map<String, Object?>>[]);
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session(tenantId: 'tenant-1')),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+    await expectLater(
+      engine.bootstrap(),
+      throwsA(
+        isA<ApiException>().having(
+          (e) => e.code, 'code', 'tenant_mismatch',
+        ),
+      ),
+    );
+    expect(store.states['last_sync_error'], 'tenant_mismatch');
+  });
+
   test('accepted mutations are applied and pull cursor resumes', () async {
     final store = _MemorySyncStore(
       pending: <OutboxMutation>[

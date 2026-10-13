@@ -1,0 +1,103 @@
+name: Verify and Package Table Status Fix
+# Retry after isolated SQLite regression fixture correction
+
+on:
+  push:
+    branches:
+      - fix/mobile-table-status-authority-20261014
+    paths:
+      - .github/workflows/verify-table-status-fix.yml
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Scaffold and configure Android
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          data,n=re.subn(r'android:label="[^"]+"', 'android:label="Restaurant"', p.read_text(), count=1)
+          assert n==1
+          p.write_text(data)
+          PY
+      - name: Generate icons
+        working-directory: .
+        run: |
+          python3 -m pip install pillow
+          python3 tools/generate_restaurant_icons.py --repo-root . --android
+      - run: flutter pub get
+      - name: Analyze and test table status fix
+        run: |
+          flutter analyze
+          flutter test
+      - name: Build APK
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk build/Restaurant-table-status-fixed.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-Android-TableStatus-Fixed
+          path: mobile/build/Restaurant-table-status-fixed.apk
+          if-no-files-found: error
+
+  ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Scaffold and configure iOS
+        run: |
+          flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_ios.dart
+      - name: Generate icons
+        working-directory: .
+        run: |
+          python3 -m venv .icon-venv
+          source .icon-venv/bin/activate
+          python -m pip install pillow
+          python tools/generate_restaurant_icons.py --repo-root . --ios
+      - name: Use compatible iOS networking plugin
+        run: flutter pub add connectivity_plus:7.0.0
+      - name: Analyze and test table status fix
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build unsigned iOS app
+        run: flutter build ios --release --no-codesign
+      - name: Verify Restaurant display name
+        run: |
+          plist=build/ios/iphoneos/Runner.app/Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")" = Restaurant
+      - name: Package IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          cd build/ipa
+          zip -qry ../Restaurant-table-status-fixed.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-iOS-TableStatus-Fixed-unsigned
+          path: mobile/build/Restaurant-table-status-fixed.ipa
+          if-no-files-found: error
