@@ -3036,11 +3036,15 @@ internal static class OperationalActionViews
                 busy = true;
                 try
                 {
-                    var newClientId = await DesktopUiWork.RunBoundedAsync(
-                        token => workflow.OpenOrderAsync(
+                    string? newClientId = null;
+                    await DesktopUiWork.RunBoundedAsync(async token =>
+                    {
+                        newClientId = await workflow.OpenOrderAsync(
                             "dine_in", table.Id, "", details.Value.Label,
-                            details.Value.Guests, null, token, separateParty: true),
-                        TimeSpan.FromSeconds(25));
+                            details.Value.Guests, null, token, separateParty: true);
+                    }, TimeSpan.FromSeconds(25));
+                    if (newClientId is null)
+                        throw new InvalidOperationException("Party order was not confirmed.");
                     await using var db = factory.Create();
                     selectedPartyOrderId = await db.Orders.AsNoTracking()
                         .Where(x => x.ClientOrderId == newClientId)
