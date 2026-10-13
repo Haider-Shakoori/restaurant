@@ -45,7 +45,20 @@ class SyncCoordinator {
       (_) => unawaited(_safeSync()),
     );
 
+    // Reconcile the active table roster and stale server-backed orders on
+    // every app startup, not only when the user manually presses Sync.
+    unawaited(_initialBootstrap());
     unawaited(_watch());
+  }
+
+  Future<void> _initialBootstrap() async {
+    try {
+      await _engine.bootstrap();
+      await _onChanges?.call();
+    } on Object {
+      // Keep existing SQLite data accessible offline. The engine persists
+      // server errors for the connection diagnostics on the Tables screen.
+    }
   }
 
   Future<void> syncNow() => _safeSync();
