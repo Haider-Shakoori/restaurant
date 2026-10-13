@@ -615,6 +615,33 @@ public sealed class LocalCashierService
             split.BalanceDue = Money(split.Amount - split.PaidAmount);
             split.Status = split.BalanceDue == 0m ? "paid" : "open";
         }
+        else
+        {
+            // A cashier may accept one payment for an entire previously split
+            // bill. Without allocating it across the split balances, the bill
+            // settles to zero but SettleBillAsync refuses to close the order.
+            // This is a common source of stranded paid-looking tables.
+            var outstandingSplits = await db.BillSplits
+                .Where(value => value.BillId == bill.Id && value.BalanceDue > 0m)
+                .OrderBy(value => value.SplitNumber)
+                .ToArrayAsync(cancellationToken);
+            var unallocated = amount;
+            foreach (var part in outstandingSplits)
+            {
+                if (unallocated <= 0m) break;
+                var appliedToPart = Math.Min(unallocated, part.BalanceDue);
+                part.PaidAmount = Money(part.PaidAmount + appliedToPart);
+                part.BalanceDue = Money(part.Amount - part.PaidAmount);
+                part.Status = part.BalanceDue == 0m ? "paid" : "open";
+                unallocated = Money(unallocated - appliedToPart);
+            }
+            if (outstandingSplits.Length > 0 && unallocated != 0m)
+            {
+                throw new LocalSyncConflictException(
+                    "bill_state_conflict",
+                    "Bill split balances do not match the outstanding total. Reconcile the bill before payment.");
+            }
+        }
 
         await db.SaveChangesAsync(cancellationToken);
 
