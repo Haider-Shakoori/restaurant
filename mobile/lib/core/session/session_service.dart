@@ -135,6 +135,11 @@ class SessionService {
       bootstrap,
       cursorScope: session.activeChannel.name,
     );
+    await _database.setSystemState('last_sync_error', '');
+    await _database.setSystemState(
+      'last_sync_at',
+      DateTime.now().toUtc().toIso8601String(),
+    );
 
     return activationTarget;
   }
