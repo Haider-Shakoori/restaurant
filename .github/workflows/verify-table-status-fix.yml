@@ -1,4 +1,5 @@
 name: Verify and Package Table Status Fix
+# Retry after regression fixture correction
 
 on:
   push:
