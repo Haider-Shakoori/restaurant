@@ -353,12 +353,18 @@ class LocalDatabase implements SyncStore {
         );
       }
 
+      final liveServerOrderIds = <String>{};
       for (final rawOrder in data['orders'] as List<Object?>? ?? const []) {
-        await _upsertOrderSnapshot(
-          txn,
-          Map<String, Object?>.from(rawOrder! as Map<Object?, Object?>),
+        final order = Map<String, Object?>.from(
+          rawOrder! as Map<Object?, Object?>,
         );
+        liveServerOrderIds.add(order['id']!.toString());
+        await _upsertOrderSnapshot(txn, order);
       }
+      // Bootstrap is an authoritative ACTIVE snapshot for this waiter. Retire
+      // server-backed orders no longer in it without deleting history, and
+      // never retire a locally edited order with unsent/conflicted mutations.
+      await _archiveMissingServerOrders(txn, liveServerOrderIds);
 
       final restaurantSettings = data['restaurant_settings'];
       if (restaurantSettings is Map<Object?, Object?>) {
@@ -380,6 +386,59 @@ class LocalDatabase implements SyncStore {
       await _setSettingTxn(txn, 'last_sync_error', '');
       await _reapplyLocalOccupancy(txn);
     });
+  }
+
+  Future<void> _archiveMissingServerOrders(
+    Transaction txn,
+    Set<String> activeServerIds,
+  ) async {
+    final protectedOrderIds = <String>{};
+    final queued = await txn.query('outbox', columns: ['payload_json']);
+    final conflicted = await txn.query('conflicts', columns: ['payload_json']);
+    for (final row in [...queued, ...conflicted]) {
+      final payload = row['payload_json'];
+      if (payload is! String) continue;
+      try {
+        final decoded = jsonDecode(payload);
+        if (decoded is! Map) continue;
+        for (final entry in decoded.entries) {
+          // All outgoing order mutations use client order IDs. Include source
+          // and target IDs for transfers/merges so no offline work is hidden.
+          if (entry.key.toString().contains('client_order_id') &&
+              entry.value is String) {
+            protectedOrderIds.add(entry.value as String);
+          }
+        }
+      } on FormatException {
+        // Protect server-backed orders rather than discarding unparseable
+        // mutations; malformed outbox payloads must remain visible to staff.
+        return;
+      }
+    }
+
+    final orders = await txn.query(
+      'orders',
+      columns: ['local_order_id', 'server_id'],
+      where: "server_id IS NOT NULL AND status NOT IN ('closed', 'cancelled', 'archived_remote')",
+    );
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final order in orders) {
+      final serverId = order['server_id']?.toString();
+      final localId = order['local_order_id']?.toString();
+      if (serverId == null || localId == null ||
+          activeServerIds.contains(serverId) ||
+          protectedOrderIds.contains(localId)) {
+        continue;
+      }
+      // "archived_remote" is intentionally not "closed": absence from the
+      // waiter's active snapshot can mean reassignment, not payment.
+      await txn.update(
+        'orders',
+        <String, Object?>{'status': 'archived_remote', 'updated_at': now},
+        where: 'local_order_id = ?',
+        whereArgs: [localId],
+      );
+    }
   }
 
   @override
@@ -547,7 +606,7 @@ class LocalDatabase implements SyncStore {
     return _db.query(
       'dining_tables',
       where: 'is_active = 1',
-      orderBy: 'code ASC',
+      orderBy: 'branch_name ASC, area_name ASC, code ASC',
     );
   }
 
@@ -571,7 +630,7 @@ class LocalDatabase implements SyncStore {
   Future<List<Map<String, Object?>>> activeOrders() {
     return _db.query(
       'orders',
-      where: "status NOT IN ('closed', 'cancelled')",
+      where: "status NOT IN ('closed', 'cancelled', 'archived_remote')",
       orderBy: 'updated_at DESC',
     );
   }
