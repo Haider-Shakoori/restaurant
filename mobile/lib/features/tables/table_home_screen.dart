@@ -11,6 +11,7 @@ import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
+import 'local_order_recovery_screen.dart';
 import 'ready_pickup_alerts.dart';
 
 class TableHomeScreen extends StatefulWidget {
@@ -315,6 +316,18 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
   }
 
+  Future<void> _recoverOrders() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => LocalOrderRecoveryScreen(
+          database: widget.dependencies.database,
+          refreshFromDesktop: widget.dependencies.syncCoordinator.syncAndRefresh,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   Future<void> _logout() async {
     await widget.dependencies.pushNotifications.signOut();
     unawaited(widget.dependencies.lanPush.stop());
@@ -363,9 +376,15 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
             onSelected: (value) {
               if (value == 'logout') {
                 _logout();
+              } else if (value == 'recover_orders') {
+                _recoverOrders();
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'recover_orders',
+                child: Text('Recover / clear stuck orders'),
+              ),
               PopupMenuItem(
                 value: 'logout',
                 child: Text('Sign out'),
