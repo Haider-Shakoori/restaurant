@@ -18,6 +18,14 @@ void main() {
     try {
       final sqlite = await openDatabase(path, singleInstance: false);
       try {
+        await sqlite.insert('dining_tables', <String, Object?>{
+          'id': 'obsolete-table',
+          'code': 'T-OLD',
+          'name': 'Old duplicate Table 01',
+          'capacity': 4,
+          'status': 'occupied',
+          'is_active': 1,
+        });
         await sqlite.insert('orders', <String, Object?>{
           'local_order_id': 'old-synced',
           'client_order_id': 'old-synced',
@@ -52,6 +60,9 @@ void main() {
       }, cursorScope: 'local');
 
       expect((await db.tables()).single['status'], 'available');
+      // The old active table did not exist in the server bootstrap and must
+      // disappear; otherwise phones show duplicates/ghost occupied cards.
+      expect((await db.tables()).single['name'], 'Table 1');
       // A server-owned draft missing from the bootstrap's active list is no
       // longer an open order, even if the phone last saw it as a draft.
       expect(await db.activeOrders(), isEmpty);
