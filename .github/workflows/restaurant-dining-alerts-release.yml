@@ -1,5 +1,5 @@
 name: Restaurant Dining Alerts Parties and Receipts
-# Final release checks cover kitchen-arrival signal, shared-table independent billing, music and receipts
+# Final release checks cover desktop shared-party creation, kitchen chime, receipt and mobile melody
 # Validation rerun after Dart cleanup analyzer correction
 # Final validation includes authoritative table roster and delivery diagnostics.
 # Retry after isolated SQLite regression fixture correction
