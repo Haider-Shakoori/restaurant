@@ -444,6 +444,9 @@ public sealed class LocalSyncService
                 .Where(value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status))
                 .Select(value => value.ServiceReference)
                 .ToArrayAsync(cancellationToken);
+            if (table.Status == "occupied" && activeParties.Length == 0)
+                throw new LocalSyncConflictException(
+                    "table_busy", "This table is awaiting clearing; another guest party cannot be seated yet.");
             var newSeparateParty = payload.TryGetProperty("separate_party", out var separatePartyValue)
                 && separatePartyValue.ValueKind == JsonValueKind.True;
             var partyLabel = OptionalString(payload, "service_reference", 80)?.Trim();
