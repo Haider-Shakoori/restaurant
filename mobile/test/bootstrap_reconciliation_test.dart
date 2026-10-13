@@ -100,6 +100,7 @@ void main() {
         mutationId: 'open-unsent',
         tableId: 'table-1',
         branchId: 'branch-1',
+        serviceType: 'dine_in',
         guestCount: 2,
       );
       await db.applyBootstrap(
@@ -127,6 +128,7 @@ void main() {
         mutationId: 'mutation-client',
         tableId: 'table-1',
         branchId: 'branch-1',
+        serviceType: 'dine_in',
         guestCount: 2,
       );
       await db.applyBootstrap(
