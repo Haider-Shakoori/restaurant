@@ -50,6 +50,20 @@ class SyncCoordinator {
 
   Future<void> syncNow() => _safeSync();
 
+  /// Explicit refresh from the table screen: drain the offline outbox first,
+  /// then fetch an authoritative full snapshot. Cursor-only pulls cannot
+  /// recover a missed table-clear event or removed/renamed table.
+  ///
+  /// Unlike the background poll, propagate failures so the UI can explain
+  /// that its offline snapshot may still be stale.
+  Future<void> reconcileNow() async {
+    await _engine.syncNow();
+    await _engine.bootstrap();
+    if (_onChanges case final onChanges?) {
+      await onChanges();
+    }
+  }
+
   Future<void> _safeSync() async {
     try {
       await _engine.syncNow();
