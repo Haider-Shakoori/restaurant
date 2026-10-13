@@ -1722,6 +1722,9 @@ public sealed class LocalCashierService
             _ when table is not null => $"DINE-IN: {table.Name} ({table.Code})",
             _ => "DINE-IN",
         });
+        if (order.ServiceType == "dine_in" && !string.IsNullOrWhiteSpace(order.ServiceReference))
+            builder.AppendLine($"PARTY: {order.ServiceReference}");
+        builder.AppendLine($"ORDER: #{order.DisplayNumber}");
         builder.AppendLine($"WAITER: {order.WaiterName}");
         builder.AppendLine($"DATE: {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}");
         builder.AppendLine("--------------------------------");
