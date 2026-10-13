@@ -1240,6 +1240,13 @@ public sealed class LocalSyncService
             .Select(table => new { table.Id, table.Status, table.IsActive })
             .ToArrayAsync(cancellationToken))
             .ToDictionary(table => table.Id, StringComparer.Ordinal);
+        var busyTableIds = (await db.Orders.AsNoTracking()
+            .Where(order => order.DiningTableId != null && order.DiningTableId != "" &&
+                            ActiveStatuses.Contains(order.Status))
+            .Select(order => order.DiningTableId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
         var branches = catalog.Branches.ToDictionary(value => value.Id, StringComparer.Ordinal);
 
         return catalog.Tables.Select(table =>
@@ -1254,7 +1261,11 @@ public sealed class LocalSyncService
                 code = table.Code,
                 name = table.Name,
                 capacity = table.Capacity,
-                status = live?.Status ?? table.Status,
+                // A non-terminal order takes precedence over a stale
+                // persisted "available" flag. Never offer a busy table twice.
+                status = busyTableIds.Contains(table.Id)
+                    ? "occupied"
+                    : live?.Status ?? table.Status,
                 is_active = live?.IsActive ?? table.IsActive,
                 area = new { id = area.Id, name = area.Name },
                 branch = new { id = branch.Id, name = branch.Name },
