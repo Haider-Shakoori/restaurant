@@ -139,6 +139,85 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Separate_parties_keep_independent_orders_and_mobile_submission_chimes_once()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalog);
+            var waiter = new LocalTerminalPrincipal(
+                "phone-1", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+            var received = new List<string>();
+            void OnReceived(string id) => received.Add(id);
+            LocalOrderArrivalSignals.KitchenOrderReceived += OnReceived;
+            try
+            {
+                var first = await PushOneAsync(sync, waiter, "OPEN-A", "order.open", new
+                {
+                    client_order_id = "PARTY-A", dining_table_id = "table-1",
+                    service_type = "dine_in", guest_count = 2,
+                });
+                Assert.Equal("accepted", first.GetProperty("status").GetString());
+
+                var blocked = await PushOneAsync(sync, waiter, "OPEN-UNLABELLED", "order.open", new
+                {
+                    client_order_id = "PARTY-X", dining_table_id = "table-1",
+                    guest_count = 1,
+                });
+                Assert.Equal("conflict", blocked.GetProperty("status").GetString());
+
+                var second = await PushOneAsync(sync, waiter, "OPEN-B", "order.open", new
+                {
+                    client_order_id = "PARTY-B", dining_table_id = "table-1",
+                    guest_count = 1, service_type = "dine_in",
+                    separate_party = true, service_reference = "Window seats",
+                });
+                Assert.Equal("accepted", second.GetProperty("status").GetString());
+
+                var duplicate = await PushOneAsync(sync, waiter, "OPEN-DUP", "order.open", new
+                {
+                    client_order_id = "PARTY-C", dining_table_id = "table-1",
+                    guest_count = 1, separate_party = true,
+                    service_reference = "Window seats",
+                });
+                Assert.Equal("conflict", duplicate.GetProperty("status").GetString());
+                Assert.Equal("party_exists", duplicate.GetProperty("code").GetString());
+
+                var add = await PushOneAsync(sync, waiter, "ADD-B", "order.item.add", new
+                {
+                    client_order_id = "PARTY-B", client_line_id = "LINE-B",
+                    menu_item_id = "item-1", quantity = 1,
+                });
+                Assert.Equal("accepted", add.GetProperty("status").GetString());
+                var send = await PushOneAsync(sync, waiter, "SEND-B", "order.submit", new
+                {
+                    client_order_id = "PARTY-B",
+                });
+                Assert.Equal("accepted", send.GetProperty("status").GetString());
+                var replay = await PushOneAsync(sync, waiter, "SEND-B", "order.submit", new
+                {
+                    client_order_id = "PARTY-B",
+                });
+                Assert.Equal("accepted", replay.GetProperty("status").GetString());
+                Assert.Equal(["PARTY-B"], received);
+                await using var db = factory.Create();
+                Assert.Equal(2, await db.Orders.CountAsync());
+                Assert.Equal("occupied", (await db.DiningTables.SingleAsync()).Status);
+                Assert.Equal("Window seats", (await db.Orders
+                    .SingleAsync(value => value.ClientOrderId == "PARTY-B")).ServiceReference);
+            }
+            finally { LocalOrderArrivalSignals.KitchenOrderReceived -= OnReceived; }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
     {
         var root = CreateTemporaryDirectory();
