@@ -202,7 +202,9 @@ public sealed class LocalOrderingTests
                     client_order_id = "PARTY-B",
                 });
                 Assert.Equal("accepted", replay.GetProperty("status").GetString());
-                Assert.Equal(["PARTY-B"], received);
+                // Other xUnit classes may submit different orders in parallel.
+                // Verify this one was announced exactly once despite replay.
+                Assert.Equal(1, received.Count(id => id == "PARTY-B"));
                 await using var db = factory.Create();
                 Assert.Equal(2, await db.Orders.CountAsync());
                 Assert.Equal("occupied", (await db.DiningTables.SingleAsync()).Status);
