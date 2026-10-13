@@ -1,0 +1,32 @@
+name: Validate Restaurant Sync Fix
+on:
+  push:
+    branches: [fix/restaurant-sync-visibility-20261014]
+    paths: [.github/workflows/validate-restaurant-sync-fix.yml]
+permissions:
+  contents: read
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable}
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+  desktop:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: {dotnet-version: '10.0.x'}
+      - run: dotnet restore BusinessOS.Restaurant.Desktop.slnx
+      - run: dotnet build BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-restore
+      - run: dotnet test BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build
