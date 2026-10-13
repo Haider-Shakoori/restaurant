@@ -2435,7 +2435,7 @@ internal static class OperationalActionViews
         string? selectedTableId = null;
         var busy = false;
 
-        var grid = new WrapPanel { Margin = new Thickness(0, 2, 0, 12) };
+        var grid = new StackPanel { Margin = new Thickness(0, 2, 0, 12) };
         var legend = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
         var panel = new StackPanel();
         var panelHost = new Border
@@ -3013,9 +3013,25 @@ internal static class OperationalActionViews
         async Task RenderAsync()
         {
             grid.Children.Clear();
-            foreach (var table in tablesNow)
+            // Physical floor groups make table selection practical during rush
+            // hours and match the mobile floor-plan layout.
+            foreach (var floor in tablesNow.GroupBy(table => table.Area))
             {
-                grid.Children.Add(BuildCard(table));
+                var floorSection = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+                var floorLabel = new TextBlock
+                {
+                    Text = $"{floor.Key} · {floor.Count()} tables",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 16,
+                    Margin = new Thickness(0, 6, 0, 10),
+                };
+                floorLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                floorSection.Children.Add(floorLabel);
+                var furnitureGrid = new WrapPanel();
+                foreach (var table in floor)
+                    furnitureGrid.Children.Add(BuildCard(table));
+                floorSection.Children.Add(furnitureGrid);
+                grid.Children.Add(floorSection);
             }
             UpdateLegend();
             await RenderPanelAsync();
