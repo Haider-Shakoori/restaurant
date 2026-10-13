@@ -363,6 +363,17 @@ public sealed class LocalSyncService
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
+        // Only new, committed waiter kitchen submissions chime on the desktop.
+        // Mutation replays return above, so they never chime twice.
+        if (!principal.DeviceId.StartsWith("desktop-", StringComparison.OrdinalIgnoreCase) &&
+            result.GetValueOrDefault("status")?.ToString() == "accepted" &&
+            mutation.Operation is "order.submit" or "order.kot.send")
+        {
+            var clientOrderId = OptionalString(mutation.Payload, "client_order_id", 80)
+                                ?? mutation.MutationId;
+            LocalOrderArrivalSignals.NotifyKitchenOrderReceived(clientOrderId);
+        }
+
         return result;
     }
 
@@ -429,15 +440,29 @@ public sealed class LocalSyncService
                     "This table is not currently available for dine-in ordering.");
             }
 
-            var busy = await db.Orders.AnyAsync(
-                value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status),
-                cancellationToken);
-            if (busy)
+            var activeParties = await db.Orders
+                .Where(value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status))
+                .Select(value => value.ServiceReference)
+                .ToArrayAsync(cancellationToken);
+            if (table.Status == "occupied" && activeParties.Length == 0)
+                throw new LocalSyncConflictException(
+                    "table_busy", "This table is awaiting clearing; another guest party cannot be seated yet.");
+            var newSeparateParty = payload.TryGetProperty("separate_party", out var separatePartyValue)
+                && separatePartyValue.ValueKind == JsonValueKind.True;
+            var partyLabel = OptionalString(payload, "service_reference", 80)?.Trim();
+            if (activeParties.Length > 0 && !newSeparateParty)
             {
                 throw new LocalSyncConflictException(
                     "table_busy",
-                    "This table already has an active order.");
+                    "This table already has an active order. Select a separate party to open another bill.");
             }
+            if (newSeparateParty && string.IsNullOrWhiteSpace(partyLabel))
+                throw new LocalSyncConflictException(
+                    "invalid_payload", "Separate guests require a party label.");
+            if (newSeparateParty && activeParties.Any(value =>
+                string.Equals(value, partyLabel, StringComparison.OrdinalIgnoreCase)))
+                throw new LocalSyncConflictException(
+                    "party_exists", "That party label is already in use at this table.");
 
             var area = await db.DiningAreas.SingleOrDefaultAsync(
                 value => value.Id == table.DiningAreaId && value.IsActive,

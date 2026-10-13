@@ -946,6 +946,7 @@ class LocalDatabase implements SyncStore {
     required String branchId,
     required String serviceType,
     String? serviceReference,
+    bool separateParty = false,
     required int guestCount,
     String? notes,
   }) async {
@@ -984,6 +985,7 @@ class LocalDatabase implements SyncStore {
           'branch_id': branchId,
           'service_type': serviceType,
           'service_reference': serviceReference,
+          'separate_party': separateParty,
           'dining_table_id': tableId,
           'guest_count': guestCount,
           'notes': notes,

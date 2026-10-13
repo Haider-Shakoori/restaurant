@@ -1607,7 +1607,10 @@ public sealed class LocalKitchenService
             builder.AppendLine(table is not null
                 ? $"TABLE: {table.Name} ({table.Code})"
                 : "TABLE: Unassigned");
+            if (!string.IsNullOrWhiteSpace(order.ServiceReference))
+                builder.AppendLine($"PARTY: {order.ServiceReference}");
         }
+        builder.AppendLine($"ORDER: #{order.DisplayNumber}");
         builder.AppendLine($"WAITER: {order.WaiterName}");
         builder.AppendLine($"PRIORITY: {ticket.Priority.ToUpperInvariant()}");
         builder.AppendLine($"TIME: {ticket.QueuedAt:yyyy-MM-dd HH:mm:ss}");

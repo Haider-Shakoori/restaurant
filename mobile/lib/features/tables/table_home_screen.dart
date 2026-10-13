@@ -189,17 +189,61 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   Future<void> _openTable(Map<String, Object?> table) async {
     final existing = _orders.where(
       (order) => order['table_id']?.toString() == table['id']?.toString(),
-    );
+    ).toList();
 
-    if (existing.isNotEmpty) {
-      await _showOrder(existing.first['local_order_id']!.toString());
+    String? separatePartyLabel;
+    if (existing.isNotEmpty || table['status'] == 'occupied') {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const ListTile(
+                title: Text('Orders at this table'),
+                subtitle: Text(
+                  'Different parties have independent orders and bills.',
+                ),
+              ),
+              ...existing.map((order) {
+                final label = order['service_reference']?.toString();
+                final number = (order['display_number'] as num?)?.toInt() ?? 0;
+                final title = number > 0 ? 'Order #$number' : 'Phone order';
+                return ListTile(
+                  leading: const Icon(Icons.receipt_long_outlined),
+                  title: Text(label == null || label.isEmpty
+                      ? title : '$title · $label'),
+                  subtitle: Text(order['status']?.toString() ?? ''),
+                  onTap: () => Navigator.pop(
+                    sheetContext,
+                    'order:${order['local_order_id']}',
+                  ),
+                );
+              }),
+              ListTile(
+                key: const Key('create-separate-party'),
+                leading: const Icon(Icons.group_add_outlined),
+                title: const Text('New separate party'),
+                subtitle: const Text('Own kitchen order, payment and receipt'),
+                onTap: () => Navigator.pop(sheetContext, 'new'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (choice == null) return;
+      if (choice.startsWith('order:')) {
+        await _showOrder(choice.substring(6));
+        return;
+      }
+      separatePartyLabel = await _askPartyLabel();
+      if (separatePartyLabel == null) return;
+    } else if (table['status'] != 'available') {
       return;
     }
 
-    if (table['status'] != 'available') {
-      return;
-    }
-
+    if (!mounted) return;
     final guests = await showDialog<int>(
       context: context,
       builder: (context) => _GuestDialog(strings: widget.strings),
@@ -214,6 +258,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
         tableId: table['id']!.toString(),
         branchId: table['branch_id']!.toString(),
         serviceType: 'dine_in',
+        serviceReference: separatePartyLabel,
+        separateParty: separatePartyLabel != null,
         guestCount: guests,
       );
       await _showOrder(orderId);
@@ -223,6 +269,54 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
           SnackBar(content: Text(error.toString())),
         );
       }
+    }
+  }
+
+  Future<String?> _askPartyLabel() async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, refresh) => AlertDialog(
+            title: const Text('Separate guest party'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Label the guests so kitchen staff and the cashier can '
+                  'identify their order. Example: Party B, Window side.',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  maxLength: 80,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Party / seat group',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => refresh(() {}),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: controller.text.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(dialogContext, controller.text.trim()),
+                child: const Text('Continue'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      controller.dispose();
     }
   }
 

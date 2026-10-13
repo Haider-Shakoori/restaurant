@@ -124,7 +124,8 @@ public sealed class DesktopRestaurantWorkflowService
         string? serviceReference,
         int guestCount,
         string? notes = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        bool separateParty = false)
     {
         var clientOrderId = $"DESK-{Guid.CreateVersion7():N}";
         var payload = JsonSerializer.SerializeToElement(new
@@ -134,6 +135,7 @@ public sealed class DesktopRestaurantWorkflowService
             branch_id = branchId,
             service_type = serviceType,
             service_reference = serviceReference,
+            separate_party = separateParty,
             guest_count = guestCount,
             notes
         });

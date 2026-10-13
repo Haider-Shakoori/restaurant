@@ -58,7 +58,7 @@ internal static class OperationalActionViews
                     option.PriceDelta))
                 .ToListAsync();
             var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
-                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total, x.DisplayNumber), x.UpdatedAtUtc })
+                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total, x.DisplayNumber, x.ServiceReference), x.UpdatedAtUtc })
                     .ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Take(100)
@@ -112,7 +112,7 @@ internal static class OperationalActionViews
                     .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                     .Select(x => new
                     {
-                        Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                        Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                         x.UpdatedAtUtc,
                     })
                     .ToListAsync())
@@ -477,7 +477,7 @@ internal static class OperationalActionViews
         cashier.Children.Add(checkoutFields);
         var payRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) };
         var pay = Button("Post payment"); pay.MinHeight = 48;
-        var receipt = Button("Queue receipt");
+        var receipt = Button("Print receipt"); receipt.Name = "PosReceiptPrintButton"; receipt.IsEnabled = false;
         var verifyBalance = Button("Check current balances");
         verifyBalance.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         payRow.Children.Add(pay); payRow.Children.Add(receipt); payRow.Children.Add(verifyBalance);
@@ -568,6 +568,7 @@ internal static class OperationalActionViews
         var paymentSubmission = new DesktopSubmissionGate();
         var paymentBusy = false;
         var paymentNeedsManualVerification = false;
+        string? lastPaidBillId = null;
         pay.Click += async (_, _) =>
         {
             if (!paymentSubmission.TryBegin()) return;
@@ -625,6 +626,8 @@ internal static class OperationalActionViews
                 await RefreshCashierStateAsync();
                 verified = true;
                 paymentNeedsManualVerification = false;
+                lastPaidBillId = bill.Id;
+                receipt.IsEnabled = true;
                 cashierStatus.Text = bills.Any(x => x.Id == bill.Id)
                     ? $"AFN {amount:N2} posted. Updated outstanding balance is shown above; additional payment is available."
                     : $"AFN {amount:N2} posted. Bill fully settled; the next outstanding bill is now selectable.";
@@ -649,7 +652,23 @@ internal static class OperationalActionViews
                     (billBox.SelectedItem is BillChoice selected && selected.Balance > 0);
             }
         };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(b.Id)); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        receipt.Click += async (_, _) => {
+            try
+            {
+                if (lastPaidBillId is null)
+                    throw new InvalidOperationException("Post and verify a payment before printing its receipt.");
+                receipt.IsEnabled = false;
+                await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(lastPaidBillId));
+                cashierStatus.Text = "Customer receipt sent to the configured printer queue. Check Printing settings if it does not print.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
+            }
+            catch (Exception ex)
+            {
+                cashierStatus.Text = "Receipt not printed: " + ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text);
+            }
+            finally { receipt.IsEnabled = lastPaidBillId is not null; }
+        };
 
         // Register mutation handlers after all POS search/list/cashier controls exist.
         open.Click += async (_, _) =>
@@ -984,7 +1003,7 @@ internal static class OperationalActionViews
                         .Select(x => new
                         {
                             Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName,
-                                x.Status, x.GuestCount, x.Total, x.DisplayNumber),
+                                x.Status, x.GuestCount, x.Total, x.DisplayNumber, x.ServiceReference),
                             x.UpdatedAtUtc,
                         }).ToListAsync())
                     .OrderByDescending(x => x.UpdatedAtUtc).Take(100).Select(x => x.Row).ToArray();
@@ -1161,7 +1180,7 @@ internal static class OperationalActionViews
                             .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                             .Select(x => new
                             {
-                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                                 x.UpdatedAtUtc,
                             })
                             .ToListAsync())
@@ -1678,7 +1697,7 @@ internal static class OperationalActionViews
                 {
                     Row = new TableOrderChoice(
                         order.Id, order.ClientOrderId, table.Id, table.Name,
-                        order.Status, order.Total, order.GuestCount, order.DisplayNumber),
+                        order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference),
                     order.UpdatedAtUtc,
                 })
                 .ToListAsync())
@@ -1712,7 +1731,7 @@ internal static class OperationalActionViews
                 select new
                 {
                     Row = new TableOrderChoice(order.Id, order.ClientOrderId,
-                        order.DiningTableId, "", order.Status, order.Total, order.GuestCount, order.DisplayNumber),
+                        order.DiningTableId, "", order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference),
                     order.UpdatedAtUtc,
                 }).ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
@@ -2142,7 +2161,7 @@ internal static class OperationalActionViews
                             order.Status != "closed" && order.Status != "cancelled")
                         .Select(order => new TableOrderChoice(order.Id, order.ClientOrderId,
                             order.DiningTableId ?? string.Empty, string.Empty,
-                            order.Status, order.Total, order.GuestCount, order.DisplayNumber))
+                            order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference))
                         .ToArrayAsync();
                     return FloorSignature(active, open);
                 });
@@ -2304,19 +2323,44 @@ internal static class OperationalActionViews
         status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         content.Children.Add(status);
 
+        string? settledBillId = null;
         var complete = Button("Complete payment");
         complete.Name = "TablePaymentCompleteButton";
         complete.MinWidth = 190;
         complete.MinHeight = 46;
         complete.IsDefault = true;
-        var cancel = Button("Cancel");
-        cancel.IsCancel = true;
+        var printReceipt = Button("Print receipt");
+        printReceipt.Name = "TablePaymentPrintReceipt";
+        printReceipt.IsEnabled = false;
+        printReceipt.MinHeight = 46;
+        var cancel = Button("Close");
+        cancel.IsCancel = false;
         cancel.MinHeight = 46;
+        cancel.Click += (_, _) => dialog.DialogResult = settledBillId is not null;
         cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
         actions.Children.Add(complete);
+        actions.Children.Add(printReceipt);
         actions.Children.Add(cancel);
         content.Children.Add(actions);
+
+        printReceipt.Click += async (_, _) =>
+        {
+            if (settledBillId is null) return;
+            printReceipt.IsEnabled = false;
+            try
+            {
+                await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(settledBillId));
+                status.Text = "Receipt queued for printing. Close when finished.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
+            }
+            catch (Exception ex)
+            {
+                status.Text = "Receipt could not be queued: " + ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, status.Text);
+            }
+            finally { printReceipt.IsEnabled = true; }
+        };
 
         complete.Click += async (_, _) =>
         {
@@ -2405,6 +2449,7 @@ internal static class OperationalActionViews
 
                     await workflow.AddPaymentAsync(bill.Id, sessionId, applied, "cash", null, token);
                     posted = applied;
+                    settledBillId = bill.Id;
                 }, TimeSpan.FromSeconds(30));
 
                 if (markVacant.IsChecked == true)
@@ -2442,14 +2487,24 @@ internal static class OperationalActionViews
                 }
 
                 var change = Math.Max(0m, amount - posted);
-                var occupancyNote = markVacant.IsChecked == true
+                // One party paying never vacates a table still used by another
+                // active party. Display the actual committed Windows status.
+                var actualTableStatus = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var live = factory.Create();
+                    return await live.DiningTables.AsNoTracking()
+                        .Where(x => x.Id == table.Id).Select(x => x.Status)
+                        .SingleAsync();
+                });
+                var occupancyNote = actualTableStatus == "available"
                     ? $" {table.Name} is vacant."
-                    : $" {table.Name} stays occupied until marked vacant.";
+                    : $" {table.Name} remains {actualTableStatus} (another party or a clearing hold may remain).";
                 statusText.Text = (change > 0m
                     ? $"{table.Name}: AFN {posted:N2} received; change AFN {change:N2}."
                     : $"{table.Name}: AFN {posted:N2} received; bill settled.") + occupancyNote;
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
-                dialog.DialogResult = true;
+                status.Text = "Payment confirmed. Use Print receipt for this bill, then Close.";
+                printReceipt.IsEnabled = settledBillId is not null;
             }
             catch (Exception ex)
             {
@@ -2461,7 +2516,7 @@ internal static class OperationalActionViews
             finally
             {
                 busy = false;
-                complete.IsEnabled = true;
+                complete.IsEnabled = settledBillId is null;
             }
         };
 
@@ -2485,6 +2540,7 @@ internal static class OperationalActionViews
         var tablesNow = initialTables;
         var ordersNow = initialOrders;
         string? selectedTableId = null;
+        string? selectedPartyOrderId = null;
         var busy = false;
 
         var grid = new WrapPanel { Margin = new Thickness(0, 2, 0, 12) };
@@ -2613,6 +2669,58 @@ internal static class OperationalActionViews
             });
         }
 
+        (string Label, int Guests)? PromptSeparateParty(TableChoice table)
+        {
+            var window = new Window
+            {
+                Title = $"New separate party · {table.Name}",
+                Width = 445,
+                SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize,
+                Owner = System.Windows.Application.Current?.MainWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            var body = new StackPanel { Margin = new Thickness(22) };
+            body.Children.Add(new TextBlock
+            {
+                Text = "Separate guests at the same table have independent orders, bills and receipts.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12),
+            });
+            body.Children.Add(new TextBlock { Text = "Party / seat-group label", Margin = new Thickness(0, 0, 0, 5) });
+            var labelBox = new TextBox { Name = "DiningSeparatePartyLabel", Height = 36, MaxLength = 80 };
+            body.Children.Add(labelBox);
+            body.Children.Add(new TextBlock { Text = "Number of guests", Margin = new Thickness(0, 12, 0, 5) });
+            var guestsBox = new TextBox { Name = "DiningSeparatePartyGuests", Text = "1", Height = 36 };
+            body.Children.Add(guestsBox);
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
+            body.Children.Add(error);
+            var buttons = new WrapPanel { Margin = new Thickness(0, 15, 0, 0) };
+            var accept = Button("Create separate order");
+            accept.IsDefault = true;
+            var cancelParty = Button("Cancel");
+            cancelParty.IsCancel = true;
+            cancelParty.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            buttons.Children.Add(accept);
+            buttons.Children.Add(cancelParty);
+            body.Children.Add(buttons);
+            var guestCount = 0;
+            accept.Click += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(labelBox.Text) ||
+                    !int.TryParse(guestsBox.Text, out guestCount) ||
+                    guestCount is < 1 or > 100)
+                {
+                    error.Text = "Enter a party label and between 1 and 100 guests.";
+                    return;
+                }
+                window.DialogResult = true;
+            };
+            window.Content = body;
+            return DesktopGlassDialog.ShowDialog(window) == true
+                ? (labelBox.Text.Trim(), guestCount) : null;
+        }
+
         Button BuildCard(TableChoice table)
         {
             var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
@@ -2674,6 +2782,7 @@ internal static class OperationalActionViews
             };
             tile.Click += async (_, _) =>
             {
+                if (selectedTableId != table.Id) selectedPartyOrderId = null;
                 selectedTableId = table.Id;
                 await RenderAsync();
             };
@@ -2698,8 +2807,38 @@ internal static class OperationalActionViews
                 return;
             }
 
-            var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
+            var parties = ordersNow.Where(x => x.TableId == table.Id).ToList();
+            var order = parties.FirstOrDefault(x => x.Id == selectedPartyOrderId)
+                        ?? parties.FirstOrDefault();
             panel.Children.Add(new TextBlock { Text = table.Name, FontSize = 24, FontWeight = FontWeights.Bold });
+            if (parties.Count > 1)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = $"{parties.Count} separate parties · choose the bill/order:",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 10, 0, 5),
+                });
+                var partyPicker = new ComboBox
+                {
+                    Name = "DiningPartyOrderPicker",
+                    ItemsSource = parties,
+                    DisplayMemberPath = nameof(TableOrderChoice.Display),
+                    SelectedItem = order,
+                    MinHeight = 36,
+                    Margin = new Thickness(0, 0, 0, 10),
+                };
+                partyPicker.SelectionChanged += async (_, _) =>
+                {
+                    if (partyPicker.SelectedItem is TableOrderChoice choice &&
+                        selectedPartyOrderId != choice.Id)
+                    {
+                        selectedPartyOrderId = choice.Id;
+                        await RenderPanelAsync();
+                    }
+                };
+                panel.Children.Add(partyPicker);
+            }
             var subtitle = new TextBlock
             {
                 Text = order is null
@@ -2710,7 +2849,8 @@ internal static class OperationalActionViews
                                 ? "Occupied · awaiting clearing"
                                 : $"Occupied · {table.ReservationNote}")
                             : $"Free, seats {table.Capacity}")
-                    : $"{order.Guests} guests · {order.ShortNumber}",
+                    : $"{order.Guests} guests · {order.ShortNumber}" +
+                      (string.IsNullOrWhiteSpace(order.PartyLabel) ? "" : $" · {order.PartyLabel}"),
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 12),
             };
@@ -2874,13 +3014,50 @@ internal static class OperationalActionViews
             cancelOrder.Visibility = order is not null &&
                 order.Status is not ("billed" or "closed" or "cancelled")
                 ? Visibility.Visible : Visibility.Collapsed;
+            var newParty = Button("New separate party");
+            newParty.Name = "DiningRoomNewPartyButton";
+            newParty.MinHeight = 42;
+            newParty.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            newParty.Visibility = table.Status == "occupied" && parties.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
             panel.Children.Add(addDishes);
+            panel.Children.Add(newParty);
             panel.Children.Add(reserve);
             panel.Children.Add(vacant);
             panel.Children.Add(send);
             panel.Children.Add(pay);
             panel.Children.Add(cancelOrder);
 
+            newParty.Click += async (_, _) =>
+            {
+                if (busy) return;
+                var details = PromptSeparateParty(table);
+                if (details is null) return;
+                busy = true;
+                try
+                {
+                    string? newClientId = null;
+                    await DesktopUiWork.RunBoundedAsync(async token =>
+                    {
+                        newClientId = await workflow.OpenOrderAsync(
+                            "dine_in", table.Id, "", details.Value.Label,
+                            details.Value.Guests, null, token, separateParty: true);
+                    }, TimeSpan.FromSeconds(25));
+                    if (newClientId is null)
+                        throw new InvalidOperationException("Party order was not confirmed.");
+                    await using var db = factory.Create();
+                    selectedPartyOrderId = await db.Orders.AsNoTracking()
+                        .Where(x => x.ClientOrderId == newClientId)
+                        .Select(x => x.Id).SingleAsync();
+                    statusText.Text = $"Created {details.Value.Label} separately at {table.Name}.";
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally { busy = false; }
+            };
             addDishes.Click += async (_, _) =>
             {
                 try
@@ -3092,7 +3269,7 @@ internal static class OperationalActionViews
                             .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                             .Select(x => new
                             {
-                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                                 x.UpdatedAtUtc,
                             })
                             .ToListAsync())
@@ -5245,19 +5422,19 @@ internal static class OperationalActionViews
     {
         public string Display => $"{Quantity} × {ItemName} · {Status}{(RoundNumber.HasValue ? $" · R{RoundNumber}" : "")}";
     }
-    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total, int DisplayNumber)
+    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total, int DisplayNumber, string? PartyLabel = null)
     {
         public string Display => DisplayNumber > 0
-            ? $"#{DisplayNumber} · {ServiceType} · {Status}"
+            ? $"#{DisplayNumber} · {ServiceType}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status}"
             : ClientOrderId;
     }
     private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status, string? ReservationNote = null);
-    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total, int Guests, int DisplayNumber)
+    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total, int Guests, int DisplayNumber, string? PartyLabel = null)
     {
         public string Display => DisplayNumber > 0
-            ? $"#{DisplayNumber} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}"
-            : $"{ClientOrderId} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}";
+            ? $"#{DisplayNumber} · {Table}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status} · {Guests} guest(s) · AFN {Total:N2}"
+            : $"{ClientOrderId} · {Table}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status} · {Guests} guest(s) · AFN {Total:N2}";
         public string ShortNumber => DisplayNumber > 0 ? $"#{DisplayNumber}" : ClientOrderId;
     }
     private sealed record TableMenuChoice(string Id, string Name, string Category, decimal Price);
