@@ -1396,18 +1396,35 @@ class LocalDatabase implements SyncStore {
   /// A phone-only order can be abandoned explicitly, never a server order.
   /// This deletes only this order and its queued/conflicted mutations; it does
   /// not cancel or alter any order on the desktop.
-  Future<void> discardLocalOrder(String localOrderId) async {
+  Future<void> discardLocalOrder(String localOrderId) =>
+      discardLocalOrders(<String>[localOrderId]);
+
+  Future<void> discardLocalOrders(List<String> localOrderIds) async {
+    if (localOrderIds.isEmpty) return;
     await _db.transaction((txn) async {
-      final rows = await txn.query('orders',
-        where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId],
-        limit: 1,
-      );
-      if (rows.isEmpty) throw StateError('Order is no longer on this phone.');
-      if (rows.single['server_id'] != null) {
-        throw StateError(
-          'This order exists on desktop. Close or cancel it there, then refresh.',
-        );
+      // Validate all before deleting anything. Another sync may have already
+      // uploaded one of these orders while the confirmation dialog was open.
+      for (final localOrderId in localOrderIds) {
+        final rows = await txn.query('orders',
+          where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId],
+          limit: 1);
+        if (rows.isEmpty || rows.single['server_id'] != null) {
+          throw StateError(
+            'An order has changed on desktop. Refresh the list before discarding.',
+          );
+        }
       }
+      for (final localOrderId in localOrderIds) {
+        await _discardLocalOrderTxn(txn, localOrderId);
+      }
+      await _reapplyLocalOccupancy(txn);
+    });
+  }
+
+  Future<void> _discardLocalOrderTxn(
+    DatabaseExecutor txn,
+    String localOrderId,
+  ) async {
       final queued = await txn.query('outbox',
         columns: <String>['mutation_id', 'payload_json'],
         where: "status IN ('pending', 'conflict')",
@@ -1435,8 +1452,6 @@ class LocalDatabase implements SyncStore {
         where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId]);
       await txn.delete('orders',
         where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId]);
-      await _reapplyLocalOccupancy(txn);
-    });
   }
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
