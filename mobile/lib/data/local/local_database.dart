@@ -346,6 +346,16 @@ class LocalDatabase implements SyncStore {
         }
       }
 
+      // A bootstrap is a complete server table snapshot. Hide obsolete table
+      // rows left by older logins or changes to the dining-room layout,
+      // without losing tables tied to an unsynced offline draft.
+      await txn.rawUpdate(
+        "UPDATE dining_tables SET is_active = 0 "
+        "WHERE NOT EXISTS (SELECT 1 FROM orders "
+        "WHERE orders.table_id = dining_tables.id AND orders.server_id IS NULL "
+        "AND orders.status IN ('draft', 'submitted_pending_sync'))",
+      );
+
       for (final rawTable in data['tables'] as List<Object?>? ?? const []) {
         await _upsertTable(
           txn,
@@ -1317,8 +1327,14 @@ class LocalDatabase implements SyncStore {
   }
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
+    // Only genuinely unacknowledged offline orders may override a table
+    // snapshot supplied by the server. Server-backed draft orders can remain
+    // cached after a cashier closes/transfers an order; those old snapshots
+    // must never turn an authoritative AVAILABLE table back to OCCUPIED.
     final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+      "SELECT DISTINCT table_id FROM orders "
+      "WHERE table_id IS NOT NULL AND server_id IS NULL "
+      "AND status IN ('draft', 'submitted_pending_sync')",
     );
 
     for (final row in rows) {
