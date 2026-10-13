@@ -96,6 +96,49 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Lan_bootstrap_returns_actual_desktop_table_status_after_clearing()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalogStore = new OperationalSnapshotStore(factory);
+            await catalogStore.ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, catalogStore);
+            var waiter = new LocalTerminalPrincipal(
+                "phone-1", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+
+            await using (var db = factory.Create())
+            {
+                var table = await db.DiningTables.SingleAsync();
+                table.Status = "occupied";
+                await db.SaveChangesAsync();
+            }
+            var occupied = JsonSerializer.SerializeToElement(
+                await sync.BootstrapAsync(waiter, CancellationToken.None));
+            Assert.Equal("occupied",
+                occupied.GetProperty("tables")[0].GetProperty("status").GetString());
+
+            // Cashier clears the table on the Windows host. The very next
+            // full mobile bootstrap MUST expose "available" without cloud.
+            await using (var db = factory.Create())
+            {
+                var table = await db.DiningTables.SingleAsync();
+                table.Status = "available";
+                await db.SaveChangesAsync();
+            }
+            var cleared = JsonSerializer.SerializeToElement(
+                await sync.BootstrapAsync(waiter, CancellationToken.None));
+            Assert.Equal("available",
+                cleared.GetProperty("tables")[0].GetProperty("status").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
     {
         var root = CreateTemporaryDirectory();

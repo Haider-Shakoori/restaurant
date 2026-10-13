@@ -16,7 +16,7 @@ class LocalDatabase implements SyncStore {
         p.join(await getDatabasesPath(), 'businessos_restaurant_waiter.db');
     final database = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -61,6 +61,7 @@ class LocalDatabase implements SyncStore {
             name TEXT NOT NULL,
             capacity INTEGER NOT NULL,
             status TEXT NOT NULL,
+            server_status TEXT NOT NULL DEFAULT 'available',
             is_active INTEGER NOT NULL DEFAULT 1,
             area_id TEXT,
             area_name TEXT,
@@ -219,6 +220,16 @@ class LocalDatabase implements SyncStore {
             'ALTER TABLE orders ADD COLUMN display_number INTEGER NOT NULL DEFAULT 0',
           );
         }
+        if (oldVersion < 9) {
+          // Existing status can be a phone-only optimistic occupancy; the
+          // next successful bootstrap replaces server_status authoritatively.
+          await db.execute(
+            "ALTER TABLE dining_tables ADD COLUMN server_status TEXT NOT NULL DEFAULT 'available'",
+          );
+          await db.execute(
+            'UPDATE dining_tables SET server_status = status',
+          );
+        }
       },
     );
 
@@ -315,6 +326,13 @@ class LocalDatabase implements SyncStore {
       await txn.delete('menu_items');
       await txn.delete('menu_categories');
       await txn.delete('branches');
+      // A full bootstrap is the authoritative active table roster. Keep
+      // inactive rows for any pending offline order's history, but never
+      // display orphaned/renamed rows from a prior server snapshot or login.
+      await txn.update(
+        'dining_tables',
+        <String, Object?>{'is_active': 0},
+      );
 
       for (final rawBranch in data['branches'] as List<Object?>? ?? const []) {
         final branch = Map<String, Object?>.from(
@@ -353,11 +371,39 @@ class LocalDatabase implements SyncStore {
         );
       }
 
-      for (final rawOrder in data['orders'] as List<Object?>? ?? const []) {
-        await _upsertOrderSnapshot(
-          txn,
-          Map<String, Object?>.from(rawOrder! as Map<Object?, Object?>),
+      final serverOrders = data['orders'] as List<Object?>? ?? const [];
+      final activeServerOrderIds = <String>{};
+      for (final rawOrder in serverOrders) {
+        final order = Map<String, Object?>.from(
+          rawOrder! as Map<Object?, Object?>,
         );
+        activeServerOrderIds.add(order['id']!.toString());
+        await _upsertOrderSnapshot(txn, order);
+      }
+
+      // Bootstrap is the server's authoritative ACTIVE order list for this
+      // signed-in waiter. Stale server-backed drafts must not stay open forever
+      // after a desktop cashier closes/cancels them or reassigns the waiter.
+      // Protect only orders actually referenced by unsent/conflicted work.
+      // One unrelated offline order must never keep ALL old server-backed
+      // orders on the phone after the desktop closes them.
+      final protectedIds = await _outstandingOrderIds(txn);
+      final cached = await txn.query(
+        'orders',
+        columns: <String>['local_order_id', 'client_order_id', 'server_id'],
+        where: "server_id IS NOT NULL AND status NOT IN ('closed', 'cancelled')",
+      );
+      for (final row in cached) {
+        if (!activeServerOrderIds.contains(row['server_id']?.toString()) &&
+            !protectedIds.contains(row['local_order_id']?.toString()) &&
+            !protectedIds.contains(row['client_order_id']?.toString())) {
+          await txn.update(
+            'orders',
+            <String, Object?>{'status': 'closed'},
+            where: 'local_order_id = ?',
+            whereArgs: <Object?>[row['local_order_id']],
+          );
+        }
       }
 
       final restaurantSettings = data['restaurant_settings'];
@@ -1232,6 +1278,7 @@ class LocalDatabase implements SyncStore {
       'name': table['name']!.toString(),
       'capacity': (table['capacity'] as num?)?.toInt() ?? 1,
       'status': table['status']!.toString(),
+      'server_status': table['status']!.toString(),
       'is_active': _boolInt(table['is_active'], defaultValue: true),
       'area_id': area['id']?.toString(),
       'area_name': area['name']?.toString(),
@@ -1316,12 +1363,132 @@ class LocalDatabase implements SyncStore {
     }
   }
 
+  /// Pending and conflicted order mutations identify exactly which orders
+  /// require local preservation during an authoritative desktop bootstrap.
+  Future<Set<String>> _outstandingOrderIds(DatabaseExecutor txn) async {
+    final entries = await txn.query(
+      'outbox',
+      columns: <String>['payload_json'],
+      where: "status IN ('pending', 'conflict')",
+    );
+    final ids = <String>{};
+    for (final entry in entries) {
+      final Object? payload;
+      try {
+        payload = jsonDecode(entry['payload_json']! as String);
+      } on FormatException {
+        // Keep malformed mutations visible as conflicts; they never authorize
+        // a broad blanket exemption for unrelated server-backed orders.
+        continue;
+      }
+      if (payload is! Map) continue;
+      for (final key in const <String>[
+        'client_order_id', 'source_client_order_id',
+        'target_client_order_id', 'target_order_id',
+      ]) {
+        final id = payload[key]?.toString();
+        if (id != null && id.isNotEmpty) ids.add(id);
+      }
+    }
+    return ids;
+  }
+
+  /// A phone-only order can be abandoned explicitly, never a server order.
+  /// This deletes only this order and its queued/conflicted mutations; it does
+  /// not cancel or alter any order on the desktop.
+  Future<void> discardLocalOrder(String localOrderId) =>
+      discardLocalOrders(<String>[localOrderId]);
+
+  Future<void> discardLocalOrders(List<String> localOrderIds) async {
+    if (localOrderIds.isEmpty) return;
+    await _db.transaction((txn) async {
+      // Validate all before deleting anything. Another sync may have already
+      // uploaded one of these orders while the confirmation dialog was open.
+      for (final localOrderId in localOrderIds) {
+        final rows = await txn.query('orders',
+          where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId],
+          limit: 1);
+        if (rows.isEmpty || rows.single['server_id'] != null) {
+          throw StateError(
+            'An order has changed on desktop. Refresh the list before discarding.',
+          );
+        }
+      }
+      for (final localOrderId in localOrderIds) {
+        await _discardLocalOrderTxn(txn, localOrderId);
+      }
+      await _reapplyLocalOccupancy(txn);
+    });
+  }
+
+  Future<void> _discardLocalOrderTxn(
+    DatabaseExecutor txn,
+    String localOrderId,
+  ) async {
+      final queued = await txn.query('outbox',
+        columns: <String>['mutation_id', 'payload_json'],
+        where: "status IN ('pending', 'conflict')",
+      );
+      for (final mutation in queued) {
+        final Object? data;
+        try {
+          data = jsonDecode(mutation['payload_json']! as String);
+        } on FormatException {
+          throw StateError('A queued operation has invalid data; do not discard automatically.');
+        }
+        final payload = data;
+        if (payload is! Map) continue;
+        final related = const <String>[
+          'client_order_id', 'source_client_order_id',
+          'target_client_order_id', 'target_order_id',
+        ].any((key) => payload[key]?.toString() == localOrderId);
+        if (!related) continue;
+        final mutationId = mutation['mutation_id']!.toString();
+        await txn.delete('conflicts',
+          where: 'mutation_id = ?', whereArgs: <Object?>[mutationId]);
+        await txn.delete('outbox',
+          where: 'mutation_id = ?', whereArgs: <Object?>[mutationId]);
+      }
+      await txn.delete('order_items',
+        where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId]);
+      await txn.delete('orders',
+        where: 'local_order_id = ?', whereArgs: <Object?>[localOrderId]);
+  }
+
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
-    final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+    // Rebuild occupancy from the last confirmed server state EVERY time.
+    // Never stack optimistic local occupancy on a previously marked table,
+    // otherwise one offline draft leaves a permanently occupied phantom.
+    await txn.rawUpdate('UPDATE dining_tables SET status = server_status');
+
+    // Only a *pending order.open mutation* may override the server's table
+    // status. A forgotten local draft or a rejected mutation is not evidence
+    // of a real occupied table, and must not lock all the phone's tables.
+    final pending = await txn.query(
+      'outbox',
+      columns: <String>['payload_json'],
+      where: "status = 'pending' AND operation = 'order.open'",
+    );
+    final awaitingServer = <String>{};
+    for (final entry in pending) {
+      final payload = jsonDecode(entry['payload_json']! as String);
+      if (payload is Map<String, dynamic>) {
+        final id = payload['client_order_id']?.toString();
+        if (id != null) awaitingServer.add(id);
+      }
+    }
+    if (awaitingServer.isEmpty) return;
+
+    final drafts = await txn.rawQuery(
+      "SELECT local_order_id, table_id FROM orders "
+      "WHERE server_id IS NULL AND table_id IS NOT NULL "
+      "AND status IN ('draft', 'submitted_pending_sync')",
     );
 
-    for (final row in rows) {
+    for (final row in drafts) {
+      if (!awaitingServer.contains(row['local_order_id']?.toString())) {
+        continue;
+      }
       await txn.update(
         'dining_tables',
         <String, Object?>{'status': 'occupied'},

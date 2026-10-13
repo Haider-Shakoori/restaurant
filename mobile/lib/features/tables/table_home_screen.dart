@@ -11,6 +11,7 @@ import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
+import 'local_order_recovery_screen.dart';
 import 'ready_pickup_alerts.dart';
 
 class TableHomeScreen extends StatefulWidget {
@@ -37,6 +38,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   int _conflicts = 0;
   String? _syncError;
   String? _connectionStatus;
+  String? _lastSyncAt;
   SessionCredentials? _session;
   bool _syncing = false;
   Timer? _readyRefreshTimer;
@@ -94,6 +96,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       db.systemState('last_sync_error'),
       db.systemState('active_connection'),
       widget.dependencies.credentials.readSession(),
+      db.systemState('last_sync_at'),
     ]);
 
     if (!mounted) return;
@@ -121,6 +124,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       _conflicts = values[4]! as int;
       _syncError = values[5] as String?;
       _connectionStatus = values[6] as String?;
+      _lastSyncAt = values[8] as String?;
       _session = session;
     });
 
@@ -151,7 +155,17 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     setState(() => _syncing = true);
 
     try {
-      await widget.dependencies.syncCoordinator.syncNow();
+      // Force an authoritative snapshot, not merely an incremental cursor
+      // pull. This clears obsolete server orders and corrects stale tables.
+      await widget.dependencies.syncCoordinator.syncAndRefresh();
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sync failed; showing cached tables. $error'),
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _syncing = false);
@@ -302,6 +316,18 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
   }
 
+  Future<void> _recoverOrders() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => LocalOrderRecoveryScreen(
+          database: widget.dependencies.database,
+          refreshFromDesktop: widget.dependencies.syncCoordinator.syncAndRefresh,
+        ),
+      ),
+    );
+    if (mounted) await _refresh();
+  }
+
   Future<void> _logout() async {
     await widget.dependencies.pushNotifications.signOut();
     unawaited(widget.dependencies.lanPush.stop());
@@ -315,6 +341,11 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   Widget build(BuildContext context) {
     final s = widget.strings;
     final session = _session;
+    final lastSync = DateTime.tryParse(_lastSyncAt ?? '')?.toLocal();
+    final syncHealthy = (_syncError == null || _syncError!.isEmpty) &&
+        _connectionStatus != 'offline' &&
+        lastSync != null &&
+        DateTime.now().difference(lastSync).inSeconds < 45;
 
     return Scaffold(
       appBar: AppBar(
@@ -345,9 +376,15 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
             onSelected: (value) {
               if (value == 'logout') {
                 _logout();
+              } else if (value == 'recover_orders') {
+                _recoverOrders();
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'recover_orders',
+                child: Text('Recover / clear stuck orders'),
+              ),
               PopupMenuItem(
                 value: 'logout',
                 child: Text('Sign out'),
@@ -370,7 +407,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                     avatar: Icon(
                       _syncing
                           ? Icons.sync
-                          : _connectionStatus == 'offline'
+                          : !syncHealthy
                               ? Icons.cloud_off_outlined
                               : session.activeChannel == ConnectionChannel.local
                                   ? Icons.lan_outlined
@@ -380,8 +417,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                     label: Text(
                       _syncing
                           ? 'Syncing'
-                          : _connectionStatus == 'offline'
-                              ? 'Offline · queued locally'
+                          : !syncHealthy
+                              ? 'Not synchronized · cached data'
                               : (session.connectionMode == ConnectionMode.automatic
                                       ? s.automatic + ' · '
                                       : '') +
@@ -390,6 +427,21 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                                       : s.connectedCloud),
                     ),
                   ),
+                if (session != null)
+                  Chip(
+                    avatar: const Icon(Icons.dns_outlined, size: 18),
+                    label: Text(
+                      'Server: ${Uri.tryParse(session.baseUrl)?.authority ?? 'unknown'}',
+                    ),
+                  ),
+                Chip(
+                  avatar: const Icon(Icons.schedule_outlined, size: 18),
+                  label: Text(
+                    lastSync == null
+                        ? 'Last confirmed sync: Never'
+                        : 'Last confirmed sync: $lastSync',
+                  ),
+                ),
                 Chip(
                   avatar: const Icon(Icons.cloud_upload_outlined, size: 18),
                   label: Text(s.offlineQueued + ': $_pending'),

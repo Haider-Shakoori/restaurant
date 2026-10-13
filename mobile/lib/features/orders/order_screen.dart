@@ -662,17 +662,34 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() => _working = true);
 
     try {
+      // Sending creates durable offline mutations first. Do not tell staff
+      // the kitchen received the order until the server acknowledges them.
       await widget.dependencies.orders.submit(widget.localOrderId);
+      Object? syncFailure;
+      try {
+        await widget.dependencies.syncCoordinator.syncNowWithFeedback();
+      } on Object catch (error) {
+        syncFailure = error;
+      }
       await _refresh();
+
+      final current = await widget.dependencies.database.order(widget.localOrderId);
+      final awaitingServer = current?['status']?.toString() ==
+          'submitted_pending_sync';
+      final conflicts = await widget.dependencies.database.conflictCount();
 
       if (mounted) {
+        final message = syncFailure != null
+            ? 'Saved on phone, NOT delivered to kitchen. Sync failed: $syncFailure'
+            : conflicts > 0
+                ? 'Not confirmed: $conflicts synchronization conflicts. Review conflicts on Tables.'
+                : awaitingServer
+                    ? 'Saved on phone, still queued. Check the desktop connection and retry sync.'
+                    : 'Kitchen order confirmed by server.';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.strings.queuedForKitchen)),
+          SnackBar(content: Text(message), duration: const Duration(seconds: 7)),
         );
       }
-
-      await widget.dependencies.syncCoordinator.syncNow();
-      await _refresh();
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -687,14 +704,11 @@ class _OrderScreenState extends State<OrderScreen> {
     ).showSnackBar(SnackBar(content: Text(error.toString())));
   }
 
-  bool get _editable => const <String>{
-    'draft',
-    'submitted',
-    'submitted_pending_sync',
-    'preparing',
-    'ready',
-    'served',
-  }.contains(_order?['status']?.toString());
+  // The waiter app sends the initial kitchen ticket only. Existing KOT
+  // history remains visible, but creating additional KOT rounds is disabled.
+  bool get _editable =>
+      _kotRounds.isEmpty &&
+      _order?['status']?.toString() == 'draft';
 
   List<int> get _heldCourses {
     final courses = _items
@@ -1280,11 +1294,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                     icon: const Icon(Icons.send_rounded),
                     label: Text(
-                      _working
-                          ? 'Sending...'
-                          : (_order?['status']?.toString() == 'draft'
-                              ? 'Send to Kitchen'
-                              : 'Send New KOT Round'),
+                      _working ? 'Sending...' : 'Send to Kitchen',
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
