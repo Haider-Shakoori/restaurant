@@ -1318,7 +1318,9 @@ class LocalDatabase implements SyncStore {
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
     final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+      "SELECT DISTINCT table_id FROM orders "
+      "WHERE server_id IS NULL AND table_id IS NOT NULL "
+      "AND status IN ('draft', 'submitted_pending_sync')",
     );
 
     for (final row in rows) {
