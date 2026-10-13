@@ -581,7 +581,14 @@ class LocalDatabase implements SyncStore {
   Future<List<Map<String, Object?>>> activeOrders() {
     return _db.query(
       'orders',
-      where: "status NOT IN ('closed', 'cancelled')",
+      // A previously synced server order is only a cache. When the latest
+      // server table snapshot says AVAILABLE, do not keep presenting its old
+      // draft as an open order. Keep unsynced offline orders visible until
+      // they are acknowledged, and never delete cached order history here.
+      where: "status NOT IN ('closed', 'cancelled') "
+          "AND (server_id IS NULL OR table_id IS NULL OR NOT EXISTS "
+          "(SELECT 1 FROM dining_tables AS t "
+          "WHERE t.id = orders.table_id AND t.status = 'available'))",
       orderBy: 'updated_at DESC',
     );
   }
