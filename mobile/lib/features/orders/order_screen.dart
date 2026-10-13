@@ -662,17 +662,34 @@ class _OrderScreenState extends State<OrderScreen> {
     setState(() => _working = true);
 
     try {
+      // Sending creates durable offline mutations first. Do not tell staff
+      // the kitchen received the order until the server acknowledges them.
       await widget.dependencies.orders.submit(widget.localOrderId);
+      Object? syncFailure;
+      try {
+        await widget.dependencies.syncCoordinator.syncNowWithFeedback();
+      } on Object catch (error) {
+        syncFailure = error;
+      }
       await _refresh();
+
+      final current = await widget.dependencies.database.order(widget.localOrderId);
+      final awaitingServer = current?['status']?.toString() ==
+          'submitted_pending_sync';
+      final conflicts = await widget.dependencies.database.conflictCount();
 
       if (mounted) {
+        final message = syncFailure != null
+            ? 'Saved on phone, NOT delivered to kitchen. Sync failed: $syncFailure'
+            : conflicts > 0
+                ? 'Not confirmed: $conflicts synchronization conflicts. Review conflicts on Tables.'
+                : awaitingServer
+                    ? 'Saved on phone, still queued. Check the desktop connection and retry sync.'
+                    : 'Kitchen order confirmed by server.';
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.strings.queuedForKitchen)),
+          SnackBar(content: Text(message), duration: const Duration(seconds: 7)),
         );
       }
-
-      await widget.dependencies.syncCoordinator.syncNow();
-      await _refresh();
     } on Object catch (error) {
       _showError(error);
     } finally {
