@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../app/app_strings.dart';
 import '../../app/app_theme.dart';
@@ -42,7 +41,6 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
   bool _syncing = false;
   Timer? _readyRefreshTimer;
   bool _refreshInProgress = false;
-  ReadyPickupTracker? _alertTracker;
   List<ReadyPickupAlert> _readyAlerts = const [];
 
   @override
@@ -100,24 +98,12 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
 
     if (!mounted) return;
 
-    final nextOrders = List<Map<String, Object?>>.from(
-      values[2]! as List<Map<String, Object?>>,
-    );
-    final nextTables = List<Map<String, Object?>>.from(
-      values[1]! as List<Map<String, Object?>>,
-    );
-    final alerts = readyPickupAlerts(nextOrders, nextTables);
     final session = values[7] as SessionCredentials?;
-    // Never share an alert's acknowledged state across tenant installations.
-    final alertScope = session?.tenantId ?? session?.deviceId ?? 'signed-out';
-    final setting = 'ready_pickup_seen_$alertScope';
-    _alertTracker ??= ReadyPickupTracker.decode(
-      await db.systemState(setting),
-    );
-    final freshAlerts = _alertTracker!.newlyReady(alerts);
-    if (freshAlerts.isNotEmpty) {
-      await db.setSystemState(setting, _alertTracker!.encode());
-    }
+    // Shared notifier owns de-duplication + the OS notification so the screen
+    // and the background LAN long-poll cannot double-alert the same dish.
+    final alertRefresh = await widget.dependencies.readyNotifier.refresh();
+    final alerts = alertRefresh.alerts;
+    final freshAlerts = alertRefresh.freshAlerts;
 
     if (!mounted) return;
     setState(() {
@@ -138,12 +124,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       _session = session;
     });
 
-    if (freshAlerts.isNotEmpty && session != null) {
-      unawaited(SystemSound.play(SystemSoundType.alert));
-      unawaited(HapticFeedback.heavyImpact());
-      unawaited(
-        widget.dependencies.localNotifications.showReadyPickup(freshAlerts),
-      );
+    if (freshAlerts.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 8),
@@ -323,7 +304,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
 
   Future<void> _logout() async {
     await widget.dependencies.pushNotifications.signOut();
-    _alertTracker = null;
+    unawaited(widget.dependencies.lanPush.stop());
+    widget.dependencies.readyNotifier.reset();
     _readyAlerts = const [];
     await widget.dependencies.session.logoutLocal();
     widget.onLoggedOut();

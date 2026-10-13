@@ -26,6 +26,7 @@ abstract interface class SyncApi {
     SessionCredentials credentials, {
     required int cursor,
     int limit,
+    Duration? wait,
   });
 }
 
@@ -173,18 +174,34 @@ class MobileApiClient implements SyncApi, ServerProbe {
     SessionCredentials credentials, {
     required int cursor,
     int limit = 100,
+    Duration? wait,
   }) {
+    final query = <String, String>{
+      'cursor': cursor.toString(),
+      'limit': limit.toString(),
+    };
+
+    // A positive wait long-polls the restaurant LAN: the desktop holds the
+    // request open until a change appears or the wait elapses so a freshly
+    // READY dish reaches the phone in about a second. The client timeout must
+    // outlast the server-side wait or the request would always time out.
+    Duration? timeoutOverride;
+    final waitSeconds = wait?.inSeconds ?? 0;
+    if (waitSeconds > 0) {
+      final clamped = waitSeconds.clamp(1, 60);
+      query['wait'] = clamped.toString();
+      timeoutOverride = Duration(seconds: clamped + 15);
+    }
+
     final uri = _uri(credentials.baseUrl, '/api/v1/sync/pull').replace(
-      queryParameters: <String, String>{
-        'cursor': cursor.toString(),
-        'limit': limit.toString(),
-      },
+      queryParameters: query,
     );
 
     return _request(
       'GET',
       uri,
       headers: _authHeaders(credentials),
+      timeoutOverride: timeoutOverride,
     ).then(_data);
   }
 

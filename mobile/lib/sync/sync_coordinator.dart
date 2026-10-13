@@ -8,14 +8,25 @@ class SyncCoordinator {
   SyncCoordinator({
     required SyncEngine engine,
     Connectivity? connectivity,
+    Future<void> Function()? onChanges,
+    Duration watchWait = const Duration(seconds: 20),
   }) : _engine = engine,
-       _connectivity = connectivity ?? Connectivity();
+       _connectivity = connectivity ?? Connectivity(),
+       _onChanges = onChanges,
+       _watchWait = watchWait;
 
   final SyncEngine _engine;
   final Connectivity _connectivity;
 
+  /// Invoked after a LAN long-poll wake so ready-for-pickup detection can run
+  /// without any visible widget (background LAN push). Null disables watching.
+  final Future<void> Function()? _onChanges;
+  final Duration _watchWait;
+
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   Timer? _timer;
+  bool _watching = false;
+  bool _disposed = false;
 
   void start() {
     _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen(
@@ -27,12 +38,14 @@ class SyncCoordinator {
     );
 
     _timer ??= Timer.periodic(
-      // Foreground mobile pickup alerts need fresh LAN/cloud KOT state.
-      // 10-second sync plus the existing 6-second local alert refresh
-      // provides timely notification without continuous HTTP polling.
+      // Full sync (heartbeat, push, drain). The LAN long-poll loop below
+      // delivers ready-for-pickup changes far faster when on the restaurant
+      // network, so this timer stays modest to avoid needless HTTP.
       const Duration(seconds: 10),
       (_) => unawaited(_safeSync()),
     );
+
+    unawaited(_watch());
   }
 
   Future<void> syncNow() => _safeSync();
@@ -45,7 +58,42 @@ class SyncCoordinator {
     }
   }
 
+  /// Long-polls the restaurant LAN while a session exists. The desktop holds
+  /// each request open until a change appears or the wait elapses, so a newly
+  /// READY dish surfaces in about a second. When the active channel is not the
+  /// LAN (or a request fails) the loop pauses; the 10-second timer keeps
+  /// performing full syncs so ordering and the cloud relay stay responsive.
+  Future<void> _watch() async {
+    final onChanges = _onChanges;
+    if (_watching || onChanges == null) {
+      return;
+    }
+
+    _watching = true;
+    while (!_disposed) {
+      var usedLongPoll = false;
+      var pause = const Duration(seconds: 4);
+
+      try {
+        usedLongPoll = await _engine.pullOnce(wait: _watchWait);
+        if (usedLongPoll) {
+          await onChanges();
+          pause = Duration.zero;
+        }
+      } on Object {
+        pause = const Duration(seconds: 5);
+      }
+
+      if (pause > Duration.zero) {
+        await Future<void>.delayed(pause);
+      }
+    }
+
+    _watching = false;
+  }
+
   Future<void> dispose() async {
+    _disposed = true;
     _timer?.cancel();
     _timer = null;
     await _connectivitySubscription?.cancel();

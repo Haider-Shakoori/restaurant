@@ -186,6 +186,57 @@ public sealed class LocalSyncService
         };
     }
 
+    /// <summary>
+    /// Long-poll variant of <see cref="PullAsync(LocalTerminalPrincipal, long, int, CancellationToken)"/>.
+    /// When <paramref name="wait"/> is positive the call blocks until a change
+    /// visible to the caller appears after the cursor, or the wait elapses -
+    /// whichever comes first. Waiters on the restaurant LAN use this so a
+    /// freshly READY dish reaches the phone in about a second instead of on the
+    /// next fixed polling tick. A waiter principal only sees their own orders
+    /// plus unowned table changes, so other waiters' activity cannot wake them.
+    /// </summary>
+    public async Task<object> PullAsync(
+        LocalTerminalPrincipal principal,
+        long cursor,
+        int limit,
+        TimeSpan wait,
+        CancellationToken cancellationToken)
+    {
+        if (wait > TimeSpan.Zero)
+        {
+            var deadline = DateTimeOffset.UtcNow + wait;
+            while (DateTimeOffset.UtcNow < deadline &&
+                   !await HasVisibleChangesAsync(principal, cursor, cancellationToken))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken);
+            }
+        }
+
+        return await PullAsync(principal, cursor, limit, cancellationToken);
+    }
+
+    /// <summary>
+    /// True when any change after <paramref name="cursor"/> is visible to the
+    /// caller. Order changes owned by another waiter stay invisible to a waiter
+    /// principal, matching the visibility filter applied by
+    /// <see cref="PullAsync(LocalTerminalPrincipal, long, int, CancellationToken)"/>.
+    /// </summary>
+    public async Task<bool> HasVisibleChangesAsync(
+        LocalTerminalPrincipal principal,
+        long cursor,
+        CancellationToken cancellationToken)
+    {
+        await using var db = _databaseFactory.Create();
+        var query = db.Changes.Where(value => value.Sequence > cursor);
+        if (string.Equals(principal.UserRole, "waiter", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(value =>
+                value.OwnerUserId == null || value.OwnerUserId == principal.UserId);
+        }
+
+        return await query.AnyAsync(cancellationToken);
+    }
+
     private async Task<Dictionary<string, object?>> ProcessMutationAsync(
         LocalTerminalPrincipal principal,
         LocalSyncMutationRequest mutation,

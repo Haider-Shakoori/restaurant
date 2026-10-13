@@ -166,7 +166,19 @@ class SyncEngine {
     }
   }
 
-  Future<void> _pull(SessionCredentials session) async {
+  /// Polls for changes exactly once and returns whether the request used the
+  /// LAN long-poll. The restaurant desktop holds a long-poll open until a
+  /// change appears, so the ready-for-pickup banner and OS notification appear
+  /// in about a second instead of on the next periodic tick. The cloud channel
+  /// has no long-poll, so [wait] is ignored there.
+  Future<bool> pullOnce({Duration? wait}) async {
+    final session = await _requireSession();
+    final longPoll = session.activeChannel == ConnectionChannel.local;
+    await _pull(session, wait: longPoll ? wait : null);
+    return longPoll;
+  }
+
+  Future<void> _pull(SessionCredentials session, {Duration? wait}) async {
     final cursorScope = session.activeChannel.name;
     var cursor = await _store.syncCursor(scope: cursorScope);
 
@@ -175,6 +187,8 @@ class SyncEngine {
         session,
         cursor: cursor,
         limit: 100,
+        // Only the first page long-polls; follow-up pages drain fast.
+        wait: page == 0 ? wait : null,
       );
       await _store.applyPull(
         response,

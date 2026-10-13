@@ -302,6 +302,7 @@ public static class LocalEndpointMappings
             LocalSyncService sync,
             long? cursor,
             int? limit,
+            int? wait,
             CancellationToken token) =>
         {
             var principal = await authenticator.AuthenticateAsync(
@@ -325,6 +326,7 @@ public static class LocalEndpointMappings
                 principal,
                 Math.Max(0, cursor ?? 0),
                 limit ?? 100,
+                TimeSpan.FromSeconds(Math.Clamp(wait ?? 0, 0, 60)),
                 token);
 
             return Results.Ok(new { data });

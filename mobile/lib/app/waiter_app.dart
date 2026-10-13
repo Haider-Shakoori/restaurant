@@ -40,6 +40,12 @@ class _WaiterAppState extends State<WaiterApp> {
       unawaited(widget.dependencies.pushNotifications.registerAfterLogin());
       widget.dependencies.syncCoordinator.start();
       unawaited(widget.dependencies.syncCoordinator.syncNow());
+      // Keep the process alive on Android so LAN ready-for-pickup alerts keep
+      // arriving when the phone screen is off. Only meaningful when a local
+      // (restaurant network) base URL is configured.
+      if ((session.localBaseUrl ?? '').isNotEmpty) {
+        unawaited(widget.dependencies.lanPush.start());
+      }
     }
 
     return session;

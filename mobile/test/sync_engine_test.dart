@@ -475,6 +475,61 @@ void main() {
     expect(store.retries, <String>['M-RETRY']);
     expect(store.states['last_sync_error'], 'offline');
   });
+
+  test('local channel long-polls the LAN pull and reports it', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 3,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(
+        _session(
+          activeChannel: ConnectionChannel.local,
+          baseUrl: 'http://192.168.1.20:8787',
+        ),
+      ),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    final longPolled = await engine.pullOnce(wait: const Duration(seconds: 20));
+
+    expect(longPolled, isTrue);
+    expect(api.pullWaits, <Duration?>[const Duration(seconds: 20)]);
+    expect(store.cursors['local'], 3);
+  });
+
+  test('cloud channel never long-polls', () async {
+    final store = _MemorySyncStore(pending: <OutboxMutation>[]);
+    final api = _FakeApi(
+      pullResponses: <Map<String, Object?>>[
+        const <String, Object?>{
+          'cursor': 4,
+          'has_more': false,
+          'changes': <Object?>[],
+        },
+      ],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session()),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    final longPolled = await engine.pullOnce(wait: const Duration(seconds: 20));
+
+    expect(longPolled, isFalse);
+    expect(api.pullWaits, <Duration?>[null]);
+    expect(store.cursors['cloud'], 4);
+  });
 }
 
 SessionCredentials _session({
@@ -696,6 +751,7 @@ class _FakeApi implements SyncApi {
   final List<Map<String, Object?>> _pullResponses;
   final List<int> pullCursors = <int>[];
   final List<String> pullBaseUrls = <String>[];
+  final List<Duration?> pullWaits = <Duration?>[];
   int _pullIndex = 0;
   int heartbeatCount = 0;
 
@@ -719,9 +775,11 @@ class _FakeApi implements SyncApi {
     SessionCredentials credentials, {
     required int cursor,
     int limit = 100,
+    Duration? wait,
   }) async {
     pullCursors.add(cursor);
     pullBaseUrls.add(credentials.baseUrl);
+    pullWaits.add(wait);
     return _pullResponses[_pullIndex++];
   }
 
