@@ -2123,7 +2123,17 @@ internal static class OperationalActionViews
     {
         var workflow = new DesktopRestaurantWorkflowService();
         var busy = false;
-        var total = order.Total;
+        // An existing bill can already be partly paid. Do not ask the guest
+        // to pay the original order total a second time.
+        var total = await DesktopUiWork.RunAsync(async () =>
+        {
+            await using var db = factory.Create();
+            var due = await db.Bills.AsNoTracking()
+                .Where(x => x.OrderId == order.Id && x.Status == "open")
+                .Select(x => (decimal?)x.BalanceDue)
+                .FirstOrDefaultAsync();
+            return due ?? order.Total;
+        });
 
         var lines = await DesktopUiWork.RunAsync(async () =>
         {
@@ -2285,8 +2295,13 @@ internal static class OperationalActionViews
 
                     if (live.Status is not ("served" or "billed"))
                     {
-                        // Serving requires every kitchen ticket to be ready; the
-                        // workflow raises the precise reason otherwise.
+                        if (live.Status != "ready")
+                        {
+                            throw new InvalidOperationException(
+                                $"Order is {live.Status}. Payment is blocked until the kitchen marks all active items ready. " +
+                                "For an abandoned or incorrect order, use Cancel order with an audit reason; " +
+                                "do not take another payment.");
+                        }
                         await workflow.ServeOrderAsync(live.Id, token);
                     }
 
@@ -2328,11 +2343,13 @@ internal static class OperationalActionViews
                         throw new InvalidOperationException("Cashier session could not be opened.");
                     }
 
-                    var applied = Math.Min(amount, bill.BalanceDue);
-                    if (applied <= 0m)
-                    {
-                        throw new InvalidOperationException("This bill is already settled.");
-                    }
+                    if (bill.BalanceDue <= 0m)
+                        throw new InvalidOperationException("This bill is already settled. Refresh the table before retrying.");
+                    if (amount < bill.BalanceDue)
+                        throw new InvalidOperationException(
+                            $"The remaining balance changed to AFN {bill.BalanceDue:N2}. " +
+                            "Refresh the table and confirm the amount received before collecting payment.");
+                    var applied = bill.BalanceDue;
 
                     await workflow.AddPaymentAsync(bill.Id, sessionId, applied, "cash", null, token);
                     posted = applied;
