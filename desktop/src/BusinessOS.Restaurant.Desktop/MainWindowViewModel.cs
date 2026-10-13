@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop.Appearance;
 using BusinessOS.Restaurant.Licensing;
+using BusinessOS.Restaurant.LocalServer;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -88,6 +89,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ToggleNotificationsCommand = new RelayCommand(() => NotificationsOpen = !NotificationsOpen);
         MarkNotificationsReadCommand = new RelayCommand(MarkNotificationsRead);
         DesktopNoticeEvents.Posted += OnDesktopNotice;
+        LocalOrderArrivalSignals.KitchenOrderReceived += OnWaiterOrderReceived;
     }
 
     partial void OnNotificationsOpenChanged(bool value)
@@ -105,6 +107,22 @@ public sealed partial class MainWindowViewModel : ObservableObject
         foreach (var notice in _noticeFeed.History)
             NotificationHistory.Add(notice);
         UnreadNotificationCount = _noticeFeed.UnreadCount;
+    }
+
+    private void OnWaiterOrderReceived(string clientOrderId)
+    {
+        // The LAN host commits its order on a background request thread.
+        // WPF notifications and the sound must run on the UI dispatcher.
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted) return;
+        dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (dispatcher.HasShutdownStarted) return;
+            OperationalAlertSounds.OrderPlaced();
+            DesktopNoticeEvents.Publish(
+                DesktopNoticeLevel.Success,
+                $"New waiter order received for kitchen · {clientOrderId}");
+        }));
     }
 
     private void OnDesktopNotice(DesktopNoticeLevel level, string message)
@@ -144,6 +162,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public void ReleaseNotifications()
     {
         DesktopNoticeEvents.Posted -= OnDesktopNotice;
+        LocalOrderArrivalSignals.KitchenOrderReceived -= OnWaiterOrderReceived;
         foreach (var timer in _noticeTimers)
             timer.Stop();
         _noticeTimers.Clear();
