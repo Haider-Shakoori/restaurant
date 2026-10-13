@@ -48,7 +48,9 @@ class SyncCoordinator {
     unawaited(_watch());
   }
 
-  Future<void> syncNow() => _safeSync();
+  // Explicit manual sync must propagate failures to the user. Only background
+  // sync is best-effort and suppresses errors after recording them.
+  Future<void> syncNow() => _engine.syncNow();
 
   Future<void> _safeSync() async {
     try {
