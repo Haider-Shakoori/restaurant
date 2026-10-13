@@ -7,6 +7,7 @@ import '../../core/notifications/restaurant_local_notifications.dart';
 import '../../core/security/secure_credential_store.dart';
 import '../../data/local/local_database.dart';
 import 'ready_pickup_alerts.dart';
+import 'ready_pickup_chime.dart';
 
 /// One refresh's worth of ready-for-pickup state.
 class ReadyPickupRefresh {
@@ -32,13 +33,16 @@ class ReadyPickupNotifier {
     required LocalDatabase database,
     required CredentialStore credentials,
     required RestaurantLocalNotifications notifications,
+    ReadyPickupChime? chime,
   }) : _database = database,
        _credentials = credentials,
-       _notifications = notifications;
+       _notifications = notifications,
+       _chime = chime ?? ReadyPickupChime();
 
   final LocalDatabase _database;
   final CredentialStore _credentials;
   final RestaurantLocalNotifications _notifications;
+  final ReadyPickupChime _chime;
 
   ReadyPickupTracker? _tracker;
   String? _scope;
@@ -96,7 +100,7 @@ class ReadyPickupNotifier {
       return ReadyPickupRefresh(alerts: alerts, freshAlerts: const []);
     }
 
-    unawaited(SystemSound.play(SystemSoundType.alert));
+    unawaited(_chime.play());
     unawaited(HapticFeedback.heavyImpact());
     unawaited(_notifications.showReadyPickup(freshAlerts));
 
