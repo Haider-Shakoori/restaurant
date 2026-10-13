@@ -2572,7 +2572,7 @@ internal static class OperationalActionViews
 
             var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
             body.Children.Add(labelText);
-            body.Children.Add(seats);
+            body.Children.Add(RestaurantTableFurniture.Create(table.Name, table.Capacity, stripeColor));
             body.Children.Add(status);
             if (order is not null)
             {
@@ -4704,7 +4704,7 @@ internal static class OperationalActionViews
 
                 var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
                 body.Children.Add(labelText);
-                body.Children.Add(seats);
+                body.Children.Add(RestaurantTableFurniture.Create(table.Name, table.Capacity, stripeColor));
                 body.Children.Add(status);
                 if (order is not null)
                 {
