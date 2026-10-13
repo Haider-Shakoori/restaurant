@@ -49,7 +49,7 @@ public sealed class LocalSyncService
         var orders = await ActiveOrdersAsync(db, principal, cancellationToken);
         var workflowSettings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
         var menu = BuildMenu(catalog);
-        var tables = BuildTables(catalog);
+        var tables = await BuildTablesAsync(db, catalog, cancellationToken);
         var staff = await db.StaffUsers
             .Where(value => value.IsActive)
             .OrderBy(value => value.Name)
@@ -1228,14 +1228,25 @@ public sealed class LocalSyncService
         }).Cast<object>().ToArray();
     }
 
-    private static object[] BuildTables(LocalCatalogSnapshot catalog)
+    private static async Task<object[]> BuildTablesAsync(
+        RestaurantDbContext db,
+        LocalCatalogSnapshot catalog,
+        CancellationToken cancellationToken)
     {
+        // The operational catalog can lag behind a LAN payment, reservation or
+        // manual table clearing. The local desktop database is authoritative
+        // for current occupancy; keep catalog labels and branch mappings.
+        var current = (await db.DiningTables.AsNoTracking()
+            .Select(table => new { table.Id, table.Status, table.IsActive })
+            .ToArrayAsync(cancellationToken))
+            .ToDictionary(table => table.Id, StringComparer.Ordinal);
         var branches = catalog.Branches.ToDictionary(value => value.Id, StringComparer.Ordinal);
 
         return catalog.Tables.Select(table =>
         {
             var area = catalog.Areas[table.DiningAreaId];
             var branch = branches[area.BranchId];
+            current.TryGetValue(table.Id, out var live);
 
             return new
             {
@@ -1243,8 +1254,8 @@ public sealed class LocalSyncService
                 code = table.Code,
                 name = table.Name,
                 capacity = table.Capacity,
-                status = table.Status,
-                is_active = table.IsActive,
+                status = live?.Status ?? table.Status,
+                is_active = live?.IsActive ?? table.IsActive,
                 area = new { id = area.Id, name = area.Name },
                 branch = new { id = branch.Id, name = branch.Name },
             };
