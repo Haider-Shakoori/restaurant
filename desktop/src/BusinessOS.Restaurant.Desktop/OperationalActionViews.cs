@@ -1167,6 +1167,13 @@ internal static class OperationalActionViews
                             .ToListAsync())
                         .OrderByDescending(x => x.UpdatedAtUtc)
                         .Select(x => x.Row).ToArray();
+                    var activeTableIds = refreshedOrders
+                        .Select(value => value.TableId)
+                        .ToHashSet(StringComparer.Ordinal);
+                    refreshedTables = refreshedTables.Select(table =>
+                        table.Status == "available" && activeTableIds.Contains(table.Id)
+                            ? table with { Status = "occupied" }
+                            : table).ToList();
                     return (Tables: refreshedTables, Orders: refreshedOrders);
                 });
                 tablesNow = refreshed.Tables;
@@ -1717,6 +1724,15 @@ internal static class OperationalActionViews
                 }).ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => x.Row).ToArray();
+
+            // A table with an active unpaid order is never a free seat or
+            // transfer target, even if its cached table status is stale.
+            var busyIds = allFloorOrders.Select(value => value.TableId)
+                .ToHashSet(StringComparer.Ordinal);
+            rows = rows.Select(table =>
+                table.Status == "available" && busyIds.Contains(table.Id)
+                    ? table with { Status = "occupied" }
+                    : table).ToList();
 
             var availableTables = rows
                 .Where(x => x.Status == "available")
