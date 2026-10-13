@@ -37,6 +37,10 @@ jobs:
           source .icon-venv/bin/activate
           python -m pip install --disable-pip-version-check pillow
           python tools/generate_restaurant_icons.py --repo-root . --ios
+      - name: Use Xcode 16 compatible connectivity plugin
+        run: |
+          flutter pub add connectivity_plus:7.0.0
+          flutter pub deps --style=compact | grep -F "connectivity_plus 7.0.0"
       - name: Dependencies and tests
         run: |
           flutter pub get
