@@ -1,0 +1,39 @@
+name: Verify Mobile Table Status Fix
+
+on:
+  push:
+    branches:
+      - fix/mobile-table-status-reconciliation-20261014
+    paths:
+      - .github/workflows/verify-mobile-table-status.yml
+      - mobile/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flutter-regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android toolchain
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+      - name: Format and resolve dependencies
+        run: |
+          flutter pub get
+          dart format lib test tool
+      - name: Analyze and run all mobile tests
+        run: |
+          flutter analyze
+          flutter test
