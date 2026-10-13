@@ -2530,6 +2530,7 @@ internal static class OperationalActionViews
         var tablesNow = initialTables;
         var ordersNow = initialOrders;
         string? selectedTableId = null;
+        string? selectedPartyOrderId = null;
         var busy = false;
 
         var grid = new WrapPanel { Margin = new Thickness(0, 2, 0, 12) };
@@ -2719,6 +2720,7 @@ internal static class OperationalActionViews
             };
             tile.Click += async (_, _) =>
             {
+                if (selectedTableId != table.Id) selectedPartyOrderId = null;
                 selectedTableId = table.Id;
                 await RenderAsync();
             };
@@ -2743,8 +2745,38 @@ internal static class OperationalActionViews
                 return;
             }
 
-            var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
+            var parties = ordersNow.Where(x => x.TableId == table.Id).ToList();
+            var order = parties.FirstOrDefault(x => x.Id == selectedPartyOrderId)
+                        ?? parties.FirstOrDefault();
             panel.Children.Add(new TextBlock { Text = table.Name, FontSize = 24, FontWeight = FontWeights.Bold });
+            if (parties.Count > 1)
+            {
+                panel.Children.Add(new TextBlock
+                {
+                    Text = $"{parties.Count} separate parties · choose the bill/order:",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 10, 0, 5),
+                });
+                var partyPicker = new ComboBox
+                {
+                    Name = "DiningPartyOrderPicker",
+                    ItemsSource = parties,
+                    DisplayMemberPath = nameof(TableOrderChoice.Display),
+                    SelectedItem = order,
+                    MinHeight = 36,
+                    Margin = new Thickness(0, 0, 0, 10),
+                };
+                partyPicker.SelectionChanged += async (_, _) =>
+                {
+                    if (partyPicker.SelectedItem is TableOrderChoice choice &&
+                        selectedPartyOrderId != choice.Id)
+                    {
+                        selectedPartyOrderId = choice.Id;
+                        await RenderPanelAsync();
+                    }
+                };
+                panel.Children.Add(partyPicker);
+            }
             var subtitle = new TextBlock
             {
                 Text = order is null
@@ -2755,7 +2787,8 @@ internal static class OperationalActionViews
                                 ? "Occupied · awaiting clearing"
                                 : $"Occupied · {table.ReservationNote}")
                             : $"Free, seats {table.Capacity}")
-                    : $"{order.Guests} guests · {order.ShortNumber}",
+                    : $"{order.Guests} guests · {order.ShortNumber}" +
+                      (string.IsNullOrWhiteSpace(order.PartyLabel) ? "" : $" · {order.PartyLabel}"),
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 12),
             };
