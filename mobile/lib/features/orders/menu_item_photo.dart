@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_theme.dart';
 import '../../core/models/session_credentials.dart';
 import 'menu_image_request.dart';
 
@@ -34,16 +35,17 @@ class MenuItemPhoto extends StatelessWidget {
   }
 
   Widget _placeholder(String text) => Container(
-        color: const Color(0xFFF0F1F3),
+        color: RestaurantColors.gridAltRow,
         alignment: Alignment.center,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.restaurant_menu_rounded,
-                size: 30, color: Color(0xFF85909D)),
+                size: 30, color: RestaurantColors.textMuted),
             const SizedBox(height: 6),
             Text(text,
-                style: const TextStyle(fontSize: 11, color: Color(0xFF697585))),
+                style: const TextStyle(
+                    fontSize: 11, color: RestaurantColors.textMuted)),
           ],
         ),
       );

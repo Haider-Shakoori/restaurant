@@ -1415,6 +1415,7 @@ public sealed class LocalKitchenService
         {
             id = order.Id,
             client_order_id = order.ClientOrderId,
+            display_number = order.DisplayNumber,
             status = order.Status,
             subtotal = order.Subtotal.ToString("0.00"),
             total = order.Total.ToString("0.00"),

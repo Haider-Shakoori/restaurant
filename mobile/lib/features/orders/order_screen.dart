@@ -3,10 +3,24 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../app/app_strings.dart';
+import '../../app/app_theme.dart';
 import '../../app/dependencies.dart';
+import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
+
+/// Mirrors the desktop order label: the short `#n` staff number leads, followed
+/// by the service reference (table / takeaway ref) when one is present.
+String _orderLabel(Map<String, Object?> order, {required String fallback}) {
+  final reference = order['service_reference']?.toString().trim() ?? '';
+  final body = reference.isNotEmpty ? reference : fallback;
+  final number = formatOrderNumber(order['display_number']);
+  if (number.isEmpty) {
+    return body;
+  }
+  return body.isEmpty ? number : '$number · $body';
+}
 
 class OrderScreen extends StatefulWidget {
   const OrderScreen({
@@ -297,7 +311,7 @@ class _OrderScreenState extends State<OrderScreen> {
                                     'x' + (item['quantity'] ?? 1).toString(),
                                   ),
                                   const SizedBox(width: 8),
-                                  Chip(label: Text(status)),
+                                  Chip(label: Text(formatStatus(status))),
                                 ],
                               ),
                               if (item['production_reason'] != null)
@@ -549,12 +563,11 @@ class _OrderScreenState extends State<OrderScreen> {
                     (order) => DropdownMenuItem<String>(
                       value: order['local_order_id']!.toString(),
                       child: Text(
-                        order['service_reference']?.toString().isNotEmpty == true
-                            ? order['service_reference']!.toString()
-                            : 'Order ' +
-                                order['local_order_id']!
-                                    .toString()
-                                    .substring(0, 8),
+                        _orderLabel(
+                          order,
+                          fallback:
+                              'Order ${order['local_order_id']!.toString().substring(0, 8)}',
+                        ),
                       ),
                     ),
                   )
@@ -762,7 +775,7 @@ class _OrderScreenState extends State<OrderScreen> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F5F7),
+      backgroundColor: RestaurantColors.appBackground,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) => Column(
@@ -787,13 +800,19 @@ class _OrderScreenState extends State<OrderScreen> {
       return Container(
         height: 60,
         padding: const EdgeInsets.symmetric(horizontal: 8),
-        color: const Color(0xFF171B20),
+        decoration: const BoxDecoration(
+          color: RestaurantColors.surface,
+          border: Border(
+            bottom: BorderSide(color: RestaurantColors.border),
+          ),
+        ),
         child: Row(
           children: [
             IconButton(
               tooltip: 'Back to tables',
               onPressed: () => Navigator.of(context).maybePop(),
-              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              color: RestaurantColors.textPrimary,
+              icon: const Icon(Icons.arrow_back_rounded),
             ),
             const SizedBox(width: 4),
             const Expanded(
@@ -801,13 +820,15 @@ class _OrderScreenState extends State<OrderScreen> {
                 'Restaurant POS',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+                style: TextStyle(
+                    color: RestaurantColors.textPrimary,
+                    fontWeight: FontWeight.w800),
               ),
             ),
             Text(
               '${_kotRounds.length} KOT',
               style: const TextStyle(
-                color: Color(0xFFFFD96B),
+                color: RestaurantColors.brandHover,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
               ),
@@ -815,7 +836,7 @@ class _OrderScreenState extends State<OrderScreen> {
             IconButton(
               tooltip: 'Order operations',
               onPressed: _working ? null : _showOrderOperations,
-              color: Colors.white,
+              color: RestaurantColors.textSecondary,
               icon: const Icon(Icons.more_vert_rounded),
             ),
           ],
@@ -826,24 +847,29 @@ class _OrderScreenState extends State<OrderScreen> {
     return Container(
       height: 68,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      color: const Color(0xFF171B20),
+      decoration: const BoxDecoration(
+        color: RestaurantColors.surface,
+        border: Border(
+          bottom: BorderSide(color: RestaurantColors.border),
+        ),
+      ),
       child: Row(
         children: [
           IconButton(
             onPressed: () => Navigator.of(context).maybePop(),
-            color: Colors.white,
+            color: RestaurantColors.textPrimary,
             icon: const Icon(Icons.arrow_back_rounded),
           ),
           Container(
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFFFFD96B)),
+              border: Border.all(color: RestaurantColors.brand),
               borderRadius: BorderRadius.circular(11),
             ),
             child: const Icon(
               Icons.restaurant_rounded,
-              color: Color(0xFFFFD96B),
+              color: RestaurantColors.brand,
             ),
           ),
           const SizedBox(width: 10),
@@ -854,22 +880,24 @@ class _OrderScreenState extends State<OrderScreen> {
               Text(
                 'Business OS',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: RestaurantColors.textPrimary,
                   fontWeight: FontWeight.w800,
                 ),
               ),
               Text(
                 'Restaurant',
-                style: TextStyle(color: Color(0xFFFFD96B), fontSize: 11),
+                style: TextStyle(
+                    color: RestaurantColors.brandHover, fontSize: 11),
               ),
             ],
           ),
           const SizedBox(width: 20),
-          const Icon(Icons.circle, size: 9, color: Color(0xFF55D46A)),
+          const Icon(Icons.circle, size: 9, color: RestaurantColors.success),
           const SizedBox(width: 6),
           const Text(
             'Connected',
-            style: TextStyle(color: Colors.white70, fontSize: 12),
+            style:
+                TextStyle(color: RestaurantColors.textSecondary, fontSize: 12),
           ),
           const Spacer(),
           if (_kotRounds.isNotEmpty) ...[
@@ -877,15 +905,15 @@ class _OrderScreenState extends State<OrderScreen> {
               margin: const EdgeInsetsDirectional.only(end: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
-                color: const Color(0xFF252A30),
-                borderRadius: BorderRadius.circular(10),
+                color: RestaurantColors.brandSoft,
+                borderRadius: BorderRadius.circular(RestaurantRadii.chip),
               ),
               child: Text(
                 _kotRounds.length == 1
                     ? '1 KOT round'
                     : '${_kotRounds.length} KOT rounds',
                 style: const TextStyle(
-                  color: Color(0xFFFFD96B),
+                  color: RestaurantColors.brandHover,
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
                 ),
@@ -899,13 +927,13 @@ class _OrderScreenState extends State<OrderScreen> {
                   vertical: 7,
                 ),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF174F2B),
-                  borderRadius: BorderRadius.circular(10),
+                  color: RestaurantColors.successSoft,
+                  borderRadius: BorderRadius.circular(RestaurantRadii.chip),
                 ),
                 child: const Text(
                   'READY',
                   style: TextStyle(
-                    color: Color(0xFF8DF0A7),
+                    color: RestaurantColors.success,
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
                   ),
@@ -915,13 +943,13 @@ class _OrderScreenState extends State<OrderScreen> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
-              color: const Color(0xFF252A30),
-              borderRadius: BorderRadius.circular(10),
+              color: RestaurantColors.gridHeader,
+              borderRadius: BorderRadius.circular(RestaurantRadii.chip),
             ),
             child: Text(
-              (order['status']?.toString() ?? '').replaceAll('_', ' '),
+              formatStatus(order['status']),
               style: const TextStyle(
-                color: Colors.white70,
+                color: RestaurantColors.textSecondary,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -931,7 +959,7 @@ class _OrderScreenState extends State<OrderScreen> {
           IconButton(
             tooltip: 'Order operations',
             onPressed: _working ? null : _showOrderOperations,
-            color: Colors.white70,
+            color: RestaurantColors.textSecondary,
             icon: const Icon(Icons.more_vert_rounded),
           ),
         ],
@@ -1039,10 +1067,10 @@ class _OrderScreenState extends State<OrderScreen> {
         hintText: 'Search menu items...',
         prefixIcon: const Icon(Icons.search_rounded),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: RestaurantColors.surface,
         contentPadding: EdgeInsets.zero,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(RestaurantRadii.input),
           borderSide: BorderSide.none,
         ),
       ),
@@ -1075,9 +1103,9 @@ class _OrderScreenState extends State<OrderScreen> {
         final item = items[index];
 
         return Material(
-          color: Colors.white,
+          color: RestaurantColors.surface,
           clipBehavior: Clip.antiAlias,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(RestaurantRadii.card),
           child: InkWell(
             onTap: _editable && !_working ? () => _addItem(item) : null,
             child: Column(
@@ -1110,9 +1138,9 @@ class _OrderScreenState extends State<OrderScreen> {
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              item['price'].toString() + ' AFN',
+                              formatMoney(item['price'], decimals: 0),
                               style: const TextStyle(
-                                color: Color(0xFF9A6C00),
+                                color: RestaurantColors.brandHover,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -1124,8 +1152,8 @@ class _OrderScreenState extends State<OrderScreen> {
                             ? () => _addItem(item)
                             : null,
                         style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFD96B),
-                          foregroundColor: const Color(0xFF171B20),
+                          backgroundColor: RestaurantColors.brand,
+                          foregroundColor: RestaurantColors.onBrand,
                         ),
                         icon: const Icon(Icons.add_rounded),
                       ),
@@ -1143,8 +1171,8 @@ class _OrderScreenState extends State<OrderScreen> {
   Widget _orderPanel(Map<String, Object?> order) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        color: RestaurantColors.surface,
+        borderRadius: BorderRadius.circular(RestaurantRadii.card),
         boxShadow: const [
           BoxShadow(
             blurRadius: 24,
@@ -1158,16 +1186,14 @@ class _OrderScreenState extends State<OrderScreen> {
         children: [
           Container(
             padding: const EdgeInsets.all(16),
-            color: const Color(0xFF171B20),
+            color: RestaurantColors.brand,
             child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    order['service_reference']?.toString().isNotEmpty == true
-                        ? order['service_reference']!.toString()
-                        : 'Current Order',
+                    _orderLabel(order, fallback: 'Current Order'),
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: RestaurantColors.onBrand,
                       fontWeight: FontWeight.w800,
                       fontSize: 16,
                     ),
@@ -1179,7 +1205,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE73737),
+                    color: RestaurantColors.error,
                     borderRadius: BorderRadius.circular(9),
                   ),
                   child: Text(
@@ -1228,12 +1254,12 @@ class _OrderScreenState extends State<OrderScreen> {
               children: [
                 _totalRow(
                   'Subtotal',
-                  (order['subtotal'] ?? '0.00').toString() + ' AFN',
+                  formatMoney(order['subtotal']),
                 ),
                 const SizedBox(height: 8),
                 _totalRow(
                   'Total',
-                  (order['total'] ?? '0.00').toString() + ' AFN',
+                  formatMoney(order['total']),
                   emphasized: true,
                 ),
                 const SizedBox(height: 14),
@@ -1245,10 +1271,11 @@ class _OrderScreenState extends State<OrderScreen> {
                         ? _submit
                         : null,
                     style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFD96B),
-                      foregroundColor: const Color(0xFF171B20),
+                      backgroundColor: RestaurantColors.brand,
+                      foregroundColor: RestaurantColors.onBrand,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
+                        borderRadius:
+                            BorderRadius.circular(RestaurantRadii.button),
                       ),
                     ),
                     icon: const Icon(Icons.send_rounded),
@@ -1293,8 +1320,8 @@ class _OrderScreenState extends State<OrderScreen> {
                 children: [
                   Text(item['item_name']!.toString(),
                       style: const TextStyle(fontWeight: FontWeight.w800)),
-                  Text('x${item['quantity']} · ${item['line_total']} AFN',
-                      style: const TextStyle(color: Colors.black54)),
+                  Text('x${item['quantity']} · ${formatMoney(item['line_total'])}',
+                      style: const TextStyle(color: RestaurantColors.textSecondary)),
                   if (allergy != null && allergy.isNotEmpty)
                     Text('ALLERGY: $allergy',
                         style: const TextStyle(
@@ -1365,7 +1392,9 @@ class _OrderScreenState extends State<OrderScreen> {
           style: TextStyle(
             fontSize: emphasized ? 16 : 13,
             fontWeight: emphasized ? FontWeight.w900 : FontWeight.w600,
-            color: emphasized ? const Color(0xFF171B20) : Colors.black54,
+            color: emphasized
+                ? RestaurantColors.textPrimary
+                : RestaurantColors.textSecondary,
           ),
         ),
         const Spacer(),
@@ -1374,7 +1403,9 @@ class _OrderScreenState extends State<OrderScreen> {
           style: TextStyle(
             fontSize: emphasized ? 16 : 13,
             fontWeight: emphasized ? FontWeight.w900 : FontWeight.w700,
-            color: emphasized ? const Color(0xFF9A6C00) : Colors.black87,
+            color: emphasized
+                ? RestaurantColors.brandHover
+                : RestaurantColors.textPrimary,
           ),
         ),
       ],
@@ -1385,21 +1416,24 @@ class _OrderScreenState extends State<OrderScreen> {
     // Do not advertise dead tabs: available actions must be functional.
     return Container(
       height: 58,
-      color: const Color(0xFF171B20),
+      decoration: const BoxDecoration(
+        color: RestaurantColors.surface,
+        border: Border(top: BorderSide(color: RestaurantColors.border)),
+      ),
       child: Row(children: [
         Expanded(child: TextButton.icon(
           onPressed: null,
           icon: const Icon(Icons.restaurant_menu_rounded,
-              color: Color(0xFFFFD96B)),
+              color: RestaurantColors.brand),
           label: const Text('Menu',
-              style: TextStyle(color: Color(0xFFFFD96B))),
+              style: TextStyle(color: RestaurantColors.brand)),
         )),
         Expanded(child: TextButton.icon(
           onPressed: () => Navigator.of(context).maybePop(),
           icon: const Icon(Icons.table_restaurant_rounded,
-              color: Colors.white),
+              color: RestaurantColors.textPrimary),
           label: const Text('Tables',
-              style: TextStyle(color: Colors.white)),
+              style: TextStyle(color: RestaurantColors.textPrimary)),
         )),
       ]),
     );
@@ -1569,8 +1603,8 @@ class _ItemOptionsDialogState extends State<_ItemOptionsDialog> {
                           final label =
                               option['name']!.toString() +
                               ' (+' +
-                              option['price_delta']!.toString() +
-                              ' AFN)';
+                              formatMoney(option['price_delta']) +
+                              ')';
 
                           return FilterChip(
                             selected: selected,
@@ -1784,12 +1818,11 @@ class _MoveItemDialogState extends State<_MoveItemDialog> {
                     (order) => DropdownMenuItem<String>(
                       value: order['local_order_id']!.toString(),
                       child: Text(
-                        order['service_reference']?.toString().isNotEmpty == true
-                            ? order['service_reference']!.toString()
-                            : 'Order ' +
-                                order['local_order_id']!
-                                    .toString()
-                                    .substring(0, 8),
+                        _orderLabel(
+                          order,
+                          fallback:
+                              'Order ${order['local_order_id']!.toString().substring(0, 8)}',
+                        ),
                       ),
                     ),
                   )

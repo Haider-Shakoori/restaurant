@@ -16,7 +16,7 @@ class LocalDatabase implements SyncStore {
         p.join(await getDatabasesPath(), 'businessos_restaurant_waiter.db');
     final database = await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -73,6 +73,7 @@ class LocalDatabase implements SyncStore {
             local_order_id TEXT PRIMARY KEY,
             client_order_id TEXT,
             server_id TEXT,
+            display_number INTEGER NOT NULL DEFAULT 0,
             table_id TEXT,
             branch_id TEXT,
             service_type TEXT NOT NULL DEFAULT 'dine_in',
@@ -212,6 +213,11 @@ class LocalDatabase implements SyncStore {
           // table_id despite fresh installs already permitting null. Rebuild
           // only when necessary, preserving orders and the durable outbox.
           await _upgradeNullableOrderTable(db);
+        }
+        if (oldVersion < 8) {
+          await db.execute(
+            'ALTER TABLE orders ADD COLUMN display_number INTEGER NOT NULL DEFAULT 0',
+          );
         }
       },
     );
@@ -1252,6 +1258,7 @@ class LocalDatabase implements SyncStore {
       'local_order_id': localId,
       'client_order_id': clientId,
       'server_id': serverId,
+      'display_number': (order['display_number'] as num?)?.toInt() ?? 0,
       'table_id': table?['id']?.toString(),
       'branch_id': order['branch_id']?.toString(),
       'service_type': order['service_type']?.toString() ?? 'dine_in',

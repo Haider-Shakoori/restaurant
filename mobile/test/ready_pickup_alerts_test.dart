@@ -70,4 +70,25 @@ void main() {
     ], tables);
     expect(takeaway.single.reference, 'TAKEAWAY · TK-07');
   });
+
+  test('ready alerts lead with the desktop short order number', () {
+    final alerts = readyPickupAlerts([
+      {
+        'local_order_id': 'order-9',
+        'status': 'ready',
+        'table_id': 'table-1',
+        'service_type': 'dine_in',
+        'display_number': 9,
+        'kitchen_tickets_json': jsonEncode([
+          {
+            'id': 'ticket-9',
+            'items': [
+              {'id': 'item-9', 'status': 'ready', 'item_name': 'Qabuli'},
+            ],
+          },
+        ]),
+      },
+    ], tables);
+    expect(alerts.single.reference, '#9 · Table 01');
+  });
 }

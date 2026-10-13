@@ -108,6 +108,9 @@ void main() {
       final migrated = await openDatabase(databasePath);
       final columns = await migrated.rawQuery('PRAGMA table_info(orders)');
       expect(columns.singleWhere((c) => c['name'] == 'table_id')['notnull'], 0);
+      final displayNumber =
+          columns.singleWhere((c) => c['name'] == 'display_number');
+      expect(displayNumber['notnull'], 1);
       final index = await migrated.rawQuery('PRAGMA index_list(orders)');
       expect(index.any((entry) => entry['name'] == 'orders_status_idx'), isTrue);
       await migrated.close();

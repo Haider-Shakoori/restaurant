@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import '../../core/format/restaurant_formats.dart';
+
 /// A visible ready-for-collection group per still-open waiter order.
 /// The synchronized server/LAN kitchen state is authoritative.
 class ReadyPickupAlert {
@@ -79,10 +81,12 @@ List<ReadyPickupAlert> readyPickupAlerts(
     final tableId = order['table_id']?.toString();
     final service = order['service_type']?.toString() ?? 'dine_in';
     final ref = order['service_reference']?.toString();
-    final label = service == 'dine_in'
+    final base = service == 'dine_in'
         ? tableNames[tableId] ?? 'Dine-in order $id'
         : service.replaceAll('_', ' ').toUpperCase() +
             (ref == null || ref.isEmpty ? ' · $id' : ' · $ref');
+    final number = formatOrderNumber(order['display_number']);
+    final label = number.isEmpty ? base : '$number · $base';
 
     ready.add(ReadyPickupAlert(
       orderId: id,

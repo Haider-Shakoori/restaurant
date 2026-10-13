@@ -1853,6 +1853,7 @@ public sealed class LocalCashierService
         {
             id = order.Id,
             client_order_id = order.ClientOrderId,
+            display_number = order.DisplayNumber,
             branch_id = order.BranchId,
             service_type = order.ServiceType,
             service_reference = order.ServiceReference,

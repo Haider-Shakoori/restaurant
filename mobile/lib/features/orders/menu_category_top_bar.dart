@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_theme.dart';
+
 /// A horizontally scrollable category selector shared by the menu browser and
 /// order-entry catalog. It stays above the photo grid on phones and tablets.
 class MenuCategoryTopBar extends StatelessWidget {
@@ -19,7 +21,7 @@ class MenuCategoryTopBar extends StatelessWidget {
     return SizedBox(
       height: 58,
       child: ColoredBox(
-        color: const Color(0xFFF7F8F9),
+        color: RestaurantColors.appBackground,
         child: ListView.separated(
           key: const Key('menu-category-topbar'),
           scrollDirection: Axis.horizontal,
@@ -45,14 +47,18 @@ class MenuCategoryTopBar extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              selectedColor: const Color(0xFF171B20),
-              backgroundColor: Colors.white,
-              side: const BorderSide(color: Color(0xFFDCE1E6)),
+              selectedColor: RestaurantColors.brandSoft,
+              backgroundColor: RestaurantColors.surface,
+              side: BorderSide(
+                color: selected
+                    ? RestaurantColors.brand
+                    : RestaurantColors.borderStrong,
+              ),
               labelStyle: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: selected
-                    ? const Color(0xFFFFD96B)
-                    : const Color(0xFF303947),
+                    ? RestaurantColors.brand
+                    : RestaurantColors.textSecondary,
               ),
             );
           },

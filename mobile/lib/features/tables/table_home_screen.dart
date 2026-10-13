@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/app_strings.dart';
+import '../../app/app_theme.dart';
 import '../../app/dependencies.dart';
 import '../../core/connection/connection_mode.dart';
+import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
@@ -437,11 +439,12 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
             if (_readyAlerts.isNotEmpty) ...[
               const SizedBox(height: 14),
               Card(
-                color: const Color(0xFFFFF7E1),
+                color: RestaurantColors.successSoft,
                 margin: EdgeInsets.zero,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
-                  side: const BorderSide(color: Color(0xFFEBC46A), width: 1.5),
+                  side: const BorderSide(
+                      color: RestaurantColors.success, width: 1.5),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
@@ -450,16 +453,16 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                     children: [
                       const Row(children: [
                         Icon(Icons.notifications_active_rounded,
-                            color: Color(0xFF916312)),
+                            color: RestaurantColors.success),
                         SizedBox(width: 8),
                         Expanded(child: Text('READY FOR PICKUP',
                             style: TextStyle(fontWeight: FontWeight.w900,
-                                color: Color(0xFF46330F)))),
+                                color: RestaurantColors.success))),
                       ]),
                       const SizedBox(height: 7),
                       const Text('Collect prepared food, deliver to the guest, '
                           'then mark the complete order Served in POS.',
-                          style: TextStyle(color: Color(0xFF554521))),
+                          style: TextStyle(color: RestaurantColors.textSecondary)),
                       for (final alert in _readyAlerts)
                         ListTile(
                           dense: true,
@@ -557,7 +560,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                               ),
                               const Spacer(),
                               Text(
-                                status,
+                                formatTableStatus(status),
                                 style: Theme.of(context).textTheme.labelMedium,
                               ),
                             ],

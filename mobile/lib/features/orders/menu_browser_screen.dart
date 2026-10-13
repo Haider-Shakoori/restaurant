@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_theme.dart';
 import '../../app/dependencies.dart';
+import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
@@ -229,15 +231,15 @@ class _MenuBrowserScreenState extends State<MenuBrowserScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontWeight: FontWeight.w800)),
                           const SizedBox(height: 4),
-                          Text('${item['price']} AFN',
+                          Text(formatMoney(item['price'], decimals: 0),
                               style: const TextStyle(
-                                color: Color(0xFF946915),
+                                color: RestaurantColors.brandHover,
                                 fontWeight: FontWeight.w700,
                               )),
                         ],
                       )),
                       const Icon(Icons.add_circle_rounded,
-                          color: Color(0xFFD4A94A), size: 32),
+                          color: RestaurantColors.brand, size: 32),
                     ],
                   ),
                 ),
