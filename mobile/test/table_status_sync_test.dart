@@ -87,6 +87,7 @@ void main() {
         mutationId: 'offline-order-open',
         tableId: 't2',
         branchId: 'b1',
+        serviceType: 'dine_in',
         guestCount: 2,
       );
 
