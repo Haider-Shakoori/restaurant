@@ -27,6 +27,8 @@ class SyncCoordinator {
   Timer? _timer;
   bool _watching = false;
   bool _disposed = false;
+  bool _syncInProgress = false;
+  DateTime? _lastAuthoritativeReconcile;
 
   void start() {
     _connectivitySubscription ??= _connectivity.onConnectivityChanged.listen(
@@ -45,16 +47,30 @@ class SyncCoordinator {
       (_) => unawaited(_safeSync()),
     );
 
+    // Existing sessions must also heal missed paid/cancelled order events;
+    // initial login is not the only time a full bootstrap is useful.
+    unawaited(_safeSync());
     unawaited(_watch());
   }
 
-  Future<void> syncNow() => _safeSync();
+  Future<void> syncNow() => _safeSync(forceReconcile: true);
 
-  Future<void> _safeSync() async {
+  Future<void> _safeSync({bool forceReconcile = false}) async {
+    if (_syncInProgress || _disposed) return;
+    _syncInProgress = true;
     try {
-      await _engine.syncNow();
+      final now = DateTime.now().toUtc();
+      final last = _lastAuthoritativeReconcile;
+      final reconcile = forceReconcile ||
+          last == null ||
+          now.difference(last) >= const Duration(minutes: 5);
+      await _engine.syncNow(reconcile: reconcile);
+      if (reconcile) _lastAuthoritativeReconcile = now;
     } on Object {
-      // SyncEngine persists the actionable error state for the UI.
+      // SyncEngine persists the actionable error state for the UI. Failed
+      // reconciliations retry on the next tick; offline orders are retained.
+    } finally {
+      _syncInProgress = false;
     }
   }
 
