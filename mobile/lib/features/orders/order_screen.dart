@@ -704,14 +704,11 @@ class _OrderScreenState extends State<OrderScreen> {
     ).showSnackBar(SnackBar(content: Text(error.toString())));
   }
 
-  bool get _editable => const <String>{
-    'draft',
-    'submitted',
-    'submitted_pending_sync',
-    'preparing',
-    'ready',
-    'served',
-  }.contains(_order?['status']?.toString());
+  // The waiter app sends the initial kitchen ticket only. Existing KOT
+  // history remains visible, but creating additional KOT rounds is disabled.
+  bool get _editable =>
+      _kotRounds.isEmpty &&
+      _order?['status']?.toString() == 'draft';
 
   List<int> get _heldCourses {
     final courses = _items
@@ -1297,11 +1294,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                     icon: const Icon(Icons.send_rounded),
                     label: Text(
-                      _working
-                          ? 'Sending...'
-                          : (_order?['status']?.toString() == 'draft'
-                              ? 'Send to Kitchen'
-                              : 'Send New KOT Round'),
+                      _working ? 'Sending...' : 'Send to Kitchen',
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
