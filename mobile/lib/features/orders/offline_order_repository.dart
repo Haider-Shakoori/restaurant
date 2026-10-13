@@ -34,6 +34,7 @@ class OfflineOrderRepository {
     required String branchId,
     String serviceType = 'dine_in',
     String? serviceReference,
+    bool separateParty = false,
     required int guestCount,
     String? notes,
   }) async {
@@ -47,6 +48,7 @@ class OfflineOrderRepository {
       branchId: branchId,
       serviceType: serviceType,
       serviceReference: serviceReference,
+      separateParty: separateParty,
       guestCount: guestCount,
       notes: notes,
     );
