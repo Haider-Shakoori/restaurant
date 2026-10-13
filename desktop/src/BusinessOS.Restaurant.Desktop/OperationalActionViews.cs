@@ -2669,6 +2669,58 @@ internal static class OperationalActionViews
             });
         }
 
+        (string Label, int Guests)? PromptSeparateParty(TableChoice table)
+        {
+            var window = new Window
+            {
+                Title = $"New separate party · {table.Name}",
+                Width = 445,
+                SizeToContent = SizeToContent.Height,
+                ResizeMode = ResizeMode.NoResize,
+                Owner = System.Windows.Application.Current?.MainWindow,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            };
+            var body = new StackPanel { Margin = new Thickness(22) };
+            body.Children.Add(new TextBlock
+            {
+                Text = "Separate guests at the same table have independent orders, bills and receipts.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 0, 0, 12),
+            });
+            body.Children.Add(new TextBlock { Text = "Party / seat-group label", Margin = new Thickness(0, 0, 0, 5) });
+            var labelBox = new TextBox { Name = "DiningSeparatePartyLabel", Height = 36, MaxLength = 80 };
+            body.Children.Add(labelBox);
+            body.Children.Add(new TextBlock { Text = "Number of guests", Margin = new Thickness(0, 12, 0, 5) });
+            var guestsBox = new TextBox { Name = "DiningSeparatePartyGuests", Text = "1", Height = 36 };
+            body.Children.Add(guestsBox);
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0) };
+            body.Children.Add(error);
+            var buttons = new WrapPanel { Margin = new Thickness(0, 15, 0, 0) };
+            var accept = Button("Create separate order");
+            accept.IsDefault = true;
+            var cancelParty = Button("Cancel");
+            cancelParty.IsCancel = true;
+            cancelParty.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            buttons.Children.Add(accept);
+            buttons.Children.Add(cancelParty);
+            body.Children.Add(buttons);
+            var guestCount = 0;
+            accept.Click += (_, _) =>
+            {
+                if (string.IsNullOrWhiteSpace(labelBox.Text) ||
+                    !int.TryParse(guestsBox.Text, out guestCount) ||
+                    guestCount is < 1 or > 100)
+                {
+                    error.Text = "Enter a party label and between 1 and 100 guests.";
+                    return;
+                }
+                window.DialogResult = true;
+            };
+            window.Content = body;
+            return DesktopGlassDialog.ShowDialog(window) == true
+                ? (labelBox.Text.Trim(), guestCount) : null;
+        }
+
         Button BuildCard(TableChoice table)
         {
             var order = ordersNow.FirstOrDefault(x => x.TableId == table.Id);
@@ -2962,13 +3014,46 @@ internal static class OperationalActionViews
             cancelOrder.Visibility = order is not null &&
                 order.Status is not ("billed" or "closed" or "cancelled")
                 ? Visibility.Visible : Visibility.Collapsed;
+            var newParty = Button("New separate party");
+            newParty.Name = "DiningRoomNewPartyButton";
+            newParty.MinHeight = 42;
+            newParty.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
+            newParty.Visibility = table.Status == "occupied" && parties.Count > 0
+                ? Visibility.Visible : Visibility.Collapsed;
             panel.Children.Add(addDishes);
+            panel.Children.Add(newParty);
             panel.Children.Add(reserve);
             panel.Children.Add(vacant);
             panel.Children.Add(send);
             panel.Children.Add(pay);
             panel.Children.Add(cancelOrder);
 
+            newParty.Click += async (_, _) =>
+            {
+                if (busy) return;
+                var details = PromptSeparateParty(table);
+                if (details is null) return;
+                busy = true;
+                try
+                {
+                    var newClientId = await DesktopUiWork.RunBoundedAsync(
+                        token => workflow.OpenOrderAsync(
+                            "dine_in", table.Id, "", details.Value.Label,
+                            details.Value.Guests, null, token, separateParty: true),
+                        TimeSpan.FromSeconds(25));
+                    await using var db = factory.Create();
+                    selectedPartyOrderId = await db.Orders.AsNoTracking()
+                        .Where(x => x.ClientOrderId == newClientId)
+                        .Select(x => x.Id).SingleAsync();
+                    statusText.Text = $"Created {details.Value.Label} separately at {table.Name}.";
+                    await RefreshAsync();
+                }
+                catch (Exception ex)
+                {
+                    statusText.Text = ex.Message;
+                }
+                finally { busy = false; }
+            };
             addDishes.Click += async (_, _) =>
             {
                 try
