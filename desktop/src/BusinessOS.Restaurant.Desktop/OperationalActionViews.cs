@@ -58,7 +58,7 @@ internal static class OperationalActionViews
                     option.PriceDelta))
                 .ToListAsync();
             var orders = (await db.Orders.AsNoTracking().Where(x => x.Status != "closed")
-                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total, x.DisplayNumber), x.UpdatedAtUtc })
+                    .Select(x => new { Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName, x.Status, x.GuestCount, x.Total, x.DisplayNumber, x.ServiceReference), x.UpdatedAtUtc })
                     .ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Take(100)
@@ -112,7 +112,7 @@ internal static class OperationalActionViews
                     .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                     .Select(x => new
                     {
-                        Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                        Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                         x.UpdatedAtUtc,
                     })
                     .ToListAsync())
@@ -1003,7 +1003,7 @@ internal static class OperationalActionViews
                         .Select(x => new
                         {
                             Row = new OrderChoice(x.Id, x.ClientOrderId, x.ServiceType, x.WaiterName,
-                                x.Status, x.GuestCount, x.Total, x.DisplayNumber),
+                                x.Status, x.GuestCount, x.Total, x.DisplayNumber, x.ServiceReference),
                             x.UpdatedAtUtc,
                         }).ToListAsync())
                     .OrderByDescending(x => x.UpdatedAtUtc).Take(100).Select(x => x.Row).ToArray();
@@ -1180,7 +1180,7 @@ internal static class OperationalActionViews
                             .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                             .Select(x => new
                             {
-                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                                 x.UpdatedAtUtc,
                             })
                             .ToListAsync())
@@ -1697,7 +1697,7 @@ internal static class OperationalActionViews
                 {
                     Row = new TableOrderChoice(
                         order.Id, order.ClientOrderId, table.Id, table.Name,
-                        order.Status, order.Total, order.GuestCount, order.DisplayNumber),
+                        order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference),
                     order.UpdatedAtUtc,
                 })
                 .ToListAsync())
@@ -1731,7 +1731,7 @@ internal static class OperationalActionViews
                 select new
                 {
                     Row = new TableOrderChoice(order.Id, order.ClientOrderId,
-                        order.DiningTableId, "", order.Status, order.Total, order.GuestCount, order.DisplayNumber),
+                        order.DiningTableId, "", order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference),
                     order.UpdatedAtUtc,
                 }).ToListAsync())
                 .OrderByDescending(x => x.UpdatedAtUtc)
@@ -2161,7 +2161,7 @@ internal static class OperationalActionViews
                             order.Status != "closed" && order.Status != "cancelled")
                         .Select(order => new TableOrderChoice(order.Id, order.ClientOrderId,
                             order.DiningTableId ?? string.Empty, string.Empty,
-                            order.Status, order.Total, order.GuestCount, order.DisplayNumber))
+                            order.Status, order.Total, order.GuestCount, order.DisplayNumber, order.ServiceReference))
                         .ToArrayAsync();
                     return FloorSignature(active, open);
                 });
@@ -3137,7 +3137,7 @@ internal static class OperationalActionViews
                             .Where(x => x.ServiceType == "dine_in" && x.Status != "closed" && x.Status != "cancelled")
                             .Select(x => new
                             {
-                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber),
+                                Row = new TableOrderChoice(x.Id, x.ClientOrderId, x.DiningTableId, "", x.Status, x.Total, x.GuestCount, x.DisplayNumber, x.ServiceReference),
                                 x.UpdatedAtUtc,
                             })
                             .ToListAsync())
@@ -5290,19 +5290,19 @@ internal static class OperationalActionViews
     {
         public string Display => $"{Quantity} × {ItemName} · {Status}{(RoundNumber.HasValue ? $" · R{RoundNumber}" : "")}";
     }
-    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total, int DisplayNumber)
+    private sealed record OrderChoice(string Id, string ClientOrderId, string ServiceType, string Waiter, string Status, int Guests, decimal Total, int DisplayNumber, string? PartyLabel = null)
     {
         public string Display => DisplayNumber > 0
-            ? $"#{DisplayNumber} · {ServiceType} · {Status}"
+            ? $"#{DisplayNumber} · {ServiceType}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status}"
             : ClientOrderId;
     }
     private sealed record BillChoice(string Id, string OrderId, string Number, decimal Total, decimal Paid, decimal Balance) { public string Display => $"{Number} — AFN {Balance:N2} due"; }
     private sealed record TableChoice(string Id, string Area, string Code, string Name, int Capacity, string Status, string? ReservationNote = null);
-    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total, int Guests, int DisplayNumber)
+    private sealed record TableOrderChoice(string Id, string ClientOrderId, string TableId, string Table, string Status, decimal Total, int Guests, int DisplayNumber, string? PartyLabel = null)
     {
         public string Display => DisplayNumber > 0
-            ? $"#{DisplayNumber} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}"
-            : $"{ClientOrderId} · {Table} · {Status} · {Guests} guest(s) · AFN {Total:N2}";
+            ? $"#{DisplayNumber} · {Table}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status} · {Guests} guest(s) · AFN {Total:N2}"
+            : $"{ClientOrderId} · {Table}{(string.IsNullOrWhiteSpace(PartyLabel) ? "" : $" · {PartyLabel}")} · {Status} · {Guests} guest(s) · AFN {Total:N2}";
         public string ShortNumber => DisplayNumber > 0 ? $"#{DisplayNumber}" : ClientOrderId;
     }
     private sealed record TableMenuChoice(string Id, string Name, string Category, decimal Price);
