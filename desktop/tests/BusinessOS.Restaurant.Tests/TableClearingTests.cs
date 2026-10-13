@@ -153,6 +153,84 @@ public sealed class TableClearingTests
         }
     }
 
+    [Fact]
+    public async Task Paying_an_entire_split_bill_closes_the_order_and_frees_the_table()
+    {
+        var root = Directory.CreateTempSubdirectory("bos-split-settle-").FullName;
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+            await SeedDiningRoomAsync(factory);
+            var now = DateTimeOffset.UtcNow;
+            await using (var db = factory.Create())
+            {
+                db.Orders.Add(NewOrder("split-order", "t-2", "billed"));
+                db.Bills.Add(new LocalBill
+                {
+                    Id = "split-bill", OrderId = "split-order", BranchId = "branch-1",
+                    CreatedByUserId = 1, BillNumber = "BILL-SPLIT", Status = "open",
+                    Subtotal = 600m, Total = 600m, PaidAmount = 0m,
+                    BalanceDue = 600m, IssuedAt = now,
+                });
+                db.BillSplits.AddRange(
+                    new LocalBillSplit
+                    {
+                        Id = "split-a", BillId = "split-bill", SplitNumber = 1,
+                        Label = "Person 1", Amount = 250m, PaidAmount = 0m,
+                        BalanceDue = 250m, Status = "open",
+                    },
+                    new LocalBillSplit
+                    {
+                        Id = "split-b", BillId = "split-bill", SplitNumber = 2,
+                        Label = "Person 2", Amount = 350m, PaidAmount = 0m,
+                        BalanceDue = 350m, Status = "open",
+                    });
+                db.CashierSessions.Add(new LocalCashierSession
+                {
+                    Id = "split-session", BranchId = "branch-1", CashierUserId = 1,
+                    CashierName = "Tester", Status = "open", OpenedAt = now,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var actor = new LocalTerminalPrincipal("device-1", 1, "u1", "Tester", "cashier", "tenant-1");
+            var cashier = new LocalCashierService(factory);
+            await cashier.AddPaymentAsync(
+                "split-bill",
+                new LocalPaymentRequest("split-session", 600m, "cash", "payment-split-once"),
+                actor, CancellationToken.None);
+
+            await using (var check = factory.Create())
+            {
+                var bill = await check.Bills.SingleAsync(x => x.Id == "split-bill");
+                Assert.Equal("paid", bill.Status);
+                Assert.Equal(0m, bill.BalanceDue);
+                Assert.Equal("closed", (await check.Orders.SingleAsync(x => x.Id == "split-order")).Status);
+                Assert.Equal("available", (await check.DiningTables.SingleAsync(x => x.Id == "t-2")).Status);
+                var splits = await check.BillSplits.Where(x => x.BillId == "split-bill").ToArrayAsync();
+                Assert.Equal(2, splits.Length);
+                Assert.All(splits, split =>
+                {
+                    Assert.Equal("paid", split.Status);
+                    Assert.Equal(0m, split.BalanceDue);
+                });
+                Assert.Single(await check.Payments.Where(x => x.BillId == "split-bill").ToArrayAsync());
+            }
+            // Replaying an idempotent payment never adds another transaction.
+            await cashier.AddPaymentAsync(
+                "split-bill",
+                new LocalPaymentRequest("split-session", 600m, "cash", "payment-split-once"),
+                actor, CancellationToken.None);
+            await using (var check = factory.Create())
+                Assert.Single(await check.Payments.Where(x => x.BillId == "split-bill").ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static LocalOrder NewOrder(string id, string tableId, string status) => new()
     {
         Id = id, ClientOrderId = "CLIENT-" + id, DiningTableId = tableId, BranchId = "branch-1",
