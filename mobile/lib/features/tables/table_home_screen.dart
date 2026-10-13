@@ -151,7 +151,15 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     setState(() => _syncing = true);
 
     try {
-      await widget.dependencies.syncCoordinator.syncNow();
+      await widget.dependencies.syncCoordinator.reconcileNow();
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not refresh from the restaurant server: $error'),
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _syncing = false);
