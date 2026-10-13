@@ -1167,6 +1167,13 @@ internal static class OperationalActionViews
                             .ToListAsync())
                         .OrderByDescending(x => x.UpdatedAtUtc)
                         .Select(x => x.Row).ToArray();
+                    var activeTableIds = refreshedOrders
+                        .Select(value => value.TableId)
+                        .ToHashSet(StringComparer.Ordinal);
+                    refreshedTables = refreshedTables.Select(table =>
+                        table.Status == "available" && activeTableIds.Contains(table.Id)
+                            ? table with { Status = "occupied" }
+                            : table).ToList();
                     return (Tables: refreshedTables, Orders: refreshedOrders);
                 });
                 tablesNow = refreshed.Tables;
@@ -1718,6 +1725,15 @@ internal static class OperationalActionViews
                 .OrderByDescending(x => x.UpdatedAtUtc)
                 .Select(x => x.Row).ToArray();
 
+            // A table with an active unpaid order is never a free seat or
+            // transfer target, even if its cached table status is stale.
+            var busyIds = allFloorOrders.Select(value => value.TableId)
+                .ToHashSet(StringComparer.Ordinal);
+            rows = rows.Select(table =>
+                table.Status == "available" && busyIds.Contains(table.Id)
+                    ? table with { Status = "occupied" }
+                    : table).ToList();
+
             var availableTables = rows
                 .Where(x => x.Status == "available")
                 .Select(x => new Choice(x.Id, $"{x.Area} · {x.Name} ({x.Code})"))
@@ -2123,7 +2139,17 @@ internal static class OperationalActionViews
     {
         var workflow = new DesktopRestaurantWorkflowService();
         var busy = false;
-        var total = order.Total;
+        // An existing bill can already be partly paid. Do not ask the guest
+        // to pay the original order total a second time.
+        var total = await DesktopUiWork.RunAsync(async () =>
+        {
+            await using var db = factory.Create();
+            var due = await db.Bills.AsNoTracking()
+                .Where(x => x.OrderId == order.Id && x.Status == "open")
+                .Select(x => (decimal?)x.BalanceDue)
+                .FirstOrDefaultAsync();
+            return due ?? order.Total;
+        });
 
         var lines = await DesktopUiWork.RunAsync(async () =>
         {
@@ -2285,8 +2311,13 @@ internal static class OperationalActionViews
 
                     if (live.Status is not ("served" or "billed"))
                     {
-                        // Serving requires every kitchen ticket to be ready; the
-                        // workflow raises the precise reason otherwise.
+                        if (live.Status != "ready")
+                        {
+                            throw new InvalidOperationException(
+                                $"Order is {live.Status}. Payment is blocked until the kitchen marks all active items ready. " +
+                                "For an abandoned or incorrect order, use Cancel order with an audit reason; " +
+                                "do not take another payment.");
+                        }
                         await workflow.ServeOrderAsync(live.Id, token);
                     }
 
@@ -2328,11 +2359,13 @@ internal static class OperationalActionViews
                         throw new InvalidOperationException("Cashier session could not be opened.");
                     }
 
-                    var applied = Math.Min(amount, bill.BalanceDue);
-                    if (applied <= 0m)
-                    {
-                        throw new InvalidOperationException("This bill is already settled.");
-                    }
+                    if (bill.BalanceDue <= 0m)
+                        throw new InvalidOperationException("This bill is already settled. Refresh the table before retrying.");
+                    if (amount < bill.BalanceDue)
+                        throw new InvalidOperationException(
+                            $"The remaining balance changed to AFN {bill.BalanceDue:N2}. " +
+                            "Refresh the table and confirm the amount received before collecting payment.");
+                    var applied = bill.BalanceDue;
 
                     await workflow.AddPaymentAsync(bill.Id, sessionId, applied, "cash", null, token);
                     posted = applied;
@@ -2418,7 +2451,7 @@ internal static class OperationalActionViews
         string? selectedTableId = null;
         var busy = false;
 
-        var grid = new WrapPanel { Margin = new Thickness(0, 2, 0, 12) };
+        var grid = new StackPanel { Margin = new Thickness(0, 2, 0, 12) };
         var legend = new WrapPanel { Margin = new Thickness(0, 0, 0, 12) };
         var panel = new StackPanel();
         var panelHost = new Border
@@ -2572,7 +2605,7 @@ internal static class OperationalActionViews
 
             var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
             body.Children.Add(labelText);
-            body.Children.Add(seats);
+            body.Children.Add(RestaurantTableFurniture.Create(table.Name, table.Capacity, stripeColor));
             body.Children.Add(status);
             if (order is not null)
             {
@@ -2996,9 +3029,25 @@ internal static class OperationalActionViews
         async Task RenderAsync()
         {
             grid.Children.Clear();
-            foreach (var table in tablesNow)
+            // Physical floor groups make table selection practical during rush
+            // hours and match the mobile floor-plan layout.
+            foreach (var floor in tablesNow.GroupBy(table => table.Area))
             {
-                grid.Children.Add(BuildCard(table));
+                var floorSection = new StackPanel { Margin = new Thickness(0, 0, 0, 12) };
+                var floorLabel = new TextBlock
+                {
+                    Text = $"{floor.Key} · {floor.Count()} tables",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 16,
+                    Margin = new Thickness(0, 6, 0, 10),
+                };
+                floorLabel.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimaryBrush");
+                floorSection.Children.Add(floorLabel);
+                var furnitureGrid = new WrapPanel();
+                foreach (var table in floor)
+                    furnitureGrid.Children.Add(BuildCard(table));
+                floorSection.Children.Add(furnitureGrid);
+                grid.Children.Add(floorSection);
             }
             UpdateLegend();
             await RenderPanelAsync();
@@ -4704,7 +4753,7 @@ internal static class OperationalActionViews
 
                 var body = new StackPanel { Margin = new Thickness(14, 12, 14, 12) };
                 body.Children.Add(labelText);
-                body.Children.Add(seats);
+                body.Children.Add(RestaurantTableFurniture.Create(table.Name, table.Capacity, stripeColor));
                 body.Children.Add(status);
                 if (order is not null)
                 {

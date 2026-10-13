@@ -12,6 +12,7 @@ import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
 import 'ready_pickup_alerts.dart';
+import 'restaurant_table_visual.dart';
 
 class TableHomeScreen extends StatefulWidget {
   const TableHomeScreen({
@@ -183,6 +184,14 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
 
     if (table['status'] != 'available') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This table is not vacant on the restaurant server. Sync to refresh it, '
+            'or ask the cashier to clear it after payment.',
+          ),
+        ),
+      );
       return;
     }
 
@@ -309,6 +318,131 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     _readyAlerts = const [];
     await widget.dependencies.session.logoutLocal();
     widget.onLoggedOut();
+  }
+
+  List<Widget> _floorSections() {
+    final byArea = <String, List<Map<String, Object?>>>{};
+    for (final table in _tables) {
+      final branch = table['branch_name']?.toString() ?? '';
+      final area = table['area_name']?.toString() ?? 'Main floor';
+      final label = branch.isEmpty ? area : '$branch · $area';
+      byArea.putIfAbsent(label, () => []).add(table);
+    }
+
+    return [
+      for (final entry in byArea.entries) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.meeting_room_outlined, size: 19),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  entry.key,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Text('${entry.value.length} tables'),
+            ],
+          ),
+        ),
+        GridView.builder(
+          key: ValueKey('floor-${entry.key}'),
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          itemCount: entry.value.length,
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 220,
+            childAspectRatio: 0.93,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemBuilder: (context, index) {
+            final table = entry.value[index];
+            final status = table['status']?.toString() ?? 'unknown';
+            final tableName =
+                table['name']?.toString() ?? table['code']?.toString() ?? 'Table';
+            final capacity = (table['capacity'] as num?)?.toInt() ?? 1;
+            final linked = _orders.where(
+              (order) => order['table_id']?.toString() == table['id']?.toString(),
+            );
+            final activeOrder = linked.isEmpty ? null : linked.first;
+            final color = RestaurantTableVisual.statusColor(status);
+
+            return Card(
+              margin: EdgeInsets.zero,
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => _openTable(table),
+                child: Padding(
+                  padding: const EdgeInsets.all(9),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        tableName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: RestaurantTableVisual(
+                            name: tableName,
+                            capacity: capacity,
+                            status: status,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        formatTableStatus(status),
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      if (activeOrder != null)
+                        Text(
+                          activeOrder['display_number'] is num &&
+                                  (activeOrder['display_number'] as num) > 0
+                              ? 'Order #${activeOrder['display_number']}'
+                              : 'Open order',
+                          style: Theme.of(context).textTheme.labelSmall,
+                          textAlign: TextAlign.center,
+                        ),
+                      if (status == 'occupied' && activeOrder == null)
+                        Text(
+                          'Managed by cashier / another waiter',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall,
+                          textAlign: TextAlign.center,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+      ],
+      if (byArea.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(18),
+          child: Text('No dining tables yet. Sync the restaurant floor.'),
+        ),
+    ];
   }
 
   @override
@@ -508,61 +642,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              itemCount: _tables.length,
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                childAspectRatio: 1.45,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemBuilder: (context, index) {
-                final table = _tables[index];
-                final status = table['status']?.toString() ?? 'unknown';
-                final occupied = status == 'occupied';
-
-                return Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: () => _openTable(table),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                occupied
-                                    ? Icons.table_restaurant
-                                    : Icons.event_seat_outlined,
-                              ),
-                              const Spacer(),
-                              Text(
-                                formatTableStatus(status),
-                                style: Theme.of(context).textTheme.labelMedium,
-                              ),
-                            ],
-                          ),
-                          Text(
-                            table['name']?.toString() ??
-                                table['code']!.toString(),
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Text(
-                            table['area_name']?.toString() ?? '',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+            ..._floorSections(),
           ],
         ),
       ),

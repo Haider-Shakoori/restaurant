@@ -1,0 +1,35 @@
+name: Restaurant focused checkout and floor regression
+
+on:
+  push:
+    branches:
+      - fix/table-order-reconciliation-and-floor-ui-20261013
+    paths:
+      - .github/workflows/restaurant-focused-regression.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet-build-and-tests:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Generate WPF assets
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python tools/generate_restaurant_icons.py --repo-root . --desktop
+      - name: Restore .NET solution
+        shell: pwsh
+        run: dotnet restore desktop/BusinessOS.Restaurant.Desktop.slnx
+      - name: Compile desktop and local server
+        shell: pwsh
+        run: dotnet build desktop/BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-restore
+      - name: Run full .NET unit and integration tests without the pre-existing WPF screenshot harness
+        shell: pwsh
+        run: dotnet test desktop/BusinessOS.Restaurant.Desktop.slnx --configuration Release --no-build --logger "console;verbosity=normal"
