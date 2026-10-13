@@ -1317,8 +1317,15 @@ class LocalDatabase implements SyncStore {
   }
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
+    // Server-backed order snapshots and dining-table changes are authoritative.
+    // Reassert occupancy only for orders still created locally without a
+    // server ID. Otherwise a stale synced draft can permanently overwrite the
+    // desktop's newly freed table after every successful bootstrap/pull.
     final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+      "SELECT DISTINCT table_id FROM orders "
+      "WHERE server_id IS NULL "
+      "AND table_id IS NOT NULL "
+      "AND status IN ('draft', 'submitted_pending_sync')",
     );
 
     for (final row in rows) {
