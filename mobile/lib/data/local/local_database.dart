@@ -1436,11 +1436,12 @@ class LocalDatabase implements SyncStore {
         } on FormatException {
           throw StateError('A queued operation has invalid data; do not discard automatically.');
         }
-        if (data is! Map) continue;
+        final payload = data;
+        if (payload is! Map) continue;
         final related = const <String>[
           'client_order_id', 'source_client_order_id',
           'target_client_order_id', 'target_order_id',
-        ].any((key) => data[key]?.toString() == localOrderId);
+        ].any((key) => payload[key]?.toString() == localOrderId);
         if (!related) continue;
         final mutationId = mutation['mutation_id']!.toString();
         await txn.delete('conflicts',
