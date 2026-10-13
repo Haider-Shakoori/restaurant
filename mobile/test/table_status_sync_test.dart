@@ -16,7 +16,7 @@ void main() {
     final path = p.join(dir.path, 'waiter.db');
     final db = await LocalDatabase.open(databasePath: path);
     try {
-      final sqlite = await openDatabase(path);
+      final sqlite = await openDatabase(path, singleInstance: false);
       try {
         await sqlite.insert('orders', <String, Object?>{
           'local_order_id': 'old-synced',
