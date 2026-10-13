@@ -82,7 +82,8 @@ List<ReadyPickupAlert> readyPickupAlerts(
     final service = order['service_type']?.toString() ?? 'dine_in';
     final ref = order['service_reference']?.toString();
     final base = service == 'dine_in'
-        ? tableNames[tableId] ?? 'Dine-in order $id'
+        ? (tableNames[tableId] ?? 'Dine-in order $id') +
+            (ref == null || ref.isEmpty ? '' : ' · $ref')
         : service.replaceAll('_', ' ').toUpperCase() +
             (ref == null || ref.isEmpty ? ' · $id' : ' · $ref');
     final number = formatOrderNumber(order['display_number']);
