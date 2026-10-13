@@ -2098,6 +2098,75 @@ internal static class OperationalActionViews
                 : "Classic floor view restored.";
         };
         ApplyTablesView();
+
+        // Incoming waiter orders update the local SQLite database, but this
+        // page previously showed the occupancy captured when it was opened.
+        // Detect real local changes and refresh only when the dining floor
+        // actually differs. The KDS uses the same lightweight polling pattern.
+        static string FloorSignature(
+            IEnumerable<TableChoice> tableRows,
+            IEnumerable<TableOrderChoice> orderRows)
+        {
+            var tablePart = string.Join(";", tableRows.OrderBy(x => x.Id, StringComparer.Ordinal)
+                .Select(x => $"{x.Id}|{x.Area}|{x.Name}|{x.Code}|{x.Capacity}|{x.Status}"));
+            var orderPart = string.Join(";", orderRows.OrderBy(x => x.Id, StringComparer.Ordinal)
+                .Select(x => $"{x.Id}|{x.TableId}|{x.Status}|{x.Total}|{x.Guests}|{x.DisplayNumber}"));
+            return tablePart + "#" + orderPart;
+        }
+
+        var knownFloorSignature = FloorSignature(rows, allFloorOrders);
+        var floorCheckInProgress = false;
+        var liveFloorTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        liveFloorTimer.Tick += async (_, _) =>
+        {
+            if (floorCheckInProgress || !root.IsLoaded ||
+                System.Windows.Application.Current?.MainWindow?.IsActive != true ||
+                advancedOperations.IsVisible)
+                return;
+
+            floorCheckInProgress = true;
+            try
+            {
+                var signature = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var watchDb = factory.Create();
+                    var active = await (from table in watchDb.DiningTables.AsNoTracking()
+                        join area in watchDb.DiningAreas.AsNoTracking() on table.DiningAreaId equals area.Id
+                        join branch in watchDb.Branches.AsNoTracking() on area.BranchId equals branch.Id
+                        where table.IsActive && area.IsActive && branch.IsActive
+                        select new TableChoice(table.Id, branch.Name + " · " + area.Name,
+                            table.Code, table.Name, table.Capacity, table.Status, table.ReservationNote))
+                        .ToListAsync();
+                    var open = await watchDb.Orders.AsNoTracking()
+                        .Where(order => order.ServiceType == "dine_in" &&
+                            order.Status != "closed" && order.Status != "cancelled")
+                        .Select(order => new TableOrderChoice(order.Id, order.ClientOrderId,
+                            order.DiningTableId ?? string.Empty, string.Empty,
+                            order.Status, order.Total, order.GuestCount, order.DisplayNumber))
+                        .ToArrayAsync();
+                    return FloorSignature(active, open);
+                });
+
+                if (signature != knownFloorSignature &&
+                    System.Windows.Application.Current?.MainWindow?.DataContext is MainWindowViewModel vm &&
+                    vm.RefreshCommand.CanExecute(null))
+                {
+                    knownFloorSignature = signature;
+                    await vm.RefreshCommand.ExecuteAsync(null);
+                }
+            }
+            catch (Exception ex)
+            {
+                syncStatus.Text = "Floor update check failed: " + ex.Message;
+            }
+            finally
+            {
+                floorCheckInProgress = false;
+            }
+        };
+        root.Loaded += (_, _) => liveFloorTimer.Start();
+        root.Unloaded += (_, _) => liveFloorTimer.Stop();
+
         return new ScrollViewer
         {
             Content = WorkspaceFrostedSurface.Wrap(root),
