@@ -1,0 +1,85 @@
+name: Restaurant Fresh iOS IPA (PR99)
+
+on:
+  push:
+    branches:
+      - build/restaurant-fresh-ios-20261014
+    paths:
+      - .github/workflows/restaurant-fresh-ios-20261014.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios-unsigned:
+    name: Fresh iOS unsigned IPA
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate iOS app project
+        run: |
+          flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+      - name: Configure iOS and Restaurant title
+        run: dart run tool/configure_ios.dart
+      - name: Generate Restaurant icons
+        working-directory: .
+        run: |
+          python3 -m venv .icon-venv
+          source .icon-venv/bin/activate
+          python -m pip install --disable-pip-version-check pillow
+          python tools/generate_restaurant_icons.py --repo-root . --ios
+      - name: Use Xcode 16 compatible connectivity plugin
+        run: |
+          flutter pub add connectivity_plus:7.0.0
+          flutter pub deps --style=compact | grep -F "connectivity_plus 7.0.0"
+      - name: Dependencies and tests
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Compile unsigned iOS app
+        env:
+          RESTAURANT_FIREBASE_API_KEY: ${{ vars.RESTAURANT_FIREBASE_API_KEY }}
+          RESTAURANT_FIREBASE_ANDROID_APP_ID: ${{ vars.RESTAURANT_FIREBASE_ANDROID_APP_ID }}
+          RESTAURANT_FIREBASE_IOS_APP_ID: ${{ vars.RESTAURANT_FIREBASE_IOS_APP_ID }}
+          RESTAURANT_FIREBASE_SENDER_ID: ${{ vars.RESTAURANT_FIREBASE_SENDER_ID }}
+          RESTAURANT_FIREBASE_PROJECT_ID: ${{ vars.RESTAURANT_FIREBASE_PROJECT_ID }}
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=RESTAURANT_FIREBASE_API_KEY="$RESTAURANT_FIREBASE_API_KEY" \
+            --dart-define=RESTAURANT_FIREBASE_ANDROID_APP_ID="$RESTAURANT_FIREBASE_ANDROID_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_IOS_APP_ID="$RESTAURANT_FIREBASE_IOS_APP_ID" \
+            --dart-define=RESTAURANT_FIREBASE_SENDER_ID="$RESTAURANT_FIREBASE_SENDER_ID" \
+            --dart-define=RESTAURANT_FIREBASE_PROJECT_ID="$RESTAURANT_FIREBASE_PROJECT_ID"
+      - name: Verify actual iOS app name and required permissions
+        run: |
+          plist=build/ios/iphoneos/Runner.app/Info.plist
+          test -f "$plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")" = Restaurant
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist")" = Restaurant
+          test "$(/usr/libexec/PlistBuddy -c 'Print :NSAppTransportSecurity:NSAllowsLocalNetworking' "$plist")" = true
+          /usr/libexec/PlistBuddy -c 'Print :NSCameraUsageDescription' "$plist"
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$plist"
+      - name: Package Restaurant.ipa
+        run: |
+          mkdir -p build/unsigned-ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/unsigned-ipa/Payload/
+          cd build/unsigned-ipa
+          zip -qry ../Restaurant.ipa Payload
+          test -s ../Restaurant.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-iOS-PR99-unsigned-20261014
+          path: mobile/build/Restaurant.ipa
+          if-no-files-found: error
+          retention-days: 30
+
