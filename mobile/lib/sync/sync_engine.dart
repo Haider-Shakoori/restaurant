@@ -39,7 +39,7 @@ class SyncEngine {
     );
   }
 
-  Future<void> syncNow() async {
+  Future<void> syncNow({bool reconcile = false}) async {
     if (_running) {
       return;
     }
@@ -63,7 +63,19 @@ class SyncEngine {
         }
 
         final fallback = await _switchToCloud(session);
+        session = fallback;
         await _syncUsing(fallback);
+      }
+
+      if (reconcile) {
+        // Pull cursors are incremental. If a waiter missed settlement events
+        // while disconnected, a fresh authoritative ACTIVE snapshot repairs
+        // stale orders and table occupancy without deleting offline changes.
+        final snapshot = await _api.syncBootstrap(session);
+        await _store.applyBootstrap(
+          snapshot,
+          cursorScope: session.activeChannel.name,
+        );
       }
 
       await _store.setSystemState('last_sync_error', '');
@@ -172,6 +184,7 @@ class SyncEngine {
   /// in about a second instead of on the next periodic tick. The cloud channel
   /// has no long-poll, so [wait] is ignored there.
   Future<bool> pullOnce({Duration? wait}) async {
+    if (_running) return false;
     final session = await _requireSession();
     final longPoll = session.activeChannel == ConnectionChannel.local;
     await _pull(session, wait: longPoll ? wait : null);
