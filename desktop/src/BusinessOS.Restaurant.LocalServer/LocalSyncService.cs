@@ -439,15 +439,26 @@ public sealed class LocalSyncService
                     "This table is not currently available for dine-in ordering.");
             }
 
-            var busy = await db.Orders.AnyAsync(
-                value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status),
-                cancellationToken);
-            if (busy)
+            var activeParties = await db.Orders
+                .Where(value => value.DiningTableId == tableId && ActiveStatuses.Contains(value.Status))
+                .Select(value => value.ServiceReference)
+                .ToArrayAsync(cancellationToken);
+            var newSeparateParty = payload.TryGetProperty("separate_party", out var separatePartyValue)
+                && separatePartyValue.ValueKind == JsonValueKind.True;
+            var partyLabel = OptionalString(payload, "service_reference", 80)?.Trim();
+            if (activeParties.Length > 0 && !newSeparateParty)
             {
                 throw new LocalSyncConflictException(
                     "table_busy",
-                    "This table already has an active order.");
+                    "This table already has an active order. Select a separate party to open another bill.");
             }
+            if (newSeparateParty && string.IsNullOrWhiteSpace(partyLabel))
+                throw new LocalSyncConflictException(
+                    "invalid_payload", "Separate guests require a party label.");
+            if (newSeparateParty && activeParties.Any(value =>
+                string.Equals(value, partyLabel, StringComparison.OrdinalIgnoreCase)))
+                throw new LocalSyncConflictException(
+                    "party_exists", "That party label is already in use at this table.");
 
             var area = await db.DiningAreas.SingleOrDefaultAsync(
                 value => value.Id == table.DiningAreaId && value.IsActive,
