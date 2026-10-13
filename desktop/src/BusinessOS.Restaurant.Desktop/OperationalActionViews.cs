@@ -2334,8 +2334,9 @@ internal static class OperationalActionViews
         printReceipt.IsEnabled = false;
         printReceipt.MinHeight = 46;
         var cancel = Button("Close");
-        cancel.IsCancel = true;
+        cancel.IsCancel = false;
         cancel.MinHeight = 46;
+        cancel.Click += (_, _) => dialog.DialogResult = settledBillId is not null;
         cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
         actions.Children.Add(complete);
@@ -2486,9 +2487,18 @@ internal static class OperationalActionViews
                 }
 
                 var change = Math.Max(0m, amount - posted);
-                var occupancyNote = markVacant.IsChecked == true
+                // One party paying never vacates a table still used by another
+                // active party. Display the actual committed Windows status.
+                var actualTableStatus = await DesktopUiWork.RunAsync(async () =>
+                {
+                    await using var live = factory.Create();
+                    return await live.DiningTables.AsNoTracking()
+                        .Where(x => x.Id == table.Id).Select(x => x.Status)
+                        .SingleAsync();
+                });
+                var occupancyNote = actualTableStatus == "available"
                     ? $" {table.Name} is vacant."
-                    : $" {table.Name} stays occupied until marked vacant.";
+                    : $" {table.Name} remains {actualTableStatus} (another party or a clearing hold may remain).";
                 statusText.Text = (change > 0m
                     ? $"{table.Name}: AFN {posted:N2} received; change AFN {change:N2}."
                     : $"{table.Name}: AFN {posted:N2} received; bill settled.") + occupancyNote;
