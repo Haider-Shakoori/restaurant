@@ -152,6 +152,12 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
 
     try {
       await widget.dependencies.syncCoordinator.syncNow();
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Restaurant synchronization failed: $error')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _syncing = false);
