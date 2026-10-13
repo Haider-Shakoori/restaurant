@@ -315,6 +315,13 @@ class LocalDatabase implements SyncStore {
       await txn.delete('menu_items');
       await txn.delete('menu_categories');
       await txn.delete('branches');
+      // A full bootstrap is the authoritative active table roster. Keep
+      // inactive rows for any pending offline order's history, but never
+      // display orphaned/renamed rows from a prior server snapshot or login.
+      await txn.update(
+        'dining_tables',
+        <String, Object?>{'is_active': 0},
+      );
 
       for (final rawBranch in data['branches'] as List<Object?>? ?? const []) {
         final branch = Map<String, Object?>.from(
