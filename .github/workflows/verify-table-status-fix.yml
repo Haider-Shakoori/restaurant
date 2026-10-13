@@ -1,5 +1,5 @@
 name: Verify and Package Table Status Fix
-# Retry after regression fixture correction
+# Retry after isolated SQLite regression fixture correction
 
 on:
   push:
