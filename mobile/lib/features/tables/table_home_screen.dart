@@ -243,6 +243,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
       return;
     }
 
+    if (!mounted) return;
     final guests = await showDialog<int>(
       context: context,
       builder: (context) => _GuestDialog(strings: widget.strings),
