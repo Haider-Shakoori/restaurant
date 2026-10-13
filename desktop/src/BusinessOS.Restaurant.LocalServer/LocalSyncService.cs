@@ -365,7 +365,8 @@ public sealed class LocalSyncService
 
         // Only new, committed waiter kitchen submissions chime on the desktop.
         // Mutation replays return above, so they never chime twice.
-        if (result.GetValueOrDefault("status")?.ToString() == "accepted" &&
+        if (!principal.DeviceId.StartsWith("desktop-", StringComparison.OrdinalIgnoreCase) &&
+            result.GetValueOrDefault("status")?.ToString() == "accepted" &&
             mutation.Operation is "order.submit" or "order.kot.send")
         {
             var clientOrderId = OptionalString(mutation.Payload, "client_order_id", 80)
