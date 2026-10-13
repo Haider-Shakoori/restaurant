@@ -477,7 +477,7 @@ internal static class OperationalActionViews
         cashier.Children.Add(checkoutFields);
         var payRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 8) };
         var pay = Button("Post payment"); pay.MinHeight = 48;
-        var receipt = Button("Queue receipt");
+        var receipt = Button("Print receipt"); receipt.Name = "PosReceiptPrintButton"; receipt.IsEnabled = false;
         var verifyBalance = Button("Check current balances");
         verifyBalance.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         payRow.Children.Add(pay); payRow.Children.Add(receipt); payRow.Children.Add(verifyBalance);
@@ -568,6 +568,7 @@ internal static class OperationalActionViews
         var paymentSubmission = new DesktopSubmissionGate();
         var paymentBusy = false;
         var paymentNeedsManualVerification = false;
+        string? lastPaidBillId = null;
         pay.Click += async (_, _) =>
         {
             if (!paymentSubmission.TryBegin()) return;
@@ -625,6 +626,8 @@ internal static class OperationalActionViews
                 await RefreshCashierStateAsync();
                 verified = true;
                 paymentNeedsManualVerification = false;
+                lastPaidBillId = bill.Id;
+                receipt.IsEnabled = true;
                 cashierStatus.Text = bills.Any(x => x.Id == bill.Id)
                     ? $"AFN {amount:N2} posted. Updated outstanding balance is shown above; additional payment is available."
                     : $"AFN {amount:N2} posted. Bill fully settled; the next outstanding bill is now selectable.";
@@ -649,7 +652,23 @@ internal static class OperationalActionViews
                     (billBox.SelectedItem is BillChoice selected && selected.Balance > 0);
             }
         };
-        receipt.Click += async (_, _) => { try { if (billBox.SelectedItem is not BillChoice b) throw new InvalidOperationException("Select a bill."); await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(b.Id)); cashierStatus.Text = "Receipt queued for the configured restaurant receipt printer."; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text); } catch (Exception ex) { cashierStatus.Text = ex.Message; DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text); } };
+        receipt.Click += async (_, _) => {
+            try
+            {
+                if (lastPaidBillId is null)
+                    throw new InvalidOperationException("Post and verify a payment before printing its receipt.");
+                receipt.IsEnabled = false;
+                await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(lastPaidBillId));
+                cashierStatus.Text = "Customer receipt sent to the configured printer queue. Check Printing settings if it does not print.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, cashierStatus.Text);
+            }
+            catch (Exception ex)
+            {
+                cashierStatus.Text = "Receipt not printed: " + ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, cashierStatus.Text);
+            }
+            finally { receipt.IsEnabled = lastPaidBillId is not null; }
+        };
 
         // Register mutation handlers after all POS search/list/cashier controls exist.
         open.Click += async (_, _) =>
@@ -2304,19 +2323,43 @@ internal static class OperationalActionViews
         status.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
         content.Children.Add(status);
 
+        string? settledBillId = null;
         var complete = Button("Complete payment");
         complete.Name = "TablePaymentCompleteButton";
         complete.MinWidth = 190;
         complete.MinHeight = 46;
         complete.IsDefault = true;
-        var cancel = Button("Cancel");
+        var printReceipt = Button("Print receipt");
+        printReceipt.Name = "TablePaymentPrintReceipt";
+        printReceipt.IsEnabled = false;
+        printReceipt.MinHeight = 46;
+        var cancel = Button("Close");
         cancel.IsCancel = true;
         cancel.MinHeight = 46;
         cancel.SetResourceReference(FrameworkElement.StyleProperty, "SecondaryActionButton");
         var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
         actions.Children.Add(complete);
+        actions.Children.Add(printReceipt);
         actions.Children.Add(cancel);
         content.Children.Add(actions);
+
+        printReceipt.Click += async (_, _) =>
+        {
+            if (settledBillId is null) return;
+            printReceipt.IsEnabled = false;
+            try
+            {
+                await DesktopUiWork.RunAsync(() => workflow.QueueReceiptAsync(settledBillId));
+                status.Text = "Receipt queued for printing. Close when finished.";
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, status.Text);
+            }
+            catch (Exception ex)
+            {
+                status.Text = "Receipt could not be queued: " + ex.Message;
+                DesktopNoticeEvents.Publish(DesktopNoticeLevel.Error, status.Text);
+            }
+            finally { printReceipt.IsEnabled = true; }
+        };
 
         complete.Click += async (_, _) =>
         {
@@ -2405,6 +2448,7 @@ internal static class OperationalActionViews
 
                     await workflow.AddPaymentAsync(bill.Id, sessionId, applied, "cash", null, token);
                     posted = applied;
+                    settledBillId = bill.Id;
                 }, TimeSpan.FromSeconds(30));
 
                 if (markVacant.IsChecked == true)
@@ -2449,7 +2493,8 @@ internal static class OperationalActionViews
                     ? $"{table.Name}: AFN {posted:N2} received; change AFN {change:N2}."
                     : $"{table.Name}: AFN {posted:N2} received; bill settled.") + occupancyNote;
                 DesktopNoticeEvents.Publish(DesktopNoticeLevel.Success, statusText.Text);
-                dialog.DialogResult = true;
+                status.Text = "Payment confirmed. Use Print receipt for this bill, then Close.";
+                printReceipt.IsEnabled = settledBillId is not null;
             }
             catch (Exception ex)
             {
@@ -2461,7 +2506,7 @@ internal static class OperationalActionViews
             finally
             {
                 busy = false;
-                complete.IsEnabled = true;
+                complete.IsEnabled = settledBillId is null;
             }
         };
 
