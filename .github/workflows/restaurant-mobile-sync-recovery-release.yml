@@ -1,4 +1,5 @@
 name: Restaurant Mobile Sync Recovery Release
+# Final validation includes authoritative table roster and delivery diagnostics.
 # Retry after isolated SQLite regression fixture correction
 
 on:
