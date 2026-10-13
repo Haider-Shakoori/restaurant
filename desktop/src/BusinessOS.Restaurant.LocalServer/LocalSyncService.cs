@@ -49,7 +49,11 @@ public sealed class LocalSyncService
         var orders = await ActiveOrdersAsync(db, principal, cancellationToken);
         var workflowSettings = await LocalRestaurantSettingsService.GetAsync(db, cancellationToken);
         var menu = BuildMenu(catalog);
-        var tables = BuildTables(catalog);
+        // Table availability is live operational state. The cached catalog can
+        // retain an earlier occupied status after Desktop closes an order.
+        var liveTableStatuses = await db.DiningTables.AsNoTracking()
+            .ToDictionaryAsync(table => table.Id, table => table.Status, cancellationToken);
+        var tables = BuildTables(catalog, liveTableStatuses);
         var staff = await db.StaffUsers
             .Where(value => value.IsActive)
             .OrderBy(value => value.Name)
@@ -1228,7 +1232,7 @@ public sealed class LocalSyncService
         }).Cast<object>().ToArray();
     }
 
-    private static object[] BuildTables(LocalCatalogSnapshot catalog)
+    private static object[] BuildTables(LocalCatalogSnapshot catalog, IReadOnlyDictionary<string, string> liveStatuses)
     {
         var branches = catalog.Branches.ToDictionary(value => value.Id, StringComparer.Ordinal);
 
@@ -1243,7 +1247,7 @@ public sealed class LocalSyncService
                 code = table.Code,
                 name = table.Name,
                 capacity = table.Capacity,
-                status = table.Status,
+                status = liveStatuses.TryGetValue(table.Id, out var currentStatus) ? currentStatus : table.Status,
                 is_active = table.IsActive,
                 area = new { id = area.Id, name = area.Name },
                 branch = new { id = branch.Id, name = branch.Name },
