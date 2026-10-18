@@ -1653,7 +1653,7 @@ public sealed class LocalCashierService
                 .ExecuteUpdateAsync(
                     setters => setters.SetProperty(value => value.Status, "completed"),
                     cancellationToken);
-            AddChange(db, "kitchen_ticket", ticket.Id, null,
+            AddChange(db, "kitchen_ticket", ticket.Id, order.WaiterId,
                 await LocalKitchenService.TicketSnapshotAsync(db, ticket, cancellationToken));
         }
 

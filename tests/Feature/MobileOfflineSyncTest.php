@@ -8,6 +8,7 @@ use App\Enums\ProvisioningState;
 use App\Models\AdminUser;
 use App\Models\Business;
 use App\Models\DesktopEntityLink;
+use App\Models\DesktopOperationalRecord;
 use App\Models\DiningArea;
 use App\Models\DiningTable;
 use App\Models\KitchenStation;
@@ -764,7 +765,7 @@ class MobileOfflineSyncTest extends TestCase
 
         tenancy()->initialize($tenant);
         $this->assertSame(DiningTable::STATUS_AVAILABLE, $table->fresh()->status);
-        $audit = \App\Models\DesktopOperationalRecord::query()
+        $audit = DesktopOperationalRecord::query()
             ->where('record_type', 'table.availability_override')
             ->latest('occurred_at')
             ->firstOrFail();

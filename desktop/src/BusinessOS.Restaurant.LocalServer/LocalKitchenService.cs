@@ -238,7 +238,7 @@ public sealed class LocalKitchenService
             }
 
             var ticketSnapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-            AddChange(db, "kitchen_ticket", ticket.Id, null, ticketSnapshot);
+            await AddWaiterScopedTicketChangeAsync(db, ticket, ticketSnapshot, cancellationToken);
 
             var printer = await db.KitchenPrinterBindings
                 .AsNoTracking()
@@ -357,7 +357,7 @@ public sealed class LocalKitchenService
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -383,7 +383,7 @@ public sealed class LocalKitchenService
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return snapshot;
@@ -418,7 +418,7 @@ public sealed class LocalKitchenService
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         if (items.Length > 0 &&
             (!round.ExpoEnabled || (await LocalRestaurantSettingsService.GetAsync(db, cancellationToken))
                 .ReadyOnlyKotEnabled))
@@ -474,7 +474,7 @@ public sealed class LocalKitchenService
         await db.SaveChangesAsync(cancellationToken);
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         // Notify the assigned waiter even when only one item of a larger KOT
         // is ready and the aggregate order stays "submitted". Mobile/LAN
         // pickup alerts derive their state from the kitchen_tickets snapshot.
@@ -545,7 +545,7 @@ public sealed class LocalKitchenService
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         var order = await db.Orders.SingleAsync(x => x.Id == ticket.OrderId, cancellationToken);
         AddChange(db, "order", order.Id, order.WaiterId,
             await BasicOrderSnapshotAsync(db, order, cancellationToken));
@@ -638,7 +638,7 @@ public sealed class LocalKitchenService
 
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         AddChange(
             db,
             "order",
@@ -732,7 +732,7 @@ public sealed class LocalKitchenService
             });
 
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -1000,7 +1000,7 @@ public sealed class LocalKitchenService
         await RefreshTicketAndOrderAsync(db, ticket, cancellationToken);
         var snapshot = await TicketSnapshotAsync(db, ticket, cancellationToken);
         AddChange(db, "kot_round", round.Id, order.WaiterId, RoundSnapshot(round));
-        AddChange(db, "kitchen_ticket", ticket.Id, null, snapshot);
+        await AddWaiterScopedTicketChangeAsync(db, ticket, snapshot, cancellationToken);
         AddChange(db, "order", order.Id, order.WaiterId, await BasicOrderSnapshotAsync(db, order, cancellationToken));
 
         await db.SaveChangesAsync(cancellationToken);
@@ -1700,6 +1700,22 @@ public sealed class LocalKitchenService
                 "This user role cannot operate the kitchen display.",
                 "rejected");
         }
+    }
+
+    // Waiters may receive their own kitchen ticket events, but not tickets
+    // containing other waiters' items, pricing, allergies or table details.
+    // Managers and kitchen roles still receive every ticket through PullAsync.
+    private static async Task AddWaiterScopedTicketChangeAsync(
+        RestaurantDbContext db,
+        LocalKitchenTicket ticket,
+        object snapshot,
+        CancellationToken cancellationToken)
+    {
+        var waiterId = await db.Orders
+            .Where(order => order.Id == ticket.OrderId)
+            .Select(order => (long?)order.WaiterId)
+            .SingleAsync(cancellationToken);
+        AddChange(db, "kitchen_ticket", ticket.Id, waiterId, snapshot);
     }
 
     private static void AddChange(

@@ -10,6 +10,8 @@ import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
+import 'kot_round_status.dart';
+import 'quick_add_policy.dart';
 
 /// Mirrors the desktop order label: the short `#n` staff number leads, followed
 /// by the service reference (table / takeaway ref) when one is present.
@@ -49,7 +51,31 @@ class _OrderScreenState extends State<OrderScreen> {
   String? _selectedCategoryId;
   String _query = '';
   bool _working = false;
+  bool _itemSelectionPending = false;
+  bool _refreshInProgress = false;
+  bool _refreshAgain = false;
+  DateTime? _lastCatalogLoad;
   bool _hasUnsent = false;
+  int _offlineQueued = 0;
+  String? _connectionStatus;
+  String? _syncError;
+
+  bool get _connectionProblem =>
+      _connectionStatus == 'offline' ||
+      _connectionStatus == 'sync_error' ||
+      (_syncError?.isNotEmpty ?? false);
+  bool get _isQueued => _offlineQueued > 0;
+  bool get _hasConfirmedSync =>
+      _connectionStatus == 'local' || _connectionStatus == 'cloud';
+  String get _connectionLabel => _connectionProblem
+      ? 'Offline'
+      : _isQueued ? 'Queued'
+          : _hasConfirmedSync ? 'Synced' : 'Not synced';
+  int get _activeKotCount => _kotRounds.where(
+      (round) => !kotRoundProgress(
+        round, orderStatus: _order?['status']?.toString(),
+      ).isHistory,
+    ).length;
   Timer? _orderRefreshTimer;
   int _rightTab = 0;
   int _phoneTab = 0;
@@ -73,61 +99,117 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<void> _refresh() async {
-    final db = widget.dependencies.database;
-    final imageSession = await widget.dependencies.credentials.readSession();
-    final order = await db.order(widget.localOrderId);
-    final items = await db.orderItems(widget.localOrderId);
-    final categories = await db.menuCategories();
-    final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
-    final restaurantSettings = await db.restaurantSettings();
-    final menu = <String, List<Map<String, Object?>>>{};
-
-    for (final category in categories) {
-      final id = category['id']!.toString();
-      menu[id] = await db.menuItems(id);
-    }
-
-    if (!mounted) {
+    // Periodic kitchen refreshes and writes can arrive together. Serialize
+    // reads, coalesce overlapping requests, and avoid stale writes to the UI.
+    if (_refreshInProgress) {
+      _refreshAgain = true;
       return;
     }
+    _refreshInProgress = true;
+    try {
+      do {
+        _refreshAgain = false;
+        final db = widget.dependencies.database;
+        final order = await db.order(widget.localOrderId);
+        final items = await db.orderItems(widget.localOrderId);
+        final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
+        final queued = await db.pendingCount();
+        final connectionStatus = await db.systemState('active_connection');
+        final syncError = await db.systemState('last_sync_error');
 
-    setState(() {
-      _order = order;
-      _imageSession = imageSession;
-      _items = items;
-      _categories = categories;
-      _menu = menu;
-      _hasUnsent = hasUnsent;
-      _restaurantSettings = restaurantSettings;
-      _selectedCategoryId ??= categories.isEmpty
-          ? null
-          : categories.first['id']!.toString();
-    });
+        // A full menu query is expensive on older iPhones and need not run
+        // every time a KOT line advances from queued to ready.
+        final now = DateTime.now();
+        final loadCatalog = _lastCatalogLoad == null ||
+            now.difference(_lastCatalogLoad!) > const Duration(minutes: 2);
+        var categories = _categories;
+        var menu = _menu;
+        var settings = _restaurantSettings;
+        var imageSession = _imageSession;
+        if (loadCatalog) {
+          categories = await db.menuCategories();
+          final freshMenu = <String, List<Map<String, Object?>>>{};
+          for (final category in categories) {
+            final id = category['id']?.toString();
+            if (id == null || id.isEmpty) continue;
+            freshMenu[id] = await db.menuItems(id);
+          }
+          menu = freshMenu;
+          settings = await db.restaurantSettings();
+          imageSession = await widget.dependencies.credentials.readSession();
+        }
+
+        if (!mounted) break;
+        setState(() {
+          _order = order;
+          _items = items;
+          _hasUnsent = hasUnsent;
+          _offlineQueued = queued;
+          _connectionStatus = connectionStatus;
+          _syncError = syncError;
+          if (loadCatalog) {
+            _imageSession = imageSession;
+            _categories = categories;
+            _menu = menu;
+            _restaurantSettings = settings;
+            _lastCatalogLoad = now;
+            if (_selectedCategoryId == null ||
+                !categories.any((c) => c['id']?.toString() == _selectedCategoryId)) {
+              _selectedCategoryId = categories.isEmpty
+                  ? null : categories.first['id']?.toString();
+            }
+          }
+        });
+      } while (_refreshAgain && mounted);
+    } on Object catch (error) {
+      debugPrint('Restaurant order refresh failed: $error');
+      if (mounted) {
+        setState(() {
+          _connectionStatus = 'sync_error';
+          _syncError = 'local_cache_error';
+        });
+      }
+    } finally {
+      _refreshInProgress = false;
+    }
   }
 
-  Future<void> _addItem(Map<String, Object?> item) async {
-    if (_working) return;
-
-    final rawGroups = item['modifier_groups_json']?.toString();
-    final groups = rawGroups == null || rawGroups.isEmpty
-        ? const <Object?>[]
-        : (jsonDecode(rawGroups) as List<Object?>);
-
-    final selected = await showDialog<_OrderItemOptions>(
-      context: context,
-      builder: (context) => _ItemOptionsDialog(
-        itemName: item['name']!.toString(),
-        groups: groups,
-        coursesEnabled: _restaurantSettings['courses_enabled'] == true,
-      ),
-    );
-
-    if (selected == null) return;
-    final options = selected;
-
-    setState(() => _working = true);
-
+  Future<void> _addItem(
+    Map<String, Object?> item, {
+    bool quick = false,
+  }) async {
+    // Lock BEFORE displaying a dialog; otherwise two rapid taps launch two
+    // dialogs and may create duplicate order lines.
+    if (_working || _itemSelectionPending || !_editable) return;
+    setState(() => _itemSelectionPending = true);
     try {
+      _OrderItemOptions? options;
+      if (quick && canQuickAddMenuItem(item)) {
+        options = const _OrderItemOptions();
+      } else {
+        final rawGroups = item['modifier_groups_json'];
+        List<Object?> groups;
+        try {
+          groups = rawGroups == null || rawGroups.toString().trim().isEmpty
+              ? const <Object?>[]
+              : (jsonDecode(rawGroups.toString()) as List<Object?>);
+        } on Object {
+          throw const FormatException(
+            'Invalid modifier configuration. Refresh the restaurant menu.',
+          );
+        }
+        options = await showDialog<_OrderItemOptions>(
+          context: context,
+          builder: (context) => _ItemOptionsDialog(
+            itemName: item['name']?.toString() ?? 'Menu item',
+            groups: groups,
+            coursesEnabled: _restaurantSettings['courses_enabled'] == true,
+          ),
+        );
+      }
+      if (options == null || !mounted) return;
+      setState(() => _working = true);
+
       await widget.dependencies.orders.addItem(
         localOrderId: widget.localOrderId,
         menuItem: item,
@@ -141,10 +223,33 @@ class _OrderScreenState extends State<OrderScreen> {
         kitchenInstructions: options.kitchenInstructions,
       );
       await _refresh();
+      if (mounted && quick && canQuickAddMenuItem(item)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 2),
+            content: Text((item['name']?.toString() ?? 'Item') + ' added to order'),
+            action: SnackBarAction(
+              label: 'View order',
+              onPressed: () => setState(() {
+                _phoneTab = 1;
+                _rightTab = 0;
+              }),
+            ),
+          ),
+        );
+      }
     } on Object catch (error) {
       _showError(error);
     } finally {
-      if (mounted) setState(() => _working = false);
+      if (mounted) {
+        setState(() {
+          _working = false;
+          _itemSelectionPending = false;
+        });
+      } else {
+        _working = false;
+        _itemSelectionPending = false;
+      }
     }
   }
 
@@ -393,6 +498,49 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
+  Future<bool> _confirmFloorChange(String title, String detail) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(
+          '$detail\n\nIf the desktop is unreachable, this action will '
+          'be queued for synchronization. Another device may have changed '
+          'the order, so the desktop can still reject it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep order'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<void> _showFloorOperationResult(
+    String label,
+    int conflictsBefore,
+  ) async {
+    final db = widget.dependencies.database;
+    final conflictsAfter = await db.conflictCount();
+    final pending = await db.pendingCount();
+    if (!mounted) return;
+    final message = conflictsAfter > conflictsBefore
+        ? '$label rejected by desktop. Review the Sync conflicts screen.'
+        : pending > 0
+            ? '$label saved locally. Waiting for desktop confirmation.'
+            : '$label synchronized with desktop.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
+    );
+  }
+
   Future<void> _transferTable() async {
     if (_working || _order?['service_type']?.toString() != 'dine_in') return;
 
@@ -460,6 +608,19 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (targetId == null) return;
+    final target = available.firstWhere(
+      (table) => table['id']?.toString() == targetId,
+    );
+    final targetName = target['name']?.toString() ??
+        target['code']?.toString() ?? 'selected table';
+    if (!await _confirmFloorChange(
+      'Confirm table transfer',
+      'Move this order to $targetName? The previous table will become '
+      'available if no other active orders use it.',
+    )) {
+      return;
+    }
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -469,6 +630,7 @@ class _OrderScreenState extends State<OrderScreen> {
       );
       await widget.dependencies.syncCoordinator.syncNow();
       await _refresh();
+      await _showFloorOperationResult('Table transfer', conflictsBefore);
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -513,6 +675,18 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (result == null) return;
+    final movingItem = unsent.firstWhere(
+      (line) => line['local_line_id']?.toString() == result.localLineId,
+    );
+    final itemName = movingItem['item_name']?.toString() ?? 'item';
+    if (!await _confirmFloorChange(
+      'Confirm item move',
+      'Move ' + result.quantity.toString() + ' × ' + itemName +
+          ' into the selected order? Only unsent items can move.',
+    )) {
+      return;
+    }
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -524,6 +698,7 @@ class _OrderScreenState extends State<OrderScreen> {
       );
       await widget.dependencies.syncCoordinator.syncNow();
       await _refresh();
+      await _showFloorOperationResult('Item move', conflictsBefore);
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -608,6 +783,15 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (targetId == null) return;
+    if (!await _confirmFloorChange(
+      'Confirm order merge',
+      'Move all unsent items into the selected order, cancel this source '
+      'order and release its table? Kitchen history and billed orders '
+      'cannot be merged.',
+    )) {
+      return;
+    }
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -616,6 +800,7 @@ class _OrderScreenState extends State<OrderScreen> {
         targetLocalOrderId: targetId,
       );
       await widget.dependencies.syncCoordinator.syncNow();
+      await _showFloorOperationResult('Order merge', conflictsBefore);
 
       if (mounted) {
         Navigator.of(context).maybePop();
@@ -850,8 +1035,43 @@ class _OrderScreenState extends State<OrderScreen> {
                     fontWeight: FontWeight.w800),
               ),
             ),
+            Tooltip(
+              message: _connectionProblem
+                  ? 'Desktop unreachable or sync error. Changes are saved locally.'
+                  : _isQueued
+                      ? 'Order actions waiting to synchronize.'
+                      : 'Last synchronization succeeded.',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _connectionProblem
+                        ? Icons.wifi_off_rounded
+                        : _isQueued
+                            ? Icons.cloud_upload_outlined
+                            : Icons.check_circle_outline_rounded,
+                    size: 16,
+                    color: _connectionProblem
+                        ? RestaurantColors.warning
+                        : _isQueued
+                            ? RestaurantColors.brandHover
+                            : RestaurantColors.success,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _connectionLabel,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: RestaurantColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
             Text(
-              '${_kotRounds.length} KOT',
+              '$_activeKotCount active',
               style: const TextStyle(
                 color: RestaurantColors.brandHover,
                 fontSize: 12,
@@ -917,12 +1137,22 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
           const SizedBox(width: 20),
-          const Icon(Icons.circle, size: 9, color: RestaurantColors.success),
+          Icon(
+            _connectionProblem ? Icons.wifi_off_rounded
+                : _isQueued ? Icons.cloud_upload_outlined
+                    : Icons.check_circle_outline_rounded,
+            size: 15,
+            color: _connectionProblem
+                ? RestaurantColors.warning
+                : _isQueued
+                    ? RestaurantColors.brandHover
+                    : RestaurantColors.success,
+          ),
           const SizedBox(width: 6),
-          const Text(
-            'Connected',
-            style:
-                TextStyle(color: RestaurantColors.textSecondary, fontSize: 12),
+          Text(
+            _connectionLabel,
+            style: const TextStyle(
+              color: RestaurantColors.textSecondary, fontSize: 12),
           ),
           const Spacer(),
           if (_kotRounds.isNotEmpty) ...[
@@ -934,9 +1164,9 @@ class _OrderScreenState extends State<OrderScreen> {
                 borderRadius: BorderRadius.circular(RestaurantRadii.chip),
               ),
               child: Text(
-                _kotRounds.length == 1
-                    ? '1 KOT round'
-                    : '${_kotRounds.length} KOT rounds',
+                _activeKotCount == 1
+                    ? '1 active KOT'
+                    : '$_activeKotCount active KOTs',
                 style: const TextStyle(
                   color: RestaurantColors.brandHover,
                   fontSize: 11,
@@ -1054,6 +1284,72 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
         ),
+        if (_isQueued || _connectionProblem)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 3, 12, 4),
+            child: Row(
+              children: [
+                Icon(
+                  _connectionProblem
+                      ? Icons.warning_amber_rounded
+                      : Icons.cloud_upload_outlined,
+                  size: 16, color: RestaurantColors.warning,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _connectionProblem
+                        ? 'Desktop sync unavailable — orders stay saved locally.'
+                        : '$_offlineQueued pending action(s) waiting for sync.',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: RestaurantColors.warning,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_phoneTab == 0 && _items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 3, 12, 7),
+            child: Container(
+              key: const Key('waiter-live-order-summary'),
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+              decoration: BoxDecoration(
+                color: RestaurantColors.brandSoft,
+                borderRadius: BorderRadius.circular(RestaurantRadii.button),
+                border: Border.all(color: RestaurantColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.shopping_bag_outlined,
+                      color: RestaurantColors.brandHover, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_items.length} items · ${formatMoney(order['total'])}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: RestaurantColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _phoneTab = 1;
+                      _rightTab = 0;
+                    }),
+                    child: const Text('View order'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(
           child: _phoneTab == 0
               ? Column(
@@ -1132,7 +1428,9 @@ class _OrderScreenState extends State<OrderScreen> {
           clipBehavior: Clip.antiAlias,
           borderRadius: BorderRadius.circular(RestaurantRadii.card),
           child: InkWell(
-            onTap: _editable && !_working ? () => _addItem(item) : null,
+            onTap: _editable && !_working && !_itemSelectionPending
+                ? () => _addItem(item)
+                : null,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1173,13 +1471,14 @@ class _OrderScreenState extends State<OrderScreen> {
                         ),
                       ),
                       IconButton.filled(
-                        onPressed: _editable && !_working
-                            ? () => _addItem(item)
+                        onPressed: _editable && !_working && !_itemSelectionPending
+                            ? () => _addItem(item, quick: true)
                             : null,
                         style: IconButton.styleFrom(
                           backgroundColor: RestaurantColors.brand,
                           foregroundColor: RestaurantColors.onBrand,
                         ),
+                        tooltip: 'Quick add; item options open when needed',
                         icon: const Icon(Icons.add_rounded),
                       ),
                     ],
@@ -1257,7 +1556,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 ),
                 ButtonSegment<int>(
                   value: 1,
-                  label: Text('KOT (${_kotRounds.length})'),
+                  label: Text('Kitchen (${_kotRounds.where((r) => !kotRoundProgress(r, orderStatus: _order?['status']?.toString()).isHistory).length})'),
                   icon: const Icon(Icons.receipt_long_outlined, size: 18),
                 ),
               ],
@@ -1383,31 +1682,51 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _kitchenRoundsScroll() {
+    final status = _order?['status']?.toString();
+    final active = <Map<String, Object?>>[];
+    final history = <Map<String, Object?>>[];
+    for (final round in _kotRounds) {
+      final progress = kotRoundProgress(round, orderStatus: status);
+      if (progress.isHistory) {
+        history.add(round);
+      } else {
+        active.add(round);
+      }
+    }
+
     return ListView(
       key: const Key('mobile-pos-kot-scroll'),
       padding: const EdgeInsets.all(12),
       children: [
-        if (_kotRounds.isEmpty)
+        if (active.isNotEmpty) ...[
           const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('No KOT rounds have been sent yet.'),
-          ),
-        ..._kotRounds.map((round) {
-          final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
-          final number = round['kot_number']?.toString() ?? 'KOT';
-          final priority = round['priority']?.toString() ?? 'normal';
-          return ListTile(
-            leading: Icon(
-              priority == 'rush'
-                  ? Icons.bolt_rounded
-                  : Icons.receipt_long_rounded,
-              color: priority == 'rush' ? Colors.red : null,
+            padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+            child: Text('ACTIVE KITCHEN TICKETS',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: RestaurantColors.textSecondary,
+              ),
             ),
-            title: Text('Round $sequence · $number'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _showKotRound(round),
-          );
-        }),
+          ),
+          ...active.map(_kotRoundTile),
+        ] else
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No active kitchen tickets. Completed KOT rounds remain in History.',
+              style: TextStyle(color: RestaurantColors.textSecondary),
+            ),
+          ),
+        if (history.isNotEmpty)
+          ExpansionTile(
+            key: const Key('kot-completed-history'),
+            initiallyExpanded: false,
+            title: Text('History (' + history.length.toString() + ')',
+              style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Completed rounds, kept for the order record'),
+            children: history.map(_kotRoundTile).toList(),
+          ),
         if (_restaurantSettings['courses_enabled'] == true &&
             _heldCourses.isNotEmpty) ...[
           const Divider(),
@@ -1420,11 +1739,45 @@ class _OrderScreenState extends State<OrderScreen> {
             children: _heldCourses.map((course) => FilledButton.tonalIcon(
               onPressed: _working ? null : () => _fireCourse(course),
               icon: const Icon(Icons.play_arrow_rounded, size: 18),
-              label: Text('Fire course $course'),
+              label: Text('Fire course ' + course.toString()),
             )).toList(),
           ),
         ],
       ],
+    );
+  }
+
+  Widget _kotRoundTile(Map<String, Object?> round) {
+    final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
+    final number = round['kot_number']?.toString() ?? 'KOT';
+    final priority = round['priority']?.toString() ?? 'normal';
+    final progress = kotRoundProgress(
+      round, orderStatus: _order?['status']?.toString(),
+    );
+    final isReady = progress.label.contains('ready') ||
+        progress.label.contains('Ready');
+    final color = progress.isHistory
+        ? RestaurantColors.textMuted
+        : isReady ? RestaurantColors.success : RestaurantColors.brandHover;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        leading: Icon(
+          priority == 'rush'
+              ? Icons.bolt_rounded
+              : isReady ? Icons.notifications_active_rounded
+                : Icons.receipt_long_rounded,
+          color: color,
+        ),
+        title: Text('Round ' + sequence.toString() + ' · ' + number,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text(progress.label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => _showKotRound(round),
+      ),
     );
   }
 

@@ -394,7 +394,7 @@ class OrderOperationsService
             ]);
         }
 
-        return DB::connection('tenant')->transaction(function () use ($table, $reason): DiningTable {
+        return DB::connection('tenant')->transaction(function () use ($table): DiningTable {
             $table = DiningTable::query()->lockForUpdate()->findOrFail($table->getKey());
 
             $active = Order::query()
@@ -443,14 +443,14 @@ class OrderOperationsService
                 return $line;
             }
 
-            $production = \App\Models\KitchenTicketItem::query()
+            $production = KitchenTicketItem::query()
                 ->where('order_item_id', $line->id)
                 ->get();
 
             foreach ($production as $kitchenItem) {
                 if (! in_array($kitchenItem->status, [
-                    \App\Models\KitchenTicketItem::STATUS_VOIDED,
-                    \App\Models\KitchenTicketItem::STATUS_CANCELLED,
+                    KitchenTicketItem::STATUS_VOIDED,
+                    KitchenTicketItem::STATUS_CANCELLED,
                 ], true)) {
                     $this->kitchen->voidItem($kitchenItem, $actor, $reason);
                 }

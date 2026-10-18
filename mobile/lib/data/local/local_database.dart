@@ -738,44 +738,97 @@ class LocalDatabase implements SyncStore {
     });
   }
 
+  /// Check mutable order state inside the same SQLite transaction as the
+  /// requested operation, so stale UI selections never overwrite local data.
+  Future<Map<String, Object?>> _requireActiveOrderTxn(
+    DatabaseExecutor txn,
+    String id, {
+    bool requireDineIn = false,
+  }) async {
+    final matches = await txn.query(
+      'orders',
+      where: 'local_order_id = ?',
+      whereArgs: <Object?>[id],
+      limit: 1,
+    );
+    if (matches.isEmpty) {
+      throw StateError('Order not found. Refresh and try again.');
+    }
+    final order = matches.first;
+    if (const <String>{
+      'closed', 'cancelled', 'billed', 'inactive_remote',
+    }.contains(order['status']?.toString())) {
+      throw StateError('This order is already closed or cancelled.');
+    }
+    if (requireDineIn &&
+        (order['service_type']?.toString() != 'dine_in' ||
+            order['table_id'] == null)) {
+      throw StateError('This action requires an active dine-in order.');
+    }
+    return order;
+  }
+
   Future<void> transferOrderTable({
     required String localOrderId,
     required String targetTableId,
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
-      final orderRows = await txn.query(
-        'orders',
-        where: 'local_order_id = ?',
-        whereArgs: <Object?>[localOrderId],
+      final order = await _requireActiveOrderTxn(
+        txn, localOrderId, requireDineIn: true,
+      );
+      final sourceTableId = order['table_id']!.toString();
+      if (sourceTableId == targetTableId) {
+        throw StateError('Choose a different destination table.');
+      }
+      final targets = await txn.query(
+        'dining_tables',
+        where: 'id = ?',
+        whereArgs: <Object?>[targetTableId],
         limit: 1,
       );
-
-      if (orderRows.isEmpty) {
-        throw StateError('Order not found.');
+      if (targets.isEmpty ||
+          targets.first['is_active'] != 1 ||
+          targets.first['status']?.toString() != 'available') {
+        throw StateError('Destination table is not available. Refresh the floor.');
+      }
+      final branch = order['branch_id']?.toString();
+      if (branch != null &&
+          branch.isNotEmpty &&
+          targets.first['branch_id']?.toString() != branch) {
+        throw StateError('Table transfers cannot cross branches.');
+      }
+      final overlappingOrders = Sqflite.firstIntValue(await txn.rawQuery(
+        """SELECT COUNT(*) FROM orders
+           WHERE table_id = ?
+             AND local_order_id != ?
+             AND status NOT IN ('closed', 'cancelled', 'billed', 'inactive_remote')""",
+        <Object?>[targetTableId, localOrderId],
+      )) ?? 0;
+      if (overlappingOrders != 0) {
+        throw StateError('Another active order already uses that table.');
       }
 
-      final currentTableId = orderRows.first['table_id']?.toString();
-
-      if (currentTableId == null || currentTableId.isEmpty) {
-        throw StateError('Only dine-in orders can be transferred.');
-      }
-
+      final now = DateTime.now().toUtc().toIso8601String();
       await txn.update(
         'orders',
-        <String, Object?>{
-          'table_id': targetTableId,
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        },
+        <String, Object?>{'table_id': targetTableId, 'updated_at': now},
         where: 'local_order_id = ?',
         whereArgs: <Object?>[localOrderId],
       );
-
+      final remainingOnSource = Sqflite.firstIntValue(await txn.rawQuery(
+        """SELECT COUNT(*) FROM orders
+           WHERE table_id = ?
+             AND status NOT IN ('closed', 'cancelled', 'billed', 'inactive_remote')""",
+        <Object?>[sourceTableId],
+      )) ?? 0;
       await txn.update(
         'dining_tables',
-        <String, Object?>{'status': 'available'},
+        <String, Object?>{
+          'status': remainingOnSource == 0 ? 'available' : 'occupied',
+        },
         where: 'id = ?',
-        whereArgs: <Object?>[currentTableId],
+        whereArgs: <Object?>[sourceTableId],
       );
       await txn.update(
         'dining_tables',
@@ -783,7 +836,6 @@ class LocalDatabase implements SyncStore {
         where: 'id = ?',
         whereArgs: <Object?>[targetTableId],
       );
-
       await _enqueue(
         txn,
         mutationId: mutationId,
@@ -805,6 +857,23 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
+      if (sourceLocalOrderId == targetLocalOrderId) {
+        throw StateError('Choose a different target order.');
+      }
+      final sourceOrder = await _requireActiveOrderTxn(
+        txn, sourceLocalOrderId, requireDineIn: true,
+      );
+      final targetOrder = await _requireActiveOrderTxn(
+        txn, targetLocalOrderId, requireDineIn: true,
+      );
+      if (sourceOrder['status']?.toString() == 'served' ||
+          targetOrder['status']?.toString() == 'served') {
+        throw StateError('Served orders cannot move items.');
+      }
+      if (sourceOrder['branch_id']?.toString() !=
+          targetOrder['branch_id']?.toString()) {
+        throw StateError('Items cannot be moved between branches.');
+      }
       final rows = await txn.query(
         'order_items',
         where: 'local_order_id = ? AND local_line_id = ?',
@@ -883,6 +952,31 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
+      if (sourceLocalOrderId == targetLocalOrderId) {
+        throw StateError('An order cannot be merged into itself.');
+      }
+      final source = await _requireActiveOrderTxn(
+        txn, sourceLocalOrderId, requireDineIn: true,
+      );
+      final target = await _requireActiveOrderTxn(
+        txn, targetLocalOrderId, requireDineIn: true,
+      );
+      if (source['status']?.toString() == 'served' ||
+          target['status']?.toString() == 'served') {
+        throw StateError('Served orders cannot be merged.');
+      }
+      if (source['branch_id']?.toString() !=
+          target['branch_id']?.toString()) {
+        throw StateError('Orders from different branches cannot be merged.');
+      }
+      final sourceRounds = jsonDecode(
+        source['kot_rounds_json']?.toString() ?? '[]',
+      );
+      if (sourceRounds is List && sourceRounds.isNotEmpty) {
+        throw StateError(
+          'Source order has kitchen history. Transfer its table instead.',
+        );
+      }
       final sourceLines = await txn.query(
         'order_items',
         where: 'local_order_id = ?',

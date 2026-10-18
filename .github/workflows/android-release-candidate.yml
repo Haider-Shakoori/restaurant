@@ -1,0 +1,153 @@
+name: Restaurant Android Release Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/waiter-stability-ui-sprint-01
+    paths:
+      - '.github/workflows/android-release-candidate.yml'
+      - 'mobile/**'
+
+permissions:
+  contents: read
+
+jobs:
+  android-tablet-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project
+        working-directory: mobile
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+          grep -F 'android:label="Restaurant"' android/app/src/main/AndroidManifest.xml
+          grep -F 'android:name=".RestaurantLanService"' android/app/src/main/AndroidManifest.xml
+      - name: Validate mobile sources
+        working-directory: mobile
+        run: |
+          flutter pub get
+          dart format lib test tool
+          flutter analyze
+          flutter test
+      - name: Build Android release candidate
+        working-directory: mobile
+        run: |
+          flutter build apk --release
+          test -s build/app/outputs/flutter-apk/app-release.apk
+      - name: Validate APK metadata and prepare manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=mobile/build/app/outputs/flutter-apk/app-release.apk
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" > /tmp/restaurant-apk-badging.txt
+          grep -F "application-label:'Restaurant'" /tmp/restaurant-apk-badging.txt
+          grep -F "package: name='af.businessos.businessos_restaurant_waiter'" /tmp/restaurant-apk-badging.txt
+          mkdir -p release-candidate
+          cp "$APK" release-candidate/Restaurant-Android-Release-Candidate.apk
+          sha256sum release-candidate/Restaurant-Android-Release-Candidate.apk > release-candidate/SHA256SUMS.txt
+          cat > release-candidate/READ-ME.txt <<'EOF'
+          Restaurant Android tablet candidate.
+          Built and validated from the GitHub development branch.
+          Testing APK only: the generated Flutter Android template uses development
+          signing unless a stable production signing configuration is supplied.
+          Do not use this candidate as an app-store or commercial production
+          release. Production signing and testing on the client's real tablet
+          must occur before commercial deployment.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-Android-Tablet-Candidate
+          path: release-candidate/*
+          if-no-files-found: error
+
+  android-emulator-smoke:
+    needs: android-tablet-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Restaurant-Android-Tablet-Candidate
+          path: tablet-candidate
+      - name: Enable KVM acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch app on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install -r tablet-candidate/Restaurant-Android-Release-Candidate.apk
+            adb shell monkey -p af.businessos.businessos_restaurant_waiter -c android.intent.category.LAUNCHER 1
+            sleep 12
+            adb shell pidof af.businessos.businessos_restaurant_waiter
+            # The hosted emulator may briefly show an Android System ANR
+            # for its own Pixel Launcher, even when our app starts normally.
+            # Dismiss the emulator-only Wait dialog and refuse to upload a
+            # screenshot obscured by any remaining system ANR overlay.
+            python3 - <<'PY'
+            import re
+            import subprocess
+            import time
+            import xml.etree.ElementTree as ET
+
+            def dump():
+                subprocess.run(
+                    ['adb', 'shell', 'uiautomator', 'dump', '/sdcard/restaurant-ui.xml'],
+                    check=True, stdout=subprocess.DEVNULL, timeout=35,
+                )
+                xml = subprocess.check_output(
+                    ['adb', 'shell', 'cat', '/sdcard/restaurant-ui.xml'],
+                    timeout=15,
+                ).decode('utf-8')
+                return list(ET.fromstring(xml).iter('node'))
+
+            for _ in range(4):
+                nodes = dump()
+                anr = [n for n in nodes if "isn't responding" in n.attrib.get('text', '').lower()]
+                if not anr:
+                    break
+                wait = next((n for n in nodes
+                             if n.attrib.get('text') == 'Wait'), None)
+                if wait is None:
+                    raise SystemExit('Android emulator ANR could not be dismissed.')
+                bounds = re.findall(r'\d+', wait.attrib['bounds'])
+                x1, y1, x2, y2 = map(int, bounds)
+                subprocess.run(['adb', 'shell', 'input', 'tap',
+                                str((x1 + x2) // 2), str((y1 + y2) // 2)],
+                               check=True)
+                time.sleep(6)
+            else:
+                raise SystemExit('Android emulator launcher ANR stayed visible.')
+            if any("isn't responding" in n.attrib.get('text', '').lower()
+                   for n in dump()):
+                raise SystemExit('A system error dialog still obscures Restaurant.')
+            print('Android startup screen has no blocking system error.')
+            PY
+            adb shell pidof af.businessos.businessos_restaurant_waiter
+            adb shell screencap -p /sdcard/restaurant-launch.png
+            mkdir -p emulator-results
+            adb pull /sdcard/restaurant-launch.png emulator-results/restaurant-launch.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Restaurant-Android-Emulator-Startup
+          path: emulator-results/restaurant-launch.png
+          if-no-files-found: ignore

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -9,8 +11,10 @@ using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop;
 using BusinessOS.Restaurant.Desktop.Appearance;
+using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
+using NSec.Cryptography;
 
 namespace BusinessOS.Restaurant.UiSmoke;
 
@@ -23,6 +27,7 @@ internal static class Program
 {
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(25);
     private static int _checks;
+    private static bool _temporaryCiActivationCreated;
 
     // Every image is rendered from the real WPF window on an isolated Windows CI
     // runner. Synthetic staff credentials and an empty local SQLite store are used;
@@ -71,8 +76,14 @@ internal static class Program
 
         var owner = OpenWindow("owner");
         application.MainWindow = owner;
+        // Loaded may fire again when WPF reattaches controls or changes themes.
+        // A second asynchronous smoke run could clear the first run's synthetic
+        // activation in its finally block while floor navigation is in flight.
+        var smokeStarted = 0;
         owner.Loaded += async (_, _) =>
         {
+            if (Interlocked.Exchange(ref smokeStarted, 1) != 0)
+                return;
             try
             {
                 await RunAsync(application, owner);
@@ -84,6 +95,13 @@ internal static class Program
                 Console.Error.WriteLine("WPF UI INTERACTION SMOKE FAILED: " + exception);
                 PrintDiagnostics();
                 application.Shutdown(1);
+            }
+            finally
+            {
+                // The isolated runner must not retain a test activation after
+                // a passed or failed smoke run; never clear pre-existing state.
+                if (_temporaryCiActivationCreated)
+                    await new WindowsActivationStore().ClearAsync();
             }
         };
 
@@ -97,6 +115,86 @@ internal static class Program
             new AuthUser(901, "ci-test-operator", "CI " + role, "ci@example.test", role),
             "isolated-test-tenant",
             DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// The smoke runner uses a synthetic operator, so it also needs a valid
+    /// synthetic lease. Generate a new Ed25519 keypair IN MEMORY on the
+    /// disposable CI runner. The production service still verifies genuine
+    /// signatures, tenant ID and validity windows unchanged. Never reuse or
+    /// access a customer's activation or copy its signing credentials.
+    /// </summary>
+    private static async Task CreateTemporaryCiActivationAsync()
+    {
+        var activationPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BusinessOS", "Restaurant", "licensing", "activation.dat");
+        if (File.Exists(activationPath))
+            throw new InvalidOperationException(
+                "Refusing UI smoke: an activation already exists in the runner.");
+
+        var algorithm = SignatureAlgorithm.Ed25519;
+        using var key = Key.Create(algorithm, new KeyCreationParameters
+        {
+            ExportPolicy = KeyExportPolicies.AllowPlaintextExport,
+        });
+        var publicKey = EncodeTestBase64Url(
+            key.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        var now = DateTimeOffset.UtcNow;
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            schema_version = 1,
+            lease_id = "ci-" + Guid.NewGuid().ToString("N"),
+            key_id = "ci-smoke-signing",
+            tenant_id = "isolated-test-tenant",
+            business_id = "ci-test-business",
+            subscription_id = "ci-test-subscription",
+            license_version = 1,
+            device_id = "ci-desktop",
+            device_uid = "ci-ephemeral-runner",
+            plan = new { code = "ci-test", name = "CI smoke only" },
+            features = new { },
+            desktop_mode = "cloud_sync",
+            issued_at = now.AddMinutes(-5).ToString("O"),
+            offline_valid_until = now.AddDays(2).ToString("O"),
+            subscription_ends_at = now.AddDays(3).ToString("O"),
+        });
+        // Call the same canonical serializer used by the verifier so the
+        // fixture exercises the real cryptographic license validation path.
+        var canonicalize = typeof(SignedLeaseVerifier).GetMethod(
+            "Canonicalize", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "Cannot create a signed CI fixture: canonicalizer missing.");
+        var canonical = (byte[])canonicalize.Invoke(null, [payload])!;
+        var signature = SignatureAlgorithm.Ed25519.Sign(key, canonical);
+        var lease = new SignedLease(payload,
+            EncodeTestBase64Url(signature), "Ed25519", "ci-smoke-signing");
+        var snapshot = new SignedLeaseVerifier().Verify(lease, publicKey);
+        var store = new WindowsActivationStore();
+        await store.SaveAsync(new ActivationState(
+            "https://restaurant-ci.example.test",
+            "ci-desktop",
+            "ci-ephemeral-runner",
+            "ci-not-a-real-secret",
+            publicKey,
+            "ci-smoke-signing",
+            lease,
+            snapshot,
+            now));
+        _temporaryCiActivationCreated = true;
+
+        // Fail at fixture setup, not on a later page, if protected storage
+        // does not persist to the location the production service reads.
+        var restored = await new WindowsActivationStore().LoadAsync();
+        if (restored is null)
+            throw new InvalidOperationException(
+                "CI-only signed activation did not survive a storage round-trip.");
+        new SignedLeaseVerifier().Verify(restored.Lease, restored.PublicKey);
+        Console.WriteLine("PASS: Synthetic CI activation saved and reloaded using production DPAPI store.");
+    }
+
+    private static string EncodeTestBase64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=')
+            .Replace('+', '-').Replace('/', '_');
 
     private static void PrintDiagnostics()
     {
@@ -137,6 +235,7 @@ internal static class Program
         // on this disposable runner; production startup remains unchanged.
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
+        await CreateTemporaryCiActivationAsync();
         await CheckPersistentMenuPhotoCacheAsync();
         CheckPhotoCatalogIncrementalRendering();
         CheckDashboardProfitLossCalculation();
@@ -290,6 +389,12 @@ internal static class Program
             for (var index = 0; index < GalleryRoutes.Length; index++)
             {
                 var route = GalleryRoutes[index];
+                if (route == "tables")
+                {
+                    var ciActivation = await new WindowsActivationStore().LoadAsync();
+                    Assert(ciActivation is not null,
+                        "Synthetic CI activation still exists before Tables & Floor navigation");
+                }
                 await NavigateAsync(window, route);
                 if (route is "settings" or "kitchen" or "pos")
                     AssertWorkspaceGlassSurface(window, theme, route);
@@ -640,7 +745,7 @@ internal static class Program
         var restore = Descendants<Button>(window)
             .Single(x => x.Name == "ExitPosButton");
         var shortcuts = Descendants<Button>(window)
-            .Single(x => x.Name == "WorkspaceShortcutsButton");
+            .Single(x => x.Name == "WorkspaceKeysButton");
         var topNav = Descendants<Border>(window)
             .Single(x => x.Name == "TopNavigationBar");
         Assert(fullscreen.Visibility == Visibility.Visible &&
@@ -651,8 +756,8 @@ internal static class Program
         Click(fullscreen);
         Assert(restore.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Collapsed &&
-            fullscreen.Visibility == Visibility.Collapsed,
-            route + " enters optional full-screen mode by top toolbar");
+            fullscreen.Visibility == Visibility.Visible,
+            route + " enters full-screen while keeping workspace controls accessible");
         Click(restore);
         Assert(fullscreen.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Visible &&
@@ -794,8 +899,25 @@ internal static class Program
     {
         Assert(FindButton(owner, "+ Add Ingredient") is not null &&
             FindButton(owner, "+ Adjust Stock Quantity") is not null &&
-            FindButton(owner, "Edit Ingredients & Units (Online)") is not null,
+            FindButton(owner, "Edit Ingredients (Online)") is not null,
             "Inventory compact action toolbar retains all operations");
+        Assert(Descendants<TextBlock>(owner).Any(x =>
+            x.Name == "InventoryPageHeading" && x.Text == "Stock & Ingredients"),
+            "Inventory has one concise page heading");
+        Assert(Descendants<TextBlock>(owner).Any(x =>
+            x.Name == "InventoryModeIndicator" && !string.IsNullOrWhiteSpace(x.Text)),
+            "Inventory clearly labels its stock-consumption mode");
+        Assert(!Descendants<TextBlock>(owner).Any(x =>
+            x.Text == "Ingredient costing mode" || x.Text == "Inventory overview"),
+            "Inventory no longer displays redundant guidance panels");
+        var history = Descendants<Expander>(owner)
+            .Single(x => x.Name == "InventoryHistoryExpander");
+        Assert(!history.IsExpanded, "Inventory audit history stays collapsed by default");
+        history.IsExpanded = true;
+        Assert(Descendants<DataGrid>(owner)
+            .Any(x => x.Name == "ConsumptionHistoryGrid"),
+            "Inventory audit history remains available on demand");
+        history.IsExpanded = false;
         var search = Descendants<TextBox>(owner).Single(x => x.Name == "InventorySearchBox");
         var lowStock = Descendants<CheckBox>(owner)
             .Single(x => x.Name == "InventoryLowStockOnlyToggle");
