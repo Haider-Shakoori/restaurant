@@ -1346,31 +1346,49 @@ class LocalDatabase implements SyncStore {
     final table = rawTable is Map<Object?, Object?>
         ? Map<String, Object?>.from(rawTable)
         : null;
+    // READY/KOT updates use the desktop's lightweight BasicOrderSnapshot.
+    // Missing keys are NOT null updates: preserve the table, waiter-facing
+    // service identity, original items and earlier receipt details.
+    final existingOrders = await txn.query(
+      'orders',
+      where: 'local_order_id = ?',
+      whereArgs: <Object?>[localId],
+      limit: 1,
+    );
+    final existingOrder = existingOrders.isEmpty
+        ? const <String, Object?>{}
+        : existingOrders.first;
+    Object? keep(String key, String column) =>
+        order.containsKey(key) ? order[key] : existingOrder[column];
+    final hasTable = order.containsKey('table');
+    final tableId = hasTable
+        ? table?['id']?.toString()
+        : existingOrder['table_id']?.toString();
 
     await txn.insert('orders', <String, Object?>{
       'local_order_id': localId,
-      'client_order_id': clientId,
+      'client_order_id': clientId ?? existingOrder['client_order_id'],
       'server_id': serverId,
-      'display_number': (order['display_number'] as num?)?.toInt() ?? 0,
-      'table_id': table?['id']?.toString(),
-      'branch_id': order['branch_id']?.toString(),
-      'service_type': order['service_type']?.toString() ?? 'dine_in',
-      'service_reference': order['service_reference']?.toString(),
-      'status': order['status']!.toString(),
-      'guest_count': (order['guest_count'] as num?)?.toInt() ?? 1,
-      'notes': order['notes']?.toString(),
-      'subtotal': order['subtotal']?.toString() ?? '0.00',
-      'total': order['total']?.toString() ?? '0.00',
-      'opened_at': order['opened_at']?.toString(),
-      'submitted_at': order['submitted_at']?.toString(),
-      'served_at': order['served_at']?.toString(),
-      'closed_at': order['closed_at']?.toString(),
-      'kot_rounds_json': jsonEncode(
-        order['kot_rounds'] as List<Object?>? ?? const <Object?>[],
-      ),
-      'kitchen_tickets_json': jsonEncode(
-        order['kitchen_tickets'] as List<Object?>? ?? const <Object?>[],
-      ),
+      'display_number': (keep('display_number', 'display_number') as num?)?.toInt() ?? 0,
+      'table_id': tableId,
+      'branch_id': keep('branch_id', 'branch_id')?.toString(),
+      'service_type': keep('service_type', 'service_type')?.toString() ?? 'dine_in',
+      'service_reference': keep('service_reference', 'service_reference')?.toString(),
+      'status': order['status']?.toString() ?? existingOrder['status']?.toString() ?? 'draft',
+      'guest_count': (keep('guest_count', 'guest_count') as num?)?.toInt() ?? 1,
+      'notes': keep('notes', 'notes')?.toString(),
+      'subtotal': keep('subtotal', 'subtotal')?.toString() ?? '0.00',
+      'total': keep('total', 'total')?.toString() ?? '0.00',
+      'opened_at': keep('opened_at', 'opened_at')?.toString(),
+      'submitted_at': keep('submitted_at', 'submitted_at')?.toString(),
+      'served_at': keep('served_at', 'served_at')?.toString(),
+      'closed_at': keep('closed_at', 'closed_at')?.toString(),
+      'kot_rounds_json': order.containsKey('kot_rounds')
+          ? jsonEncode(order['kot_rounds'] ?? const <Object?>[])
+          : existingOrder['kot_rounds_json'] ?? '[]',
+      'kitchen_tickets_json': order.containsKey('kitchen_tickets')
+          ? jsonEncode(order['kitchen_tickets'] ?? const <Object?>[])
+          : existingOrder['kitchen_tickets_json'] ?? '[]',
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
 
@@ -1381,6 +1399,28 @@ class LocalDatabase implements SyncStore {
       final localLineId = clientLineId == null || clientLineId.isEmpty
           ? 'server:$serverLineId'
           : clientLineId;
+      final existingLines = await txn.query(
+        'order_items',
+        columns: <String>['dispatched_quantity', 'course_state'],
+        where: 'local_line_id = ?',
+        whereArgs: <Object?>[localLineId],
+        limit: 1,
+      );
+      final oldLine = existingLines.isEmpty
+          ? const <String, Object?>{}
+          : existingLines.first;
+      final quantity = (item['quantity'] as num?)?.toInt() ?? 1;
+      final roundId = item['kot_round_id']?.toString();
+      final roundNumber = (item['round_number'] as num?)?.toInt() ?? 0;
+      // The desktop doesn't publish dispatched_quantity. A line assigned to
+      // a KOT round is already sent; don't reset it to zero on every sync.
+      final sentToKitchen = (roundId != null && roundId.isNotEmpty) ||
+          roundNumber > 0;
+      final priorSent = (oldLine['dispatched_quantity'] as num?)?.toInt() ?? 0;
+      final dispatched = sentToKitchen
+          ? quantity
+          : ((item['dispatched_quantity'] as num?)?.toInt() ?? priorSent)
+              .clamp(0, quantity);
 
       await txn.insert('order_items', <String, Object?>{
         'local_line_id': localLineId,
@@ -1390,15 +1430,15 @@ class LocalDatabase implements SyncStore {
         'menu_item_id': item['menu_item_id']?.toString(),
         'item_name': item['item_name']!.toString(),
         'unit_price': item['unit_price']!.toString(),
-        'quantity': (item['quantity'] as num?)?.toInt() ?? 1,
-        'dispatched_quantity':
-            (item['dispatched_quantity'] as num?)?.toInt() ?? 0,
+        'quantity': quantity,
+        'dispatched_quantity': dispatched,
         'line_total': item['line_total']!.toString(),
         'notes': item['notes']?.toString(),
         'seat_number': (item['seat_number'] as num?)?.toInt(),
         'course_number': (item['course_number'] as num?)?.toInt(),
         'course_name': item['course_name']?.toString(),
-        'course_state': item['course_state']?.toString() ?? 'open',
+        'course_state': item['course_state']?.toString() ??
+            oldLine['course_state']?.toString() ?? 'open',
         'modifiers_snapshot_json': jsonEncode(
           item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
         ),
