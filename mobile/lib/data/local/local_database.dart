@@ -380,10 +380,10 @@ class LocalDatabase implements SyncStore {
           final localId = row['local_order_id']!.toString();
           if (serverOrderIds.contains(localId)) continue;
           final unsent = await txn.rawQuery(
-            """SELECT 1 FROM outbox
+            r'''SELECT 1 FROM outbox
                WHERE status = 'pending'
                  AND json_extract(payload_json, '$.client_order_id') = ?
-               LIMIT 1""",
+               LIMIT 1''',
             <Object?>[localId],
           );
           if (unsent.isNotEmpty) continue;
@@ -1411,14 +1411,14 @@ class LocalDatabase implements SyncStore {
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
     final rows = await txn.rawQuery(
-      """SELECT DISTINCT orders.table_id FROM orders
+      r'''SELECT DISTINCT orders.table_id FROM orders
          WHERE orders.table_id IS NOT NULL
            AND orders.status IN ('draft', 'submitted_pending_sync')
            AND EXISTS (
              SELECT 1 FROM outbox
              WHERE outbox.status = 'pending'
                AND json_extract(outbox.payload_json, '$.client_order_id') = orders.local_order_id
-           )""",
+           )''',
     );
 
     for (final row in rows) {
