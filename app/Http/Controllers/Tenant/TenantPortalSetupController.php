@@ -25,6 +25,7 @@ class TenantPortalSetupController extends Controller
     public function __construct(
         private readonly TenantRoleService $roles,
     ) {}
+
     public function branch(Request $request): RedirectResponse
     {
         $data = $request->validate([
