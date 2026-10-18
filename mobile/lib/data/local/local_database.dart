@@ -16,7 +16,7 @@ class LocalDatabase implements SyncStore {
         p.join(await getDatabasesPath(), 'businessos_restaurant_waiter.db');
     final database = await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE settings (
@@ -135,7 +135,9 @@ class LocalDatabase implements SyncStore {
             code TEXT NOT NULL,
             message TEXT NOT NULL,
             payload_json TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            resolved_at TEXT,
+            resolution TEXT
           )
         ''');
         await db.execute(
@@ -218,6 +220,10 @@ class LocalDatabase implements SyncStore {
           await db.execute(
             'ALTER TABLE orders ADD COLUMN display_number INTEGER NOT NULL DEFAULT 0',
           );
+        }
+        if (oldVersion < 9) {
+          await db.execute('ALTER TABLE conflicts ADD COLUMN resolved_at TEXT');
+          await db.execute('ALTER TABLE conflicts ADD COLUMN resolution TEXT');
         }
       },
     );
@@ -418,6 +424,7 @@ class LocalDatabase implements SyncStore {
       // not_configured sync error left over from a prior session.
       await _setSettingTxn(txn, 'last_sync_error', '');
       await _reapplyLocalOccupancy(txn);
+      await _reconcileSubmittedConflicts(txn);
     });
   }
 
@@ -441,6 +448,7 @@ class LocalDatabase implements SyncStore {
       );
       await _setSettingTxn(txn, 'server_locked', '0');
       await _reapplyLocalOccupancy(txn);
+      await _reconcileSubmittedConflicts(txn);
     });
   }
 
@@ -961,12 +969,66 @@ class LocalDatabase implements SyncStore {
   }
 
   Future<int> conflictCount() async {
-    final rows = await _db.rawQuery('SELECT COUNT(*) AS total FROM conflicts');
+    final rows = await _db.rawQuery(
+      'SELECT COUNT(*) AS total FROM conflicts WHERE resolved_at IS NULL',
+    );
     return (rows.first['total'] as num?)?.toInt() ?? 0;
   }
 
-  Future<List<Map<String, Object?>>> conflicts() {
-    return _db.query('conflicts', orderBy: 'created_at DESC');
+  Future<List<Map<String, Object?>>> conflicts({bool archived = false}) {
+    return _db.query(
+      'conflicts',
+      where: archived ? 'resolved_at IS NOT NULL' : 'resolved_at IS NULL',
+      orderBy: 'created_at DESC',
+    );
+  }
+
+  /// Only reconcile a duplicate kitchen submission once the desktop has
+  /// confirmed it is already dispatched or the order is terminal.
+  /// Rejected item additions and payments remain unresolved for review.
+  Future<void> _reconcileSubmittedConflicts(DatabaseExecutor txn) async {
+    final candidates = await txn.query(
+      'conflicts',
+      columns: <String>['mutation_id', 'payload_json'],
+      where: "resolved_at IS NULL AND operation = 'order.submit' AND code = 'order_state_conflict'",
+    );
+    for (final conflict in candidates) {
+      final payload = jsonDecode(conflict['payload_json']! as String);
+      if (payload is! Map<String, dynamic>) continue;
+      final localId = payload['client_order_id']?.toString();
+      if (localId == null || localId.isEmpty) continue;
+      final orders = await txn.query(
+        'orders',
+        columns: <String>['status', 'server_id', 'kot_rounds_json'],
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[localId],
+        limit: 1,
+      );
+      if (orders.isEmpty || orders.first['server_id'] == null) continue;
+      final status = orders.first['status']?.toString();
+      final terminal = const <String>{
+        'closed', 'cancelled', 'billed', 'served', 'inactive_remote',
+      }.contains(status);
+      final rounds = jsonDecode(
+        orders.first['kot_rounds_json']?.toString() ?? '[]',
+      );
+      final hasDispatchedRound = rounds is List && rounds.isNotEmpty;
+      final unsent = Sqflite.firstIntValue(await txn.rawQuery(
+        'SELECT COUNT(*) FROM order_items WHERE local_order_id = ? AND dispatched_quantity < quantity',
+        <Object?>[localId],
+      )) ?? 0;
+      if (!terminal && !(hasDispatchedRound && unsent == 0)) continue;
+      await txn.update(
+        'conflicts',
+        <String, Object?>{
+          'resolved_at': DateTime.now().toUtc().toIso8601String(),
+          'resolution': 'Duplicate KOT submission superseded by confirmed '
+              'desktop state; the rejected request was not replayed.',
+        },
+        where: 'mutation_id = ? AND resolved_at IS NULL',
+        whereArgs: <Object?>[conflict['mutation_id']],
+      );
+    }
   }
 
   Future<void> createDraftOrder({
@@ -1401,7 +1463,12 @@ class LocalDatabase implements SyncStore {
           : clientLineId;
       final existingLines = await txn.query(
         'order_items',
-        columns: <String>['dispatched_quantity', 'course_state'],
+        columns: <String>[
+          'menu_item_id', 'item_name', 'unit_price', 'line_total',
+          'dispatched_quantity', 'course_state', 'notes', 'seat_number',
+          'course_number', 'course_name', 'modifiers_snapshot_json',
+          'allergy_instructions', 'kitchen_instructions', 'status',
+        ],
         where: 'local_line_id = ?',
         whereArgs: <Object?>[localLineId],
         limit: 1,
@@ -1414,37 +1481,59 @@ class LocalDatabase implements SyncStore {
       final roundNumber = (item['round_number'] as num?)?.toInt() ?? 0;
       // The desktop doesn't publish dispatched_quantity. A line assigned to
       // a KOT round is already sent; don't reset it to zero on every sync.
+      final lineStatus = item['status']?.toString() ??
+          oldLine['status']?.toString() ?? 'pending';
       final sentToKitchen = (roundId != null && roundId.isNotEmpty) ||
-          roundNumber > 0;
+          roundNumber > 0 ||
+          const <String>{
+            'submitted', 'submitted_pending_sync',
+            'preparing', 'ready', 'served', 'completed',
+          }.contains(lineStatus);
       final priorSent = (oldLine['dispatched_quantity'] as num?)?.toInt() ?? 0;
       final dispatched = sentToKitchen
           ? quantity
           : ((item['dispatched_quantity'] as num?)?.toInt() ?? priorSent)
               .clamp(0, quantity);
 
+      // Live desktop READY/served/closed events omit unit_price and menu
+      // metadata. Keep existing details or derive the price from line_total.
+      final lineTotal = item['line_total']?.toString() ??
+          oldLine['line_total']?.toString() ?? '0.00';
+      final effectiveQuantity = quantity < 1 ? 1 : quantity;
+      final unitPrice = item['unit_price']?.toString() ??
+          oldLine['unit_price']?.toString() ??
+          _fromMinor(_toMinor(lineTotal) ~/ effectiveQuantity);
+      final modifiers = item.containsKey('modifiers_snapshot')
+          ? jsonEncode(item['modifiers_snapshot'] ?? const <Object?>[])
+          : oldLine['modifiers_snapshot_json']?.toString() ?? '[]';
       await txn.insert('order_items', <String, Object?>{
         'local_line_id': localLineId,
         'client_line_id': clientLineId,
         'server_id': serverLineId,
         'local_order_id': localId,
-        'menu_item_id': item['menu_item_id']?.toString(),
-        'item_name': item['item_name']!.toString(),
-        'unit_price': item['unit_price']!.toString(),
+        'menu_item_id': item['menu_item_id']?.toString() ??
+            oldLine['menu_item_id']?.toString(),
+        'item_name': item['item_name']?.toString() ??
+            oldLine['item_name']?.toString() ?? 'Unknown item',
+        'unit_price': unitPrice,
         'quantity': quantity,
         'dispatched_quantity': dispatched,
-        'line_total': item['line_total']!.toString(),
-        'notes': item['notes']?.toString(),
-        'seat_number': (item['seat_number'] as num?)?.toInt(),
-        'course_number': (item['course_number'] as num?)?.toInt(),
-        'course_name': item['course_name']?.toString(),
+        'line_total': lineTotal,
+        'notes': item['notes']?.toString() ?? oldLine['notes']?.toString(),
+        'seat_number': (item['seat_number'] as num?)?.toInt() ??
+            (oldLine['seat_number'] as num?)?.toInt(),
+        'course_number': (item['course_number'] as num?)?.toInt() ??
+            (oldLine['course_number'] as num?)?.toInt(),
+        'course_name': item['course_name']?.toString() ??
+            oldLine['course_name']?.toString(),
         'course_state': item['course_state']?.toString() ??
             oldLine['course_state']?.toString() ?? 'open',
-        'modifiers_snapshot_json': jsonEncode(
-          item['modifiers_snapshot'] as List<Object?>? ?? const <Object?>[],
-        ),
-        'allergy_instructions': item['allergy_instructions']?.toString(),
-        'kitchen_instructions': item['kitchen_instructions']?.toString(),
-        'status': item['status']!.toString(),
+        'modifiers_snapshot_json': modifiers,
+        'allergy_instructions': item['allergy_instructions']?.toString() ??
+            oldLine['allergy_instructions']?.toString(),
+        'kitchen_instructions': item['kitchen_instructions']?.toString() ??
+            oldLine['kitchen_instructions']?.toString(),
+        'status': lineStatus,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
