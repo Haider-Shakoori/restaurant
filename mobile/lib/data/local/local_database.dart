@@ -1004,6 +1004,21 @@ class LocalDatabase implements SyncStore {
     );
   }
 
+  /// Deliberately retain the rejected operation and its audit record.
+  /// Acknowledgement is a user decision, NOT a retry or an acceptance.
+  Future<void> acknowledgeConflict(String mutationId) async {
+    await _db.update(
+      'conflicts',
+      <String, Object?>{
+        'resolved_at': DateTime.now().toUtc().toIso8601String(),
+        'resolution': 'Manually acknowledged after review. '
+            'The rejected operation was NOT applied or replayed.',
+      },
+      where: 'mutation_id = ? AND resolved_at IS NULL',
+      whereArgs: <Object?>[mutationId],
+    );
+  }
+
   /// Only reconcile a duplicate kitchen submission once the desktop has
   /// confirmed it is already dispatched or the order is terminal.
   /// Rejected item additions and payments remain unresolved for review.
