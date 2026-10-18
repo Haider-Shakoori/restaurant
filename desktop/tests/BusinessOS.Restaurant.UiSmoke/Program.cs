@@ -76,8 +76,14 @@ internal static class Program
 
         var owner = OpenWindow("owner");
         application.MainWindow = owner;
+        // Loaded may fire again when WPF reattaches controls or changes themes.
+        // A second asynchronous smoke run could clear the first run's synthetic
+        // activation in its finally block while floor navigation is in flight.
+        var smokeStarted = 0;
         owner.Loaded += async (_, _) =>
         {
+            if (Interlocked.Exchange(ref smokeStarted, 1) != 0)
+                return;
             try
             {
                 await RunAsync(application, owner);
@@ -175,6 +181,15 @@ internal static class Program
             snapshot,
             now));
         _temporaryCiActivationCreated = true;
+
+        // Fail at fixture setup, not on a later page, if protected storage
+        // does not persist to the location the production service reads.
+        var restored = await new WindowsActivationStore().LoadAsync();
+        if (restored is null)
+            throw new InvalidOperationException(
+                "CI-only signed activation did not survive a storage round-trip.");
+        new SignedLeaseVerifier().Verify(restored.Lease, restored.PublicKey);
+        Console.WriteLine("PASS: Synthetic CI activation saved and reloaded using production DPAPI store.");
     }
 
     private static string EncodeTestBase64Url(byte[] bytes) =>
@@ -374,6 +389,12 @@ internal static class Program
             for (var index = 0; index < GalleryRoutes.Length; index++)
             {
                 var route = GalleryRoutes[index];
+                if (route == "tables")
+                {
+                    var ciActivation = await new WindowsActivationStore().LoadAsync();
+                    Assert(ciActivation is not null,
+                        "Synthetic CI activation still exists before Tables & Floor navigation");
+                }
                 await NavigateAsync(window, route);
                 if (route is "settings" or "kitchen" or "pos")
                     AssertWorkspaceGlassSurface(window, theme, route);
