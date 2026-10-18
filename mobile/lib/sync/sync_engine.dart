@@ -27,6 +27,8 @@ class SyncEngine {
   final ConnectionResolver? _connectionResolver;
 
   Future<void>? _activeSync;
+  DateTime? _lastLanBootstrap;
+  static const Duration _lanSnapshotRefreshInterval = Duration(minutes: 3);
 
   Future<void> bootstrap() async {
     var session = await _requireSession();
@@ -37,6 +39,9 @@ class SyncEngine {
       data,
       cursorScope: refreshed.activeChannel.name,
     );
+    if (refreshed.activeChannel == ConnectionChannel.local) {
+      _lastLanBootstrap = DateTime.now().toUtc();
+    }
   }
 
   /// Manual LAN refresh must wait for the periodic sync rather than silently
@@ -84,15 +89,25 @@ class SyncEngine {
         await _syncUsing(activeSession);
       }
 
-      if (forceBootstrap) {
-        // The incrementing cursor can be valid while a table status was
-        // cached incorrectly. Bootstrap replaces the LAN floor from the
-        // desktop without deleting outbox mutations or conflict history.
+      final now = DateTime.now().toUtc();
+      final refreshLocalSnapshot = activeSession.activeChannel ==
+              ConnectionChannel.local &&
+          (_lastLanBootstrap == null ||
+              now.difference(_lastLanBootstrap!) >=
+                  _lanSnapshotRefreshInterval);
+
+      if (forceBootstrap || refreshLocalSnapshot) {
+        // Reconcile from the desktop after any outage and periodically even
+        // when there are no new change events (e.g. server cursor reset).
+        // The local database retains pending offline mutations and conflicts.
         final data = await _api.syncBootstrap(activeSession);
         await _store.applyBootstrap(
           data,
           cursorScope: activeSession.activeChannel.name,
         );
+        if (activeSession.activeChannel == ConnectionChannel.local) {
+          _lastLanBootstrap = now;
+        }
       }
 
       await _store.setSystemState(
@@ -105,6 +120,7 @@ class SyncEngine {
         DateTime.now().toUtc().toIso8601String(),
       );
     } on ApiException catch (error) {
+      _lastLanBootstrap = null;
       await _store.setSystemState('last_sync_error', error.code);
       await _store.setSystemState('active_connection', 'offline');
 
