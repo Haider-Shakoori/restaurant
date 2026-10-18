@@ -43,7 +43,13 @@ class RestaurantLocalNotifications {
       await _plugin.initialize(
         settings: const InitializationSettings(
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-          iOS: DarwinInitializationSettings(),
+          iOS: DarwinInitializationSettings(
+            defaultPresentAlert: true,
+            defaultPresentSound: true,
+            defaultPresentBadge: true,
+            requestAlertPermission: true,
+            requestSoundPermission: true,
+          ),
         ),
         onDidReceiveNotificationResponse: _onNotificationResponse,
       );
@@ -96,7 +102,12 @@ class RestaurantLocalNotifications {
             playSound: true,
             ticker: 'Ready for pickup',
           ),
-          iOS: const DarwinNotificationDetails(presentSound: true),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBanner: true,
+            presentList: true,
+            presentSound: true,
+          ),
         ),
         payload: alerts.first.orderId,
       );
