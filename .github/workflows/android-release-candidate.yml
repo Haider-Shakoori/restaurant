@@ -1,0 +1,71 @@
+name: Restaurant Android Release Candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/waiter-stability-ui-sprint-01
+    paths:
+      - '.github/workflows/android-release-candidate.yml'
+      - 'mobile/**'
+
+permissions:
+  contents: read
+
+jobs:
+  android-tablet-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Android project
+        working-directory: mobile
+        run: |
+          flutter create --platforms=android --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          dart run tool/configure_android.dart
+          grep -F 'android:label="Restaurant"' android/app/src/main/AndroidManifest.xml
+          grep -F 'android:name=".RestaurantLanService"' android/app/src/main/AndroidManifest.xml
+      - name: Validate mobile sources
+        working-directory: mobile
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test tool
+          flutter analyze
+          flutter test
+      - name: Build Android release candidate
+        working-directory: mobile
+        run: |
+          flutter build apk --release
+          test -s build/app/outputs/flutter-apk/app-release.apk
+      - name: Validate APK metadata and prepare manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=mobile/build/app/outputs/flutter-apk/app-release.apk
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" > /tmp/restaurant-apk-badging.txt
+          grep -F "application-label:'Restaurant'" /tmp/restaurant-apk-badging.txt
+          grep -F "package: name='af.businessos.businessos_restaurant_waiter'" /tmp/restaurant-apk-badging.txt
+          mkdir -p release-candidate
+          cp "$APK" release-candidate/Restaurant-Android-Release-Candidate.apk
+          sha256sum release-candidate/Restaurant-Android-Release-Candidate.apk > release-candidate/SHA256SUMS.txt
+          cat > release-candidate/READ-ME.txt <<'EOF'
+          Restaurant Android tablet candidate.
+          Built and validated from the GitHub development branch.
+          Testing APK only: the generated Flutter Android template uses development
+          signing unless a stable production signing configuration is supplied.
+          Do not use this candidate as an app-store or commercial production
+          release. Production signing and testing on the client's real tablet
+          must occur before commercial deployment.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-Android-Tablet-Candidate
+          path: release-candidate/*
+          if-no-files-found: error
