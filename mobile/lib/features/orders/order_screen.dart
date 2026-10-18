@@ -1349,6 +1349,23 @@ class _OrderScreenState extends State<OrderScreen> {
                       style: const TextStyle(fontWeight: FontWeight.w800)),
                   Text('x${item['quantity']} · ${formatMoney(item['line_total'])}',
                       style: const TextStyle(color: RestaurantColors.textSecondary)),
+                  const SizedBox(height: 3),
+                  Text(
+                    (item['dispatched_quantity'] as num? ?? 0).toInt() >=
+                            ((item['quantity'] as num?)?.toInt() ?? 1)
+                        ? item['status'] == 'ready'
+                            ? 'READY FOR PICKUP'
+                            : 'Sent to Kitchen'
+                        : 'Not sent to Kitchen',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: (item['dispatched_quantity'] as num? ?? 0).toInt() >=
+                              ((item['quantity'] as num?)?.toInt() ?? 1)
+                          ? RestaurantColors.success
+                          : RestaurantColors.brandHover,
+                    ),
+                  ),
                   if (allergy != null && allergy.isNotEmpty)
                     Text('ALLERGY: $allergy',
                         style: const TextStyle(
