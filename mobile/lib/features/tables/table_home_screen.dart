@@ -394,6 +394,18 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
   }
 
+  Future<void> _testReadySound() async {
+    final result = await widget.dependencies.localNotifications.testReadySound();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result
+            ? 'Test notification sent. Check the iPhone sound and notification settings.'
+            : 'Notifications unavailable. Enable Restaurant alerts and sounds in iPhone Settings.'),
+      ),
+    );
+  }
+
   Future<void> _logout() async {
     await widget.dependencies.pushNotifications.signOut();
     unawaited(widget.dependencies.lanPush.stop());
@@ -437,9 +449,19 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
             onSelected: (value) {
               if (value == 'logout') {
                 _logout();
+              } else if (value == 'test_ready_sound') {
+                unawaited(_testReadySound());
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'test_ready_sound',
+                child: ListTile(
+                  leading: Icon(Icons.notifications_active_outlined),
+                  title: Text('Test kitchen-ready sound'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
               PopupMenuItem(
                 value: 'logout',
                 child: Text('Sign out'),
