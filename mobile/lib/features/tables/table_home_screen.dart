@@ -6,6 +6,7 @@ import '../../app/app_strings.dart';
 import '../../app/app_theme.dart';
 import '../../app/dependencies.dart';
 import '../../core/connection/connection_mode.dart';
+import '../../core/api/api_exception.dart';
 import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
@@ -157,6 +158,79 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
         setState(() => _syncing = false);
         await _refresh();
       }
+    }
+  }
+
+  Future<void> _connectToDesktop() async {
+    final controller = TextEditingController(
+      text: _session?.localBaseUrl ?? '',
+    );
+    final localUrl = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Connect to Restaurant Desktop'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your current Cloud view can differ from the desktop. '
+              'Switch to the desktop LAN to see its current tables and KOTs. '
+              'Your saved orders and conflicts will not be deleted.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Desktop LAN URL',
+                hintText: 'http://192.168.1.11:8787',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Connect via LAN'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (localUrl == null || localUrl.isEmpty) return;
+
+    if (!mounted) return;
+    setState(() => _syncing = true);
+    try {
+      await widget.dependencies.session.connectToDesktop(localUrl);
+      await widget.dependencies.syncCoordinator.syncNow();
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Connected to Restaurant Desktop LAN. Tables refreshed.')),
+        );
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Desktop LAN connection failed: ${error.message}')),
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Desktop LAN connection failed: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
@@ -418,6 +492,20 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                   ),
               ],
             ),
+            if (session != null &&
+                session.activeChannel == ConnectionChannel.cloud) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _syncing ? null : _connectToDesktop,
+                icon: const Icon(Icons.lan_outlined),
+                label: const Text('Connect to Desktop LAN'),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Cloud may show tables that differ from your local Restaurant Desktop.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
             if (_readyAlerts.isNotEmpty) ...[
               const SizedBox(height: 14),
               Card(
