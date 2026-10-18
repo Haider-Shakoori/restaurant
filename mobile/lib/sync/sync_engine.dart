@@ -26,7 +26,7 @@ class SyncEngine {
   final LeaseValidator _leaseVerifier;
   final ConnectionResolver? _connectionResolver;
 
-  bool _running = false;
+  Future<void>? _activeSync;
 
   Future<void> bootstrap() async {
     var session = await _requireSession();
@@ -39,18 +39,36 @@ class SyncEngine {
     );
   }
 
-  Future<void> syncNow() async {
-    if (_running) {
-      return;
+  /// Manual LAN refresh must wait for the periodic sync rather than silently
+  /// skipping it, then fetch a full authoritative snapshot. Background sync
+  /// remains incremental to minimize traffic.
+  Future<void> syncNow({bool forceBootstrap = false}) async {
+    final previous = _activeSync;
+    if (previous != null) {
+      try {
+        await previous;
+      } on Object {
+        // Manual retry still runs after a previous background failure.
+      }
+      if (!forceBootstrap) return;
     }
 
-    _running = true;
+    final operation = _syncOnce(forceBootstrap: forceBootstrap);
+    _activeSync = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_activeSync, operation)) _activeSync = null;
+    }
+  }
 
+  Future<void> _syncOnce({required bool forceBootstrap}) async {
     try {
       var session = await _requireSession();
       session = await _resolveActiveChannel(session);
       session = await _refreshLeaseIfNeeded(session);
 
+      var activeSession = session;
       try {
         await _syncUsing(session);
       } on ApiException catch (error) {
@@ -62,10 +80,25 @@ class SyncEngine {
           rethrow;
         }
 
-        final fallback = await _switchToCloud(session);
-        await _syncUsing(fallback);
+        activeSession = await _switchToCloud(session);
+        await _syncUsing(activeSession);
       }
 
+      if (forceBootstrap) {
+        // The incrementing cursor can be valid while a table status was
+        // cached incorrectly. Bootstrap replaces the LAN floor from the
+        // desktop without deleting outbox mutations or conflict history.
+        final data = await _api.syncBootstrap(activeSession);
+        await _store.applyBootstrap(
+          data,
+          cursorScope: activeSession.activeChannel.name,
+        );
+      }
+
+      await _store.setSystemState(
+        'active_connection',
+        activeSession.activeChannel.name,
+      );
       await _store.setSystemState('last_sync_error', '');
       await _store.setSystemState(
         'last_sync_at',
@@ -73,14 +106,12 @@ class SyncEngine {
       );
     } on ApiException catch (error) {
       await _store.setSystemState('last_sync_error', error.code);
+      await _store.setSystemState('active_connection', 'offline');
 
       if (error.code == 'subscription_locked') {
         await _store.setSystemState('server_locked', '1');
       }
-
       rethrow;
-    } finally {
-      _running = false;
     }
   }
 
