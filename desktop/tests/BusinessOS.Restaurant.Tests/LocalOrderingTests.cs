@@ -96,6 +96,78 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Waiter_table_transfer_updates_LAN_floor_and_replay_is_idempotent()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            await using (var db = factory.Create())
+            {
+                db.DiningTables.Add(new LocalDiningTable
+                {
+                    Id = "table-2", DiningAreaId = "area-1", Code = "T-02",
+                    Name = "Table 2", Capacity = 4,
+                    Status = "available", IsActive = true,
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var sync = new LocalSyncService(factory, new OperationalSnapshotStore(factory));
+            var waiter = new LocalTerminalPrincipal(
+                "device-a", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+            var other = new LocalTerminalPrincipal(
+                "device-b", 2, "waiter-2", "Waiter Two", "waiter", "tenant-1");
+
+            var opened = await PushOneAsync(
+                sync, waiter, "OPEN-1", "order.open",
+                new { client_order_id = "TRANSFER-1", dining_table_id = "table-1" });
+            Assert.Equal("accepted", opened.GetProperty("status").GetString());
+
+            var notOwner = await PushOneAsync(
+                sync, other, "ILLEGAL-TRANSFER", "order.table.transfer",
+                new { client_order_id = "TRANSFER-1", target_table_id = "table-2" });
+            Assert.Equal("conflict", notOwner.GetProperty("status").GetString());
+
+            var transferred = await PushOneAsync(
+                sync, waiter, "TRANSFER-1", "order.table.transfer",
+                new { client_order_id = "TRANSFER-1", target_table_id = "table-2" });
+            Assert.Equal("accepted", transferred.GetProperty("status").GetString());
+            Assert.Equal("table-2", transferred.GetProperty("data")
+                .GetProperty("table").GetProperty("id").GetString());
+
+            var replay = await PushOneAsync(
+                sync, waiter, "TRANSFER-1", "order.table.transfer",
+                new { client_order_id = "TRANSFER-1", target_table_id = "table-2" });
+            Assert.Equal("accepted", replay.GetProperty("status").GetString());
+
+            var invalid = await PushOneAsync(
+                sync, waiter, "BUSY-TRANSFER", "order.table.transfer",
+                new { client_order_id = "TRANSFER-1", target_table_id = "table-1" });
+            // After the transfer table-1 is available, so transferring back
+            // is valid. Instead assert no-op transfers are rejected.
+            Assert.Equal("accepted", invalid.GetProperty("status").GetString());
+
+            var same = await PushOneAsync(
+                sync, waiter, "SAME-TABLE", "order.table.transfer",
+                new { client_order_id = "TRANSFER-1", target_table_id = "table-1" });
+            Assert.Equal("conflict", same.GetProperty("status").GetString());
+
+            await using var verify = factory.Create();
+            Assert.Equal("table-1", (await verify.Orders.SingleAsync()).DiningTableId);
+            Assert.Equal("occupied", (await verify.DiningTables.SingleAsync(x => x.Id == "table-1")).Status);
+            Assert.Equal("available", (await verify.DiningTables.SingleAsync(x => x.Id == "table-2")).Status);
+            Assert.Equal(2, await verify.Mutations.CountAsync(x =>
+                x.MutationId == "TRANSFER-1" || x.MutationId == "BUSY-TRANSFER"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
     {
         var root = CreateTemporaryDirectory();
