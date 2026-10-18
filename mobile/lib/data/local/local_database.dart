@@ -861,11 +861,15 @@ class LocalDatabase implements SyncStore {
         throw StateError('Choose a different target order.');
       }
       final sourceOrder = await _requireActiveOrderTxn(
-        txn, sourceLocalOrderId,
+        txn, sourceLocalOrderId, requireDineIn: true,
       );
       final targetOrder = await _requireActiveOrderTxn(
-        txn, targetLocalOrderId,
+        txn, targetLocalOrderId, requireDineIn: true,
       );
+      if (sourceOrder['status']?.toString() == 'served' ||
+          targetOrder['status']?.toString() == 'served') {
+        throw StateError('Served orders cannot move items.');
+      }
       if (sourceOrder['branch_id']?.toString() !=
           targetOrder['branch_id']?.toString()) {
         throw StateError('Items cannot be moved between branches.');
