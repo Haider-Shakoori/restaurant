@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Storage;
 
 #[Fillable([
     'menu_category_id',
@@ -59,7 +60,7 @@ class MenuItem extends Model
         $signature = (string) $this->image_path;
 
         try {
-            $disk = \Illuminate\Support\Facades\Storage::disk('public');
+            $disk = Storage::disk('public');
             if ($disk->exists($this->image_path)) {
                 $signature .= '|'.$disk->lastModified($this->image_path).'|'.$disk->size($this->image_path);
             }
