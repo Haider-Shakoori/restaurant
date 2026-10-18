@@ -13,6 +13,7 @@ import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
 import '../orders/order_screen.dart';
 import 'ready_pickup_alerts.dart';
+import 'floor_board.dart';
 
 class TableHomeScreen extends StatefulWidget {
   const TableHomeScreen({
@@ -139,6 +140,16 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
         ),
       );
     }
+    } on Object catch (error) {
+      // A transient corrupt/locked SQLite snapshot should never crash
+      // periodic UI refresh. Do not claim cached table states are live.
+      if (mounted) {
+        setState(() {
+          _syncError = 'local_cache_error';
+          _connectionStatus = 'sync_error';
+        });
+      }
+      debugPrint('Restaurant floor refresh error: $error');
     } finally {
       _refreshInProgress = false;
     }
@@ -275,6 +286,17 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     }
 
     if (table['status'] != 'available') {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'This table is not available or belongs to another waiter. '
+              'Refresh the floor before creating a new order.',
+            ),
+            action: SnackBarAction(label: 'Refresh', onPressed: _sync),
+          ),
+        );
+      }
       return;
     }
 
@@ -484,7 +506,8 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                     avatar: Icon(
                       _syncing
                           ? Icons.sync
-                          : _connectionStatus == 'offline'
+                          : _connectionStatus == 'offline' ||
+                                _connectionStatus == 'sync_error'
                               ? Icons.cloud_off_outlined
                               : session.activeChannel == ConnectionChannel.local
                                   ? Icons.lan_outlined
@@ -494,8 +517,9 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                     label: Text(
                       _syncing
                           ? 'Syncing'
-                          : _connectionStatus == 'offline'
-                              ? 'Offline · queued locally'
+                          : _connectionStatus == 'offline' ||
+                                _connectionStatus == 'sync_error'
+                              ? 'Needs sync · cached floor'
                               : (session.connectionMode == ConnectionMode.automatic
                                       ? s.automatic + ' · '
                                       : '') +
@@ -541,6 +565,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                 label: const Text('Reconnect and refresh desktop tables'),
               ),
               if (_connectionStatus == 'offline' ||
+                  _connectionStatus == 'sync_error' ||
                   (_syncError?.isNotEmpty ?? false)) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -656,63 +681,15 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              itemCount: _tables.length,
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                childAspectRatio: 1.45,
-                crossAxisSpacing: 12,
-                mainAxisSpacing: 12,
-              ),
-              itemBuilder: (context, index) {
-                final table = _tables[index];
-                final status = table['status']?.toString() ?? 'unknown';
-                final occupied = status == 'occupied';
-
-                return Card(
-                  clipBehavior: Clip.antiAlias,
-                  child: InkWell(
-                    onTap: () => _openTable(table),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                occupied
-                                    ? Icons.table_restaurant
-                                    : Icons.event_seat_outlined,
-                              ),
-                              const Spacer(),
-                              Text(
-                                (_connectionStatus == 'offline' ||
-                                        (_syncError?.isNotEmpty ?? false))
-                                    ? 'Cached ${formatTableStatus(status)}'
-                                    : formatTableStatus(status),
-                                style: Theme.of(context).textTheme.labelMedium,
-                              ),
-                            ],
-                          ),
-                          Text(
-                            table['name']?.toString() ??
-                                table['code']!.toString(),
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          Text(
-                            table['area_name']?.toString() ?? '',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                );
-              },
+            FloorBoard(
+              key: const Key('waiter-floor-board'),
+              tables: _tables,
+              orders: _orders,
+              readyAlerts: _readyAlerts,
+              offline: _connectionStatus == 'offline' ||
+                  _connectionStatus == 'sync_error' ||
+                  (_syncError?.isNotEmpty ?? false),
+              onTableTap: (table) => unawaited(_openTable(table)),
             ),
           ],
         ),
