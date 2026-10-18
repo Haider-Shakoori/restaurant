@@ -24,9 +24,18 @@ jobs:
           flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
           rm -f test/widget_test.dart
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Restaurant" ios/Runner/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Restaurant" ios/Runner/Info.plist
+      - name: Configure iOS local network and camera permissions
+        working-directory: mobile
+        run: dart run tool/configure_ios.dart
       - name: Resolve dependencies
         working-directory: mobile
         run: flutter pub get
+      - name: Validate Flutter app
+        working-directory: mobile
+        run: |
+          dart format --output=none --set-exit-if-changed lib test tool
+          flutter analyze
+          flutter test
       - name: Build unsigned device application
         working-directory: mobile
         run: flutter build ios --release --no-codesign
@@ -52,6 +61,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - name: Run desktop ordering, authentication and LAN regression tests
+        shell: pwsh
+        run: |
+          dotnet test desktop/BusinessOS.Restaurant.Desktop.slnx --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw "Desktop regression tests failed" }
       - name: Publish Windows desktop
         shell: pwsh
         run: |
