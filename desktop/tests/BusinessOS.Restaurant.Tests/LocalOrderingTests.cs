@@ -363,8 +363,9 @@ public sealed class LocalOrderingTests
                 ticketA = (await db.KitchenTickets.SingleAsync(t => t.OrderId == orderA.Id)).Id;
             }
 
-            await new LocalKitchenService(factory).ReadyAsync(
-                ticketA, manager, CancellationToken.None);
+            var kitchen = new LocalKitchenService(factory);
+            await kitchen.StartAsync(ticketA, manager, CancellationToken.None);
+            await kitchen.ReadyAsync(ticketA, manager, CancellationToken.None);
 
             Assert.True(await sync.HasVisibleChangesAsync(
                 waiterA, bCursor, CancellationToken.None));
