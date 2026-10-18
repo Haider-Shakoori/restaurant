@@ -455,6 +455,24 @@ class LocalDatabase implements SyncStore {
     Map<String, Object?> result,
   ) async {
     await _db.transaction((txn) async {
+      // A successful LAN request can still be rejected when another terminal
+      // already cancelled/closed this order. Reconcile the authoritative
+      // terminal status, preserving the rejected mutation in Conflicts.
+      final clientOrderId = result['client_order_id']?.toString();
+      final serverStatus = result['server_order_status']?.toString();
+      if (result['code'] == 'order_state_conflict' &&
+          clientOrderId == mutation.payload['client_order_id'] &&
+          const <String>{'closed', 'cancelled', 'billed'}.contains(serverStatus)) {
+        await txn.update(
+          'orders',
+          <String, Object?>{
+            'status': serverStatus,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          },
+          where: 'local_order_id = ?',
+          whereArgs: <Object?>[clientOrderId],
+        );
+      }
       await txn.update(
         'outbox',
         <String, Object?>{
@@ -1083,6 +1101,23 @@ class LocalDatabase implements SyncStore {
     required String mutationId,
   }) async {
     await _db.transaction((txn) async {
+      final orderRows = await txn.query(
+        'orders',
+        columns: <String>['status'],
+        where: 'local_order_id = ?',
+        whereArgs: <Object?>[localOrderId],
+        limit: 1,
+      );
+      final status = orderRows.isEmpty ? null : orderRows.first['status']?.toString();
+      if (status == null ||
+          !const <String>{
+            'draft', 'submitted', 'submitted_pending_sync',
+            'preparing', 'ready', 'served',
+          }.contains(status)) {
+        throw StateError(
+          'This order is closed or cancelled. Start a new order before sending to Kitchen.',
+        );
+      }
       final unsentCount =
           Sqflite.firstIntValue(
             await txn.rawQuery(
