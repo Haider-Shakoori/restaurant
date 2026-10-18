@@ -302,6 +302,8 @@ public sealed class LocalSyncService
                 "order.item.void" => await VoidOrderItemAsync(db, principal, mutation, cancellationToken),
                 "order.cancel" => await CancelOrderAsync(db, principal, mutation, cancellationToken),
                 "order.table.transfer" => await TransferTableAsync(db, principal, mutation, cancellationToken),
+                "order.item.move" => await MoveUnsentItemAsync(db, principal, mutation, cancellationToken),
+                "order.merge" => await MergeUnsentOrdersAsync(db, principal, mutation, cancellationToken),
                 _ => throw new LocalSyncConflictException(
                     "unsupported_operation",
                     "Unsupported offline operation."),
@@ -1198,6 +1200,237 @@ public sealed class LocalSyncService
             new { order_id = order.Id, from_table_id = sourceId, to_table_id = target.Id });
 
         return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
+    }
+
+    /// Moves only the unsubmitted quantity of one item into another active
+    /// dine-in order. Prepared/served items retain their original kitchen
+    /// lineage. The mutation envelope guarantees replay idempotency.
+    private async Task<Dictionary<string, object?>> MoveUnsentItemAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+        var sourceId = RequiredString(mutation.Payload, "source_client_order_id", 40);
+        var targetId = RequiredString(mutation.Payload, "target_client_order_id", 40);
+        var lineId = RequiredString(mutation.Payload, "client_line_id", 40);
+        var newLineId = RequiredString(mutation.Payload, "target_client_line_id", 40);
+        var quantity = RequiredInt(mutation.Payload, "quantity");
+
+        if (sourceId == targetId || lineId == newLineId || quantity is < 1 or > 999)
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload", "Invalid source, target or quantity for item move.");
+        }
+        var source = await db.Orders.SingleOrDefaultAsync(
+            value => value.ClientOrderId == sourceId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Source order does not exist.");
+        var target = await db.Orders.SingleOrDefaultAsync(
+            value => value.ClientOrderId == targetId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Target order does not exist.");
+        AuthorizeOrder(principal, source);
+        AuthorizeOrder(principal, target);
+
+        if (source.BranchId != target.BranchId ||
+            source.ServiceType != "dine_in" || target.ServiceType != "dine_in" ||
+            string.IsNullOrWhiteSpace(source.DiningTableId) ||
+            string.IsNullOrWhiteSpace(target.DiningTableId) ||
+            source.Status is "served" or "billed" or "closed" or "cancelled" ||
+            target.Status is "served" or "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Items may move only between active dine-in orders in the same branch.");
+        }
+        if (await db.Bills.AnyAsync(
+                value => value.OrderId == source.Id || value.OrderId == target.Id,
+                cancellationToken))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Billed orders cannot move items.");
+        }
+
+        var item = await db.OrderItems.SingleOrDefaultAsync(
+            value => value.OrderId == source.Id && value.ClientLineId == lineId,
+            cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Source item does not exist.");
+        if (!string.IsNullOrWhiteSpace(item.KotRoundId) ||
+            item.Status is not ("pending" or "held") ||
+            quantity > item.Quantity)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Only unsent pending or held quantities can be moved.");
+        }
+        if (await db.OrderItems.AnyAsync(
+            value => value.OrderId == target.Id && value.ClientLineId == newLineId,
+            cancellationToken))
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload", "The target line identifier already exists.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var moved = new LocalOrderItem
+        {
+            Id = Guid.CreateVersion7().ToString("N"),
+            OrderId = target.Id,
+            MenuItemId = item.MenuItemId,
+            ClientLineId = newLineId,
+            ItemName = item.ItemName,
+            UnitPrice = item.UnitPrice,
+            Quantity = quantity,
+            LineTotal = item.UnitPrice * quantity,
+            Notes = item.Notes,
+            Status = item.Status,
+            SeatNumber = item.SeatNumber,
+            CourseNumber = item.CourseNumber,
+            CourseName = item.CourseName,
+            Priority = item.Priority,
+            ModifiersJson = item.ModifiersJson,
+            AllergyInstructions = item.AllergyInstructions,
+            KitchenInstructions = item.KitchenInstructions,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+        };
+        db.OrderItems.Add(moved);
+        if (quantity == item.Quantity)
+        {
+            db.OrderItems.Remove(item);
+        }
+        else
+        {
+            item.Quantity -= quantity;
+            item.LineTotal = item.UnitPrice * item.Quantity;
+            item.UpdatedAtUtc = now;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        source.Subtotal = await db.OrderItems
+            .Where(value => value.OrderId == source.Id && value.Status != "voided" && value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken);
+        source.Total = source.Subtotal;
+        target.Subtotal = await db.OrderItems
+            .Where(value => value.OrderId == target.Id && value.Status != "voided" && value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken);
+        target.Total = target.Subtotal;
+        source.UpdatedAtUtc = now;
+        target.UpdatedAtUtc = now;
+        if (target.Status == "ready") target.Status = "submitted";
+        await db.SaveChangesAsync(cancellationToken);
+
+        var sourceSnapshot = await OrderSnapshotAsync(db, source, cancellationToken);
+        var targetSnapshot = await OrderSnapshotAsync(db, target, cancellationToken);
+        AddChange(db, "order", source.Id, source.WaiterId, sourceSnapshot);
+        AddChange(db, "order", target.Id, target.WaiterId, targetSnapshot);
+        LocalOperationsControlService.AddAudit(
+            db, principal, "order", "order.items_moved", target.BranchId,
+            "order", target.Id, new {
+                source_order_id = source.Id, target_order_id = target.Id,
+                original_client_line_id = lineId, new_client_line_id = newLineId, quantity,
+            });
+
+        return Accepted(mutation, "order", target.Id, target.ClientOrderId, targetSnapshot);
+    }
+
+    private async Task<Dictionary<string, object?>> MergeUnsentOrdersAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+        var sourceId = RequiredString(mutation.Payload, "source_client_order_id", 40);
+        var targetId = RequiredString(mutation.Payload, "target_client_order_id", 40);
+        if (sourceId == targetId)
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload", "An order cannot be merged into itself.");
+        }
+        var source = await db.Orders.SingleOrDefaultAsync(
+            value => value.ClientOrderId == sourceId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Source order does not exist.");
+        var target = await db.Orders.SingleOrDefaultAsync(
+            value => value.ClientOrderId == targetId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Target order does not exist.");
+        AuthorizeOrder(principal, source);
+        AuthorizeOrder(principal, target);
+
+        if (source.BranchId != target.BranchId ||
+            source.ServiceType != "dine_in" || target.ServiceType != "dine_in" ||
+            string.IsNullOrWhiteSpace(source.DiningTableId) ||
+            string.IsNullOrWhiteSpace(target.DiningTableId) ||
+            source.Status is "served" or "billed" or "closed" or "cancelled" ||
+            target.Status is "served" or "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Only active dine-in orders within one branch may be merged.");
+        }
+        if (await db.KitchenTickets.AnyAsync(
+                value => value.OrderId == source.Id, cancellationToken) ||
+            await db.KotRounds.AnyAsync(
+                value => value.OrderId == source.Id, cancellationToken) ||
+            await db.Bills.AnyAsync(
+                value => value.OrderId == source.Id || value.OrderId == target.Id, cancellationToken))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Orders with source KOT history or issued bills cannot be merged.");
+        }
+        var lines = await db.OrderItems
+            .Where(value => value.OrderId == source.Id).ToArrayAsync(cancellationToken);
+        if (lines.Any(value => !string.IsNullOrWhiteSpace(value.KotRoundId) ||
+                    value.Status is not ("pending" or "held")))
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Only unsent source items may be merged.");
+        }
+        foreach (var line in lines)
+        {
+            line.OrderId = target.Id;
+            line.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        var sourceTable = await db.DiningTables.SingleOrDefaultAsync(
+            value => value.Id == source.DiningTableId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Source table does not exist.");
+        var now = DateTimeOffset.UtcNow;
+        source.Status = "cancelled";
+        source.Subtotal = 0m;
+        source.Total = 0m;
+        source.ClosedAt = now;
+        source.UpdatedAtUtc = now;
+        if (target.Status == "ready") target.Status = "submitted";
+        target.UpdatedAtUtc = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        target.Subtotal = await db.OrderItems
+            .Where(value => value.OrderId == target.Id && value.Status != "voided" && value.Status != "cancelled")
+            .SumAsync(value => value.LineTotal, cancellationToken);
+        target.Total = target.Subtotal;
+        sourceTable.Status = await db.Orders.AnyAsync(
+            value => value.DiningTableId == sourceTable.Id &&
+                     value.Id != source.Id &&
+                     ActiveStatuses.Contains(value.Status), cancellationToken)
+                ? "occupied" : "available";
+        await db.SaveChangesAsync(cancellationToken);
+
+        var sourceSnapshot = await OrderSnapshotAsync(db, source, cancellationToken);
+        var targetSnapshot = await OrderSnapshotAsync(db, target, cancellationToken);
+        AddChange(db, "order", source.Id, source.WaiterId, sourceSnapshot);
+        AddChange(db, "order", target.Id, target.WaiterId, targetSnapshot);
+        AddChange(db, "dining_table", sourceTable.Id, null, TableSnapshot(db, sourceTable));
+        LocalOperationsControlService.AddAudit(
+            db, principal, "order", "order.merged", target.BranchId,
+            "order", target.Id, new {
+                source_order_id = source.Id, target_order_id = target.Id,
+                source_item_count = lines.Length,
+            });
+
+        return Accepted(mutation, "order", target.Id, target.ClientOrderId, targetSnapshot);
     }
 
     private static Dictionary<string, object?> Accepted(
