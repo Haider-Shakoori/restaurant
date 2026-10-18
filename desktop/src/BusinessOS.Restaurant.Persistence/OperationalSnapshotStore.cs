@@ -307,7 +307,12 @@ public sealed class OperationalSnapshotStore
                          order.ServiceType == "dine_in" &&
                          order.Status != "closed" && order.Status != "cancelled",
                 cancellationToken);
-            tableEntity.Status = hasLocalActiveOrder ? "occupied" : table.Status;
+            // Never overwrite the operational floor with a stale cloud
+            // 'occupied' value when no active local dine-in order exists.
+            // Preserve explicit non-occupancy states such as reserved/disabled.
+            tableEntity.Status = table.Status is "occupied" or "available"
+                ? hasLocalActiveOrder ? "occupied" : "available"
+                : table.Status;
             tableEntity.IsActive = table.IsActive;
         }
 
