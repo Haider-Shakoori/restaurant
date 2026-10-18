@@ -10,6 +10,66 @@ import 'package:businessos_restaurant_waiter/sync/sync_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('manual LAN sync reboots full table snapshot and clears offline', () async {
+    final store = _MemorySyncStore(
+      pending: <OutboxMutation>[],
+      cursors: <String, int>{'local': 17},
+    );
+    store.states['active_connection'] = 'offline';
+    store.states['last_sync_error'] = 'offline';
+    final api = _FakeApi(
+      pullResponses: const <Map<String, Object?>>[
+        <String, Object?>{
+          'cursor': 17, 'has_more': false, 'changes': <Object?>[],
+        },
+      ],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session(
+        connectionMode: ConnectionMode.local,
+        activeChannel: ConnectionChannel.local,
+        baseUrl: 'http://192.168.1.11:8787',
+      )),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+    await engine.syncNow(forceBootstrap: true);
+    expect(api.heartbeatCount, 1);
+    expect(api.bootstrapCalls, 1);
+    expect(store.cursors['local'], 22);
+    expect(store.states['active_connection'], 'local');
+    expect(store.states['last_sync_error'], '');
+  });
+
+  test('failed LAN sync is visibly offline and preserves cached state', () async {
+    final store = _MemorySyncStore(
+      pending: <OutboxMutation>[],
+      cursors: <String, int>{'local': 15},
+    );
+    final api = _FakeApi(
+      heartbeatError: const ApiException(
+        code: 'offline', message: 'Desktop unreachable',
+      ),
+      pullResponses: const <Map<String, Object?>>[],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session(
+        connectionMode: ConnectionMode.local,
+        activeChannel: ConnectionChannel.local,
+        baseUrl: 'http://192.168.1.11:8787',
+      )),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+    await expectLater(engine.syncNow(forceBootstrap: true), throwsA(isA<ApiException>()));
+    expect(store.states['active_connection'], 'offline');
+    expect(store.states['last_sync_error'], 'offline');
+    expect(store.cursors['local'], 15);
+    expect(api.bootstrapCalls, 0);
+  });
+
   test('accepted mutations are applied and pull cursor resumes', () async {
     final store = _MemorySyncStore(
       pending: <OutboxMutation>[
@@ -762,6 +822,7 @@ class _FakeApi implements SyncApi {
   final ApiException? refreshError;
   final ApiException? heartbeatError;
   final List<Map<String, Object?>> _pullResponses;
+  int bootstrapCalls = 0;
   final List<int> pullCursors = <int>[];
   final List<String> pullBaseUrls = <String>[];
   final List<Duration?> pullWaits = <Duration?>[];
@@ -824,7 +885,8 @@ class _FakeApi implements SyncApi {
   Future<Map<String, Object?>> syncBootstrap(
     SessionCredentials credentials,
   ) async {
-    return const <String, Object?>{'cursor': 0};
+    bootstrapCalls++;
+    return const <String, Object?>{'cursor': 22};
   }
 }
 
