@@ -1,0 +1,109 @@
+name: Unsigned Restaurant Packages
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/unsigned-packages.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios-unsigned:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate iOS scaffold
+        working-directory: mobile
+        run: |
+          flutter create --platforms=ios --org af.businessos --project-name businessos_restaurant_waiter --no-pub .
+          rm -f test/widget_test.dart
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Restaurant" ios/Runner/Info.plist || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Restaurant" ios/Runner/Info.plist
+      - name: Resolve dependencies
+        working-directory: mobile
+        run: flutter pub get
+      - name: Build unsigned device application
+        working-directory: mobile
+        run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        working-directory: mobile
+        run: |
+          test -d build/ios/iphoneos/Runner.app
+          mkdir -p output/Payload
+          cp -R build/ios/iphoneos/Runner.app output/Payload/Restaurant.app
+          cd output
+          zip -q -r Restaurant.ipa Payload
+          test -s Restaurant.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-unsigned-ipa
+          path: mobile/output/Restaurant.ipa
+          if-no-files-found: error
+
+  windows-unsigned:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Publish Windows desktop
+        shell: pwsh
+        run: |
+          $projects = @(Get-ChildItem desktop -Filter *.csproj -Recurse | Where-Object { (Get-Content $_.FullName -Raw) -match 'UseWPF' })
+          if ($projects.Count -ne 1) { throw "Expected one WPF desktop project; found $($projects.Count)." }
+          dotnet publish $projects[0].FullName -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o "$env:GITHUB_WORKSPACE\\publish"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
+          if (-not (Get-ChildItem publish -Filter *.exe)) { throw "Published executable missing" }
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Create unsigned Windows installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem publish -Filter *.exe | Where-Object { $_.Name -notmatch 'test' } | Select-Object -First 1
+          if (-not $exe) { throw "Desktop executable missing" }
+          $script = @'
+          #define AppName "Restaurant"
+          #define AppVersion "1.0.0"
+          [Setup]
+          AppId={{A9DA1BEA-1A73-4CAD-A952-0EA6BF4B8902}
+          AppName={#AppName}
+          AppVersion={#AppVersion}
+          DefaultDirName={autopf}\\Restaurant
+          DefaultGroupName=Restaurant
+          OutputDir=installer
+          OutputBaseFilename=Restaurant-Setup
+          Compression=lzma
+          SolidCompression=yes
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          PrivilegesRequired=admin
+          CloseApplications=yes
+          RestartApplications=no
+          UninstallDisplayIcon={app}\\APP_EXECUTABLE
+          [Files]
+          Source: "publish\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          [Icons]
+          Name: "{autoprograms}\\Restaurant"; Filename: "{app}\\APP_EXECUTABLE"
+          Name: "{autodesktop}\\Restaurant"; Filename: "{app}\\APP_EXECUTABLE"; Tasks: desktopicon
+          [Tasks]
+          Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
+          [Run]
+          Filename: "{app}\\APP_EXECUTABLE"; Description: "Launch Restaurant"; Flags: nowait postinstall skipifsilent
+          '@
+          $script = $script.Replace('APP_EXECUTABLE', $exe.Name)
+          Set-Content -Path restaurant-installer.iss -Value $script -Encoding UTF8
+          & "${env:ProgramFiles(x86)}\\Inno Setup 6\\ISCC.exe" restaurant-installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed" }
+          if (-not (Test-Path installer/Restaurant-Setup.exe)) { throw "Installer missing" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Restaurant-unsigned-windows-installer
+          path: installer/Restaurant-Setup.exe
+          if-no-files-found: error
