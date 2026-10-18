@@ -1143,19 +1143,12 @@ internal static class RestaurantOperationalPages
         };
         var editInventory = new Button
         {
-            Content = "Edit Ingredients",
+            Content = "Edit Ingredients (Online)",
             Height = 38,
             Margin = new Thickness(0, 6, 0, 8),
-            ToolTip = "Edit ingredient details and purchase units. Opens the local catalog in standalone mode.",
+            ToolTip = "Edit ingredient details and purchase units in the online catalog. For offline stock changes use Adjust Stock.",
         };
-        editInventory.Click += async (_, _) =>
-        {
-            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
-            if (BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
-                await OpenStandaloneCatalogAsync();
-            else
-                await OpenCloudManagementAsync("inventory_items");
-        };
+        editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
         create.HorizontalAlignment = HorizontalAlignment.Left;
         editInventory.HorizontalAlignment = HorizontalAlignment.Left;
         create.MinWidth = 0;
