@@ -446,7 +446,10 @@ void main() {
     await engine.syncNow();
 
     expect(api.pullCursors, <int>[3]);
-    expect(store.cursors['local'], 4);
+    // The authenticated LAN snapshot becomes authoritative after the
+    // incremental pull; its cursor supersedes the prior cached local value.
+    expect(api.bootstrapCalls, 1);
+    expect(store.cursors['local'], 22);
     expect(store.cursors['cloud'], 57);
   });
 
