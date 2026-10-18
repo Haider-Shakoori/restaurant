@@ -65,9 +65,17 @@ class _OrderScreenState extends State<OrderScreen> {
       _connectionStatus == 'sync_error' ||
       (_syncError?.isNotEmpty ?? false);
   bool get _isQueued => _offlineQueued > 0;
+  bool get _hasConfirmedSync =>
+      _connectionStatus == 'local' || _connectionStatus == 'cloud';
   String get _connectionLabel => _connectionProblem
       ? 'Offline'
-      : _isQueued ? 'Queued' : 'Synced';
+      : _isQueued ? 'Queued'
+          : _hasConfirmedSync ? 'Synced' : 'Not synced';
+  int get _activeKotCount => _kotRounds.where(
+      (round) => !kotRoundProgress(
+        round, orderStatus: _order?['status']?.toString(),
+      ).isHistory,
+    ).length;
   Timer? _orderRefreshTimer;
   int _rightTab = 0;
   int _phoneTab = 0;
@@ -156,11 +164,10 @@ class _OrderScreenState extends State<OrderScreen> {
     } on Object catch (error) {
       debugPrint('Restaurant order refresh failed: $error');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(
-            'Could not refresh the order. Local data is preserved; retry shortly.',
-          )),
-        );
+        setState(() {
+          _connectionStatus = 'sync_error';
+          _syncError = 'local_cache_error';
+        });
       }
     } finally {
       _refreshInProgress = false;
@@ -984,7 +991,7 @@ class _OrderScreenState extends State<OrderScreen> {
             ),
             const SizedBox(width: 8),
             Text(
-              '${_kotRounds.length} KOT',
+              '$_activeKotCount active',
               style: const TextStyle(
                 color: RestaurantColors.brandHover,
                 fontSize: 12,
@@ -1077,9 +1084,9 @@ class _OrderScreenState extends State<OrderScreen> {
                 borderRadius: BorderRadius.circular(RestaurantRadii.chip),
               ),
               child: Text(
-                _kotRounds.length == 1
-                    ? '1 KOT round'
-                    : '${_kotRounds.length} KOT rounds',
+                _activeKotCount == 1
+                    ? '1 active KOT'
+                    : '$_activeKotCount active KOTs',
                 style: const TextStyle(
                   color: RestaurantColors.brandHover,
                   fontSize: 11,
