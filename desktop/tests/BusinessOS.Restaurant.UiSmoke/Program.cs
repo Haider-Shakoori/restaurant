@@ -724,7 +724,7 @@ internal static class Program
         var restore = Descendants<Button>(window)
             .Single(x => x.Name == "ExitPosButton");
         var shortcuts = Descendants<Button>(window)
-            .Single(x => x.Name == "WorkspaceShortcutsButton");
+            .Single(x => x.Name == "WorkspaceKeysButton");
         var topNav = Descendants<Border>(window)
             .Single(x => x.Name == "TopNavigationBar");
         Assert(fullscreen.Visibility == Visibility.Visible &&
@@ -736,7 +736,7 @@ internal static class Program
         Assert(restore.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Collapsed &&
             fullscreen.Visibility == Visibility.Collapsed,
-            route + " enters optional full-screen mode by top toolbar");
+            route + " enters optional full-screen mode from workspace controls");
         Click(restore);
         Assert(fullscreen.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Visible &&
