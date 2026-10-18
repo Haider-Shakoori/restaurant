@@ -16,6 +16,9 @@ jobs:
       - name: Test multi-waiter ordering and sync
         shell: pwsh
         run: dotnet test desktop/tests/BusinessOS.Restaurant.Tests/BusinessOS.Restaurant.Tests.csproj --configuration Release --filter 'FullyQualifiedName~LocalOrderingTests' --logger 'trx;LogFileName=waiter-lan.trx' --results-directory acceptance-results
+      - name: Test signing, activation, offline renewal, and cloud isolation
+        shell: pwsh
+        run: dotnet test desktop/tests/BusinessOS.Restaurant.Tests/BusinessOS.Restaurant.Tests.csproj --configuration Release --filter 'FullyQualifiedName~LicensingTests|FullyQualifiedName~OfflineRenewalFileTests|FullyQualifiedName~OfflineNetworkBoundaryTests' --logger 'trx;LogFileName=waiter-license.trx' --results-directory acceptance-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
