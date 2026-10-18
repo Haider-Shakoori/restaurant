@@ -735,8 +735,8 @@ internal static class Program
         Click(fullscreen);
         Assert(restore.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Collapsed &&
-            fullscreen.Visibility == Visibility.Collapsed,
-            route + " enters optional full-screen mode from workspace controls");
+            fullscreen.Visibility == Visibility.Visible,
+            route + " enters full-screen while keeping workspace controls accessible");
         Click(restore);
         Assert(fullscreen.Visibility == Visibility.Visible &&
             topNav.Visibility == Visibility.Visible &&
