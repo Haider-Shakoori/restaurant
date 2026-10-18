@@ -21,6 +21,39 @@ class ConflictScreen extends StatefulWidget {
 
 class _ConflictScreenState extends State<ConflictScreen> {
   bool _showHistory = false;
+  int _revision = 0;
+
+  Future<void> _acknowledge(Map<String, Object?> conflict) async {
+    final operation = conflict['operation']?.toString() ?? 'operation';
+    final mutationId = conflict['mutation_id']?.toString();
+    if (mutationId == null || mutationId.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Acknowledge rejected operation?'),
+        content: Text(
+          'The desktop rejected $operation. Confirm the order is correct '
+          'on the desktop before acknowledging. This will hide the warning '
+          'but will NOT send, apply, or retry the rejected action. '
+          'The record stays in Reconciled history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep warning'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Acknowledge'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.database.acknowledgeConflict(mutationId);
+    if (mounted) setState(() => _revision++);
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +84,7 @@ class _ConflictScreenState extends State<ConflictScreen> {
           ),
           Expanded(
             child: FutureBuilder<List<Map<String, Object?>>>(
-              key: ValueKey(_showHistory),
+              key: ValueKey('$_showHistory-$_revision'),
               future: widget.database.conflicts(archived: _showHistory),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -101,7 +134,13 @@ class _ConflictScreenState extends State<ConflictScreen> {
                             ),
                         ],
                       ),
-                      trailing: Text(conflict['operation']?.toString() ?? ''),
+                      trailing: _showHistory
+                          ? Text(conflict['operation']?.toString() ?? '')
+                          : IconButton(
+                              icon: const Icon(Icons.task_alt_outlined),
+                              tooltip: 'Review and acknowledge',
+                              onPressed: () => _acknowledge(conflict),
+                            ),
                       isThreeLine: _showHistory,
                     );
                   },
