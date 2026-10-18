@@ -250,6 +250,168 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Two_waiters_share_floor_but_not_other_waiters_kitchen_orders_or_ready_alerts()
+    {
+        // Isolated SQLite fixture: no network, app install, printer or customer data.
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            var catalog = new OperationalSnapshotStore(factory);
+            await catalog.ApplyAsync(Snapshot());
+            await using (var db = factory.Create())
+            {
+                db.DiningTables.Add(new LocalDiningTable
+                {
+                    Id = "table-2", DiningAreaId = "area-1", Code = "T-02",
+                    Name = "Table 2", Capacity = 4,
+                    IsActive = true, Status = "available",
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var sync = new LocalSyncService(factory, catalog);
+            var waiterA = new LocalTerminalPrincipal(
+                "iphone-a", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+            var waiterB = new LocalTerminalPrincipal(
+                "iphone-b", 2, "waiter-2", "Waiter Two", "waiter", "tenant-1");
+            var manager = new LocalTerminalPrincipal(
+                "desktop-manager", 10, "manager-1", "Manager", "manager", "tenant-1");
+
+            Assert.Empty(JsonSerializer.SerializeToElement(
+                await sync.BootstrapAsync(waiterB, CancellationToken.None))
+                .GetProperty("orders").EnumerateArray());
+
+            var aOpen = await PushOneAsync(sync, waiterA, "A-OPEN", "order.open",
+                new { client_order_id = "A-ORDER", dining_table_id = "table-1" });
+            Assert.Equal("accepted", aOpen.GetProperty("status").GetString());
+            var bStale = await PushOneAsync(sync, waiterB, "B-OFFLINE-OPEN",
+                "order.open", new
+                {
+                    client_order_id = "B-STALE", dining_table_id = "table-1",
+                });
+            Assert.Equal("conflict", bStale.GetProperty("status").GetString());
+            Assert.Equal("table_busy", bStale.GetProperty("code").GetString());
+
+            var bFloor = JsonSerializer.SerializeToElement(
+                await sync.BootstrapAsync(waiterB, CancellationToken.None));
+            Assert.Empty(bFloor.GetProperty("orders").EnumerateArray());
+            Assert.Equal("occupied", bFloor.GetProperty("tables")
+                .EnumerateArray().Single(x => x.GetProperty("id").GetString() == "table-1")
+                .GetProperty("status").GetString());
+
+            Assert.Equal("accepted", (await PushOneAsync(
+                sync, waiterB, "B-OPEN", "order.open",
+                new { client_order_id = "B-ORDER", dining_table_id = "table-2" }))
+                .GetProperty("status").GetString());
+
+            foreach (var (actor, prefix) in new[]
+            {
+                (waiterA, "A"),
+                (waiterB, "B"),
+            })
+            {
+                Assert.Equal("accepted", (await PushOneAsync(
+                    sync, actor, prefix + "-ADD", "order.item.add", new
+                    {
+                        client_order_id = prefix + "-ORDER",
+                        client_line_id = prefix + "-ITEM",
+                        menu_item_id = "item-1",
+                        quantity = 1,
+                    })).GetProperty("status").GetString());
+                Assert.Equal("accepted", (await PushOneAsync(
+                    sync, actor, prefix + "-KOT", "order.submit", new
+                    {
+                        client_order_id = prefix + "-ORDER",
+                    })).GetProperty("status").GetString());
+            }
+
+            var noNewItems = await PushOneAsync(sync, waiterA, "A-REPEAT",
+                "order.submit", new { client_order_id = "A-ORDER" });
+            Assert.Equal("conflict", noNewItems.GetProperty("status").GetString());
+            Assert.Equal("order_state_conflict", noNewItems.GetProperty("code").GetString());
+            var replay = await PushOneAsync(sync, waiterA, "A-KOT",
+                "order.submit", new { client_order_id = "A-ORDER" });
+            Assert.Equal("accepted", replay.GetProperty("status").GetString());
+
+            var unauthorized = await PushOneAsync(sync, waiterB, "B-ILLEGAL",
+                "order.item.add", new
+                {
+                    client_order_id = "A-ORDER",
+                    client_line_id = "ILLEGAL-LINE",
+                    menu_item_id = "item-1", quantity = 1,
+                });
+            Assert.Equal("conflict", unauthorized.GetProperty("status").GetString());
+
+            var bInitial = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(waiterB, 0, 100, CancellationToken.None));
+            var bCursor = bInitial.GetProperty("cursor").GetInt64();
+            var visible = bInitial.GetProperty("changes").EnumerateArray().ToArray();
+            Assert.Contains(visible, x => x.GetProperty("entity_type").GetString() == "dining_table");
+            Assert.DoesNotContain(visible, x =>
+                x.GetProperty("entity_type").GetString() == "order" &&
+                x.GetProperty("data").GetProperty("client_order_id").GetString() == "A-ORDER");
+
+            string ticketA;
+            await using (var db = factory.Create())
+            {
+                Assert.Equal(2, await db.Orders.CountAsync());
+                Assert.Equal(2, await db.KitchenTickets.CountAsync());
+                Assert.Equal(2, await db.KotRounds.CountAsync());
+                Assert.Equal(2, await db.OrderItems.CountAsync());
+                var orderA = await db.Orders.SingleAsync(o => o.ClientOrderId == "A-ORDER");
+                ticketA = (await db.KitchenTickets.SingleAsync(t => t.OrderId == orderA.Id)).Id;
+            }
+
+            await new LocalKitchenService(factory).ReadyAsync(
+                ticketA, manager, CancellationToken.None);
+
+            Assert.True(await sync.HasVisibleChangesAsync(
+                waiterA, bCursor, CancellationToken.None));
+            Assert.False(await sync.HasVisibleChangesAsync(
+                waiterB, bCursor, CancellationToken.None));
+
+            var aReady = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(waiterA, bCursor, 100, CancellationToken.None));
+            var aChanges = aReady.GetProperty("changes").EnumerateArray().ToArray();
+            Assert.Contains(aChanges, x =>
+                x.GetProperty("entity_type").GetString() == "kitchen_ticket" &&
+                x.GetProperty("entity_id").GetString() == ticketA);
+
+            var bReady = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(waiterB, bCursor, 100, CancellationToken.None));
+            Assert.Empty(bReady.GetProperty("changes").EnumerateArray());
+
+            // Existing unowned ticket events from an older desktop version
+            // must not become readable when a waiter first reconnects.
+            await using (var db = factory.Create())
+            {
+                db.Changes.Add(new LocalChange
+                {
+                    EntityType = "kitchen_ticket",
+                    EntityId = "legacy-unowned-ticket",
+                    Operation = "upsert",
+                    OwnerUserId = null,
+                    DataJson = "{\"private\":true}",
+                    OccurredAtUtc = DateTimeOffset.UtcNow,
+                });
+                await db.SaveChangesAsync();
+            }
+            var current = bReady.GetProperty("cursor").GetInt64();
+            Assert.False(await sync.HasVisibleChangesAsync(
+                waiterB, current, CancellationToken.None));
+            var managerFeed = JsonSerializer.SerializeToElement(
+                await sync.PullAsync(manager, current, 100, CancellationToken.None));
+            Assert.Contains(managerFeed.GetProperty("changes").EnumerateArray(),
+                x => x.GetProperty("entity_id").GetString() == "legacy-unowned-ticket");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
     {
         var root = CreateTemporaryDirectory();
