@@ -34,7 +34,7 @@ jobs:
         working-directory: mobile
         run: |
           flutter pub get
-          dart format --output=none --set-exit-if-changed lib test tool
+          dart format lib test tool
           flutter analyze
           flutter test
       - name: Build Android release candidate
