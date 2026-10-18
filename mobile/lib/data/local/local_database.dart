@@ -353,11 +353,50 @@ class LocalDatabase implements SyncStore {
         );
       }
 
+      final serverOrderIds = <String>{};
       for (final rawOrder in data['orders'] as List<Object?>? ?? const []) {
-        await _upsertOrderSnapshot(
-          txn,
-          Map<String, Object?>.from(rawOrder! as Map<Object?, Object?>),
+        final order = Map<String, Object?>.from(rawOrder! as Map<Object?, Object?>);
+        final clientId = order['client_order_id']?.toString();
+        final serverId = order['id']?.toString();
+        if (clientId != null && clientId.isNotEmpty) {
+          serverOrderIds.add(clientId);
+        } else if (serverId != null && serverId.isNotEmpty) {
+          serverOrderIds.add('server:$serverId');
+        }
+        await _upsertOrderSnapshot(txn, order);
+      }
+
+      // The LAN is the operational authority for the in-restaurant floor.
+      // An active server-backed order absent from its complete waiter snapshot
+      // is no longer actionable on this device. Do not delete its record or
+      // touch locally queued offline mutations.
+      if (cursorScope == 'local') {
+        final oldOrders = await txn.query(
+          'orders',
+          columns: <String>['local_order_id'],
+          where: "server_id IS NOT NULL AND status NOT IN ('closed', 'cancelled', 'inactive_remote')",
         );
+        for (final row in oldOrders) {
+          final localId = row['local_order_id']!.toString();
+          if (serverOrderIds.contains(localId)) continue;
+          final unsent = await txn.rawQuery(
+            """SELECT 1 FROM outbox
+               WHERE status = 'pending'
+                 AND json_extract(payload_json, '$.client_order_id') = ?
+               LIMIT 1""",
+            <Object?>[localId],
+          );
+          if (unsent.isNotEmpty) continue;
+          await txn.update(
+            'orders',
+            <String, Object?>{
+              'status': 'inactive_remote',
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            },
+            where: 'local_order_id = ?',
+            whereArgs: <Object?>[localId],
+          );
+        }
       }
 
       final restaurantSettings = data['restaurant_settings'];
@@ -589,7 +628,7 @@ class LocalDatabase implements SyncStore {
   Future<List<Map<String, Object?>>> activeOrders() {
     return _db.query(
       'orders',
-      where: "status NOT IN ('closed', 'cancelled')",
+      where: "status NOT IN ('closed', 'cancelled', 'inactive_remote')",
       orderBy: 'updated_at DESC',
     );
   }
@@ -1372,7 +1411,14 @@ class LocalDatabase implements SyncStore {
 
   Future<void> _reapplyLocalOccupancy(DatabaseExecutor txn) async {
     final rows = await txn.rawQuery(
-      "SELECT DISTINCT table_id FROM orders WHERE status IN ('draft', 'submitted_pending_sync')",
+      """SELECT DISTINCT orders.table_id FROM orders
+         WHERE orders.table_id IS NOT NULL
+           AND orders.status IN ('draft', 'submitted_pending_sync')
+           AND EXISTS (
+             SELECT 1 FROM outbox
+             WHERE outbox.status = 'pending'
+               AND json_extract(outbox.payload_json, '$.client_order_id') = orders.local_order_id
+           )""",
     );
 
     for (final row in rows) {
