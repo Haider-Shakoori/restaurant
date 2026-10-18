@@ -319,6 +319,26 @@ public sealed class LocalSyncService
                 mutation.Operation,
                 conflict.Code,
                 conflict.Message);
+
+            // The mobile app may have a stale, locally editable copy of an
+            // order already closed/cancelled on desktop. Return authoritative
+            // state to the same authorized waiter without accepting new KOT.
+            if (conflict.Code == "order_state_conflict" &&
+                mutation.Payload.ValueKind == JsonValueKind.Object &&
+                mutation.Payload.TryGetProperty("client_order_id", out var clientIdElement) &&
+                clientIdElement.ValueKind == JsonValueKind.String &&
+                clientIdElement.GetString() is { Length: > 0 } clientId)
+            {
+                var currentOrder = await db.Orders.AsNoTracking()
+                    .SingleOrDefaultAsync(value => value.ClientOrderId == clientId, cancellationToken);
+                if (currentOrder is not null &&
+                    (!string.Equals(principal.UserRole, "waiter", StringComparison.OrdinalIgnoreCase) ||
+                     currentOrder.WaiterId == principal.UserId))
+                {
+                    result["client_order_id"] = currentOrder.ClientOrderId;
+                    result["server_order_status"] = currentOrder.Status;
+                }
+            }
         }
 
         if (string.Equals(result.GetValueOrDefault("status")?.ToString(), "accepted", StringComparison.Ordinal))
