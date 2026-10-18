@@ -139,6 +139,45 @@ class SessionService {
     return activationTarget;
   }
 
+  /// Move an already-paired waiter to the desktop's LAN without logging out.
+  /// Verify identity and authorization before touching local cached snapshots.
+  Future<void> connectToDesktop(String localUrl) async {
+    final current = await _credentials.readSession();
+    if (current == null) {
+      throw const ApiException(
+        code: 'not_configured',
+        message: 'Sign in to this restaurant before connecting to the desktop.',
+      );
+    }
+    final target = await _connectionResolver.resolve(
+      mode: ConnectionMode.local,
+      localUrl: localUrl,
+    );
+    if (current.tenantId != null &&
+        current.tenantId!.isNotEmpty &&
+        target.tenantId != current.tenantId) {
+      throw const ApiException(
+        code: 'tenant_mismatch',
+        message: 'This desktop belongs to a different restaurant tenant.',
+      );
+    }
+
+    final localSession = current.copyWith(
+      baseUrl: target.baseUrl,
+      activeChannel: ConnectionChannel.local,
+      connectionMode: ConnectionMode.local,
+      localBaseUrl: target.baseUrl,
+    );
+    // A health response alone is not enough: verify the saved device
+    // credentials really authorize the LAN host before switching.
+    await _api.heartbeat(localSession);
+    final snapshot = await _api.syncBootstrap(localSession);
+    await _database.applyBootstrap(snapshot, cursorScope: 'local');
+    await _credentials.saveLocalConnection(target.baseUrl);
+    await _database.setSystemState('active_connection', 'local');
+    await _database.setSystemState('last_sync_error', '');
+  }
+
   Future<void> logoutLocal() async {
     await _credentials.clearSession();
   }
