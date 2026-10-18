@@ -160,8 +160,9 @@ public sealed class LocalSyncService
         var visible = scanned
             .Where(change =>
                 !string.Equals(principal.UserRole, "waiter", StringComparison.OrdinalIgnoreCase) ||
-                change.OwnerUserId is null ||
-                change.OwnerUserId == principal.UserId)
+                change.OwnerUserId == principal.UserId ||
+                (change.OwnerUserId is null &&
+                 !string.Equals(change.EntityType, "kitchen_ticket", StringComparison.Ordinal)))
             .Select(change => new
             {
                 sequence = change.Sequence,
@@ -231,7 +232,8 @@ public sealed class LocalSyncService
         if (string.Equals(principal.UserRole, "waiter", StringComparison.OrdinalIgnoreCase))
         {
             query = query.Where(value =>
-                value.OwnerUserId == null || value.OwnerUserId == principal.UserId);
+                value.OwnerUserId == principal.UserId ||
+                (value.OwnerUserId == null && value.EntityType != "kitchen_ticket"));
         }
 
         return await query.AnyAsync(cancellationToken);
