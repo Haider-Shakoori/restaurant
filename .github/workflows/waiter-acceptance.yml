@@ -1,0 +1,24 @@
+name: Restaurant Waiter Acceptance
+on:
+  push:
+    branches: [feat/waiter-stability-ui-sprint-01]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lan-acceptance:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test multi-waiter ordering and sync
+        shell: pwsh
+        run: dotnet test desktop/tests/BusinessOS.Restaurant.Tests/BusinessOS.Restaurant.Tests.csproj --configuration Release --filter 'FullyQualifiedName~LocalOrderingTests' --logger 'trx;LogFileName=waiter-lan.trx' --results-directory acceptance-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: waiter-lan-tests
+          path: acceptance-results/*.trx
+          if-no-files-found: ignore
