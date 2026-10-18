@@ -225,6 +225,10 @@ public sealed class CloudReconciliationService
 
         await using (var db = _databaseFactory.Create())
         {
+            // Cloud table statuses can lag behind completed/cancelled local
+            // orders. Reconcile on EVERY pass, including an empty cloud pull.
+            // This also emits LAN changes so connected waiters refresh.
+            await ReconcileLocalTableOccupancyAsync(db, cancellationToken);
             var state = await StateAsync(db, cancellationToken);
             return new CloudReconciliationRunResult(
                 pushed,
@@ -233,6 +237,51 @@ public sealed class CloudReconciliationService
                 pulled,
                 state.PullCursor);
         }
+    }
+
+    private static async Task ReconcileLocalTableOccupancyAsync(
+        RestaurantDbContext db,
+        CancellationToken cancellationToken)
+    {
+        var occupiedTableIds = (await db.Orders.AsNoTracking()
+                .Where(order => order.ServiceType == "dine_in" &&
+                    order.Status != "closed" && order.Status != "cancelled")
+                .Select(order => order.DiningTableId)
+                .Distinct()
+                .ToArrayAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var tables = await db.DiningTables
+            .Where(table => table.IsActive &&
+                (table.Status == "occupied" || table.Status == "available"))
+            .ToArrayAsync(cancellationToken);
+        var areas = await db.DiningAreas.AsNoTracking()
+            .ToDictionaryAsync(area => area.Id, cancellationToken);
+        var branches = await db.Branches.AsNoTracking()
+            .ToDictionaryAsync(branch => branch.Id, cancellationToken);
+
+        foreach (var table in tables)
+        {
+            var expected = occupiedTableIds.Contains(table.Id) ? "occupied" : "available";
+            if (table.Status == expected) continue;
+            table.Status = expected;
+
+            if (!areas.TryGetValue(table.DiningAreaId, out var area)) continue;
+            var branchName = branches.TryGetValue(area.BranchId, out var branch)
+                ? branch.Name : area.BranchId;
+            AddLanChange(db, "dining_table", table.Id, "upsert", new
+            {
+                id = table.Id,
+                code = table.Code,
+                name = table.Name,
+                capacity = table.Capacity,
+                status = table.Status,
+                is_active = table.IsActive,
+                area = new { id = area.Id, name = area.Name },
+                branch = new { id = area.BranchId, name = branchName },
+            });
+        }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task ApplyChangeAsync(
@@ -557,7 +606,17 @@ public sealed class CloudReconciliationService
         table.Code = String(payload, "code") ?? table.Code;
         table.Name = String(payload, "name") ?? table.Name;
         table.Capacity = Int(payload, "capacity", table.Capacity == 0 ? 4 : table.Capacity);
-        table.Status = String(payload, "status") ?? table.Status;
+        var incomingStatus = String(payload, "status") ?? table.Status;
+        // An occupied flag from the cloud is only a hint: it can be stale
+        // after a local cancellation whose cloud mutation has conflicted.
+        // The desktop's active dine-in orders determine occupancy.
+        table.Status = incomingStatus is "occupied" or "available"
+            ? await db.Orders.AnyAsync(
+                order => order.DiningTableId == table.Id &&
+                    order.ServiceType == "dine_in" &&
+                    order.Status != "closed" && order.Status != "cancelled",
+                cancellationToken) ? "occupied" : "available"
+            : incomingStatus;
         table.IsActive = Bool(payload, "is_active", true);
 
         AddLanChange(db, "dining_table", table.Id, "upsert", new
@@ -673,9 +732,13 @@ public sealed class CloudReconciliationService
             cancellationToken);
         if (table is not null)
         {
-            table.Status = order.Status is "closed" or "cancelled"
-                ? "available"
-                : "occupied";
+            // A closed cloud order must not free a table still hosting
+            // another active order; similarly a takeaway is not dine-in.
+            table.Status = await db.Orders.AnyAsync(
+                value => value.DiningTableId == table.Id &&
+                    value.ServiceType == "dine_in" &&
+                    value.Status != "closed" && value.Status != "cancelled",
+                cancellationToken) ? "occupied" : "available";
         }
 
         await SynchronizeCloudOrderItemsAsync(db, order, payload, cancellationToken);
