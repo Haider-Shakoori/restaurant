@@ -168,6 +168,88 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Waiter_can_move_unsent_quantity_and_merge_remaining_order_once()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            await using (var db = factory.Create())
+            {
+                db.DiningTables.Add(new LocalDiningTable
+                {
+                    Id = "table-2", DiningAreaId = "area-1",
+                    Code = "T-02", Name = "Table 2", Capacity = 4,
+                    IsActive = true, Status = "available",
+                });
+                await db.SaveChangesAsync();
+            }
+            var sync = new LocalSyncService(factory, new OperationalSnapshotStore(factory));
+            var waiter = new LocalTerminalPrincipal(
+                "device-a", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+            var other = new LocalTerminalPrincipal(
+                "device-b", 2, "waiter-2", "Waiter Two", "waiter", "tenant-1");
+
+            foreach (var (id, table) in new[] { ("O1", "table-1"), ("O2", "table-2") })
+            {
+                var opened = await PushOneAsync(sync, waiter,
+                    $"OPEN-{id}", "order.open",
+                    new { client_order_id = id, dining_table_id = table });
+                Assert.Equal("accepted", opened.GetProperty("status").GetString());
+            }
+            var added = await PushOneAsync(sync, waiter, "ADD-L1", "order.item.add",
+                new { client_order_id = "O1", client_line_id = "L1",
+                    menu_item_id = "item-1", quantity = 2 });
+            Assert.Equal("accepted", added.GetProperty("status").GetString());
+
+            var forbidden = await PushOneAsync(sync, other, "MOVE-OTHER", "order.item.move",
+                new { source_client_order_id = "O1", target_client_order_id = "O2",
+                    client_line_id = "L1", target_client_line_id = "L2", quantity = 1 });
+            Assert.Equal("conflict", forbidden.GetProperty("status").GetString());
+
+            var moved = await PushOneAsync(sync, waiter, "MOVE-1", "order.item.move",
+                new { source_client_order_id = "O1", target_client_order_id = "O2",
+                    client_line_id = "L1", target_client_line_id = "L2", quantity = 1 });
+            Assert.Equal("accepted", moved.GetProperty("status").GetString());
+
+            var movedReplay = await PushOneAsync(sync, waiter, "MOVE-1", "order.item.move",
+                new { source_client_order_id = "O1", target_client_order_id = "O2",
+                    client_line_id = "L1", target_client_line_id = "L2", quantity = 1 });
+            Assert.Equal("accepted", movedReplay.GetProperty("status").GetString());
+
+            await using (var verify = factory.Create())
+            {
+                Assert.Equal(2, await verify.OrderItems.CountAsync());
+                Assert.Equal(1, (await verify.OrderItems.SingleAsync(x => x.ClientLineId == "L1")).Quantity);
+                Assert.Equal(1, (await verify.OrderItems.SingleAsync(x => x.ClientLineId == "L2")).Quantity);
+                Assert.Equal(250m, (await verify.Orders.SingleAsync(x => x.ClientOrderId == "O1")).Total);
+                Assert.Equal(250m, (await verify.Orders.SingleAsync(x => x.ClientOrderId == "O2")).Total);
+            }
+
+            var merged = await PushOneAsync(sync, waiter, "MERGE-1", "order.merge",
+                new { source_client_order_id = "O1", target_client_order_id = "O2" });
+            Assert.Equal("accepted", merged.GetProperty("status").GetString());
+            var repeatMerge = await PushOneAsync(sync, waiter, "MERGE-1", "order.merge",
+                new { source_client_order_id = "O1", target_client_order_id = "O2" });
+            Assert.Equal("accepted", repeatMerge.GetProperty("status").GetString());
+
+            await using var final = factory.Create();
+            Assert.Equal("cancelled", (await final.Orders.SingleAsync(x => x.ClientOrderId == "O1")).Status);
+            Assert.Equal(0m, (await final.Orders.SingleAsync(x => x.ClientOrderId == "O1")).Total);
+            Assert.Equal(500m, (await final.Orders.SingleAsync(x => x.ClientOrderId == "O2")).Total);
+            Assert.Equal(2, await final.OrderItems.CountAsync(x =>
+                x.OrderId == final.Orders.Single(y => y.ClientOrderId == "O2").Id));
+            Assert.Equal("available", (await final.DiningTables.SingleAsync(x => x.Id == "table-1")).Status);
+            Assert.Equal("occupied", (await final.DiningTables.SingleAsync(x => x.Id == "table-2")).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Bootstrap_carries_menu_image_url_to_LAN_clients()
     {
         var root = CreateTemporaryDirectory();
