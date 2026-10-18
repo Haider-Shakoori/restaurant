@@ -116,6 +116,40 @@ class RestaurantLocalNotifications {
     }
   }
 
+  /// Lets the waiter verify iOS notification permission and audible delivery
+  /// without creating an actual READY ticket or changing order history.
+  Future<bool> testReadySound() async {
+    if (!_supported) return false;
+    await initialize();
+    if (!_initialized) return false;
+    try {
+      await _plugin.show(
+        id: _nextId++,
+        title: 'Restaurant — sound test',
+        body: 'This is a test kitchen-ready notification.',
+        notificationDetails: NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDescription,
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: true,
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBanner: true,
+            presentList: true,
+            presentSound: true,
+          ),
+        ),
+      );
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
   void _onNotificationResponse(NotificationResponse response) {
     final payload = response.payload;
     if (payload != null && payload.isNotEmpty) {
