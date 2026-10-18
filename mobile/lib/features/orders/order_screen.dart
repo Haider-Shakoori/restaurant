@@ -10,6 +10,7 @@ import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
+import 'kot_round_status.dart';
 
 /// Mirrors the desktop order label: the short `#n` staff number leads, followed
 /// by the service reference (table / takeaway ref) when one is present.
@@ -1257,7 +1258,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 ),
                 ButtonSegment<int>(
                   value: 1,
-                  label: Text('KOT (${_kotRounds.length})'),
+                  label: Text('Kitchen (${_kotRounds.where((r) => !kotRoundProgress(r, orderStatus: _order?['status']?.toString()).isHistory).length})'),
                   icon: const Icon(Icons.receipt_long_outlined, size: 18),
                 ),
               ],
@@ -1383,31 +1384,51 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Widget _kitchenRoundsScroll() {
+    final status = _order?['status']?.toString();
+    final active = <Map<String, Object?>>[];
+    final history = <Map<String, Object?>>[];
+    for (final round in _kotRounds) {
+      final progress = kotRoundProgress(round, orderStatus: status);
+      if (progress.isHistory) {
+        history.add(round);
+      } else {
+        active.add(round);
+      }
+    }
+
     return ListView(
       key: const Key('mobile-pos-kot-scroll'),
       padding: const EdgeInsets.all(12),
       children: [
-        if (_kotRounds.isEmpty)
+        if (active.isNotEmpty) ...[
           const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text('No KOT rounds have been sent yet.'),
-          ),
-        ..._kotRounds.map((round) {
-          final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
-          final number = round['kot_number']?.toString() ?? 'KOT';
-          final priority = round['priority']?.toString() ?? 'normal';
-          return ListTile(
-            leading: Icon(
-              priority == 'rush'
-                  ? Icons.bolt_rounded
-                  : Icons.receipt_long_rounded,
-              color: priority == 'rush' ? Colors.red : null,
+            padding: EdgeInsets.fromLTRB(4, 4, 4, 8),
+            child: Text('ACTIVE KITCHEN TICKETS',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                color: RestaurantColors.textSecondary,
+              ),
             ),
-            title: Text('Round $sequence · $number'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _showKotRound(round),
-          );
-        }),
+          ),
+          ...active.map(_kotRoundTile),
+        ] else
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Text(
+              'No active kitchen tickets. Completed KOT rounds remain in History.',
+              style: TextStyle(color: RestaurantColors.textSecondary),
+            ),
+          ),
+        if (history.isNotEmpty)
+          ExpansionTile(
+            key: const Key('kot-completed-history'),
+            initiallyExpanded: false,
+            title: Text('History (' + history.length.toString() + ')',
+              style: const TextStyle(fontWeight: FontWeight.w800)),
+            subtitle: const Text('Completed rounds, kept for the order record'),
+            children: history.map(_kotRoundTile).toList(),
+          ),
         if (_restaurantSettings['courses_enabled'] == true &&
             _heldCourses.isNotEmpty) ...[
           const Divider(),
@@ -1420,11 +1441,45 @@ class _OrderScreenState extends State<OrderScreen> {
             children: _heldCourses.map((course) => FilledButton.tonalIcon(
               onPressed: _working ? null : () => _fireCourse(course),
               icon: const Icon(Icons.play_arrow_rounded, size: 18),
-              label: Text('Fire course $course'),
+              label: Text('Fire course ' + course.toString()),
             )).toList(),
           ),
         ],
       ],
+    );
+  }
+
+  Widget _kotRoundTile(Map<String, Object?> round) {
+    final sequence = (round['sequence'] as num?)?.toInt() ?? 0;
+    final number = round['kot_number']?.toString() ?? 'KOT';
+    final priority = round['priority']?.toString() ?? 'normal';
+    final progress = kotRoundProgress(
+      round, orderStatus: _order?['status']?.toString(),
+    );
+    final isReady = progress.label.contains('ready') ||
+        progress.label.contains('Ready');
+    final color = progress.isHistory
+        ? RestaurantColors.textMuted
+        : isReady ? RestaurantColors.success : RestaurantColors.brandHover;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      elevation: 0,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        leading: Icon(
+          priority == 'rush'
+              ? Icons.bolt_rounded
+              : isReady ? Icons.notifications_active_rounded
+                : Icons.receipt_long_rounded,
+          color: color,
+        ),
+        title: Text('Round ' + sequence.toString() + ' · ' + number,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text(progress.label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w700)),
+        trailing: const Icon(Icons.chevron_right_rounded),
+        onTap: () => _showKotRound(round),
+      ),
     );
   }
 
