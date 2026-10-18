@@ -22,3 +22,17 @@ jobs:
           name: waiter-lan-tests
           path: acceptance-results/*.trx
           if-no-files-found: ignore
+
+  mobile-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Verify mobile offline and KOT flows
+        working-directory: mobile
+        run: |
+          flutter pub get
+          flutter test test/sync_engine_test.dart test/kot_round_reconciliation_test.dart test/desktop_partial_sync_conflict_test.dart test/order_operations_safety_test.dart test/legacy_order_upgrade_test.dart
