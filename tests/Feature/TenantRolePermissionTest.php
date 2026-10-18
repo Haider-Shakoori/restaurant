@@ -10,8 +10,8 @@ use App\Models\Tenant;
 use App\Models\TenantUser;
 use App\Services\Platform\SubscriptionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
