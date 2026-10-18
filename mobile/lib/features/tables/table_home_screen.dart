@@ -152,7 +152,25 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     setState(() => _syncing = true);
 
     try {
-      await widget.dependencies.syncCoordinator.syncNow();
+      // A real user refresh is authoritative. Background syncs only fetch
+      // incrementally, which can leave old occupancy cached indefinitely.
+      await widget.dependencies.syncEngine.syncNow(forceBootstrap: true);
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Desktop sync failed (${error.code}). '
+                'Check Wi-Fi and the desktop LAN address, then retry.'),
+            duration: const Duration(seconds: 7),
+          ),
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Desktop sync failed: $error')),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() => _syncing = false);
@@ -210,7 +228,7 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
     setState(() => _syncing = true);
     try {
       await widget.dependencies.session.connectToDesktop(localUrl);
-      await widget.dependencies.syncCoordinator.syncNow();
+      await widget.dependencies.syncEngine.syncNow(forceBootstrap: true);
       await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -493,6 +511,26 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
               ],
             ),
             if (session != null &&
+                session.activeChannel == ConnectionChannel.local) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _syncing ? null : _sync,
+                icon: const Icon(Icons.refresh_outlined),
+                label: const Text('Reconnect and refresh desktop tables'),
+              ),
+              if (_connectionStatus == 'offline' ||
+                  (_syncError?.isNotEmpty ?? false)) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Offline — table statuses below are cached, not confirmed '
+                  'by Restaurant Desktop. The configured LAN server is '
+                  '${session.localBaseUrl ?? session.baseUrl}. '
+                  'Keep both devices on the same Wi-Fi and retry.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+            if (session != null &&
                 session.activeChannel == ConnectionChannel.cloud) ...[
               const SizedBox(height: 12),
               OutlinedButton.icon(
@@ -630,7 +668,10 @@ class _TableHomeScreenState extends State<TableHomeScreen> {
                               ),
                               const Spacer(),
                               Text(
-                                formatTableStatus(status),
+                                (_connectionStatus == 'offline' ||
+                                        (_syncError?.isNotEmpty ?? false))
+                                    ? 'Cached ${formatTableStatus(status)}'
+                                    : formatTableStatus(status),
                                 style: Theme.of(context).textTheme.labelMedium,
                               ),
                             ],
