@@ -13,6 +13,106 @@ namespace BusinessOS.Restaurant.Tests;
 public sealed class CloudReconciliationTests
 {
     [Fact]
+    public async Task Empty_cloud_pull_repairs_ghost_occupied_tables_and_notifies_LAN()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+            await using (var db = factory.Create())
+            {
+                db.Branches.Add(new LocalBranch
+                {
+                    Id = "branch-1", Code = "MAIN", Name = "Main Branch", IsActive = true,
+                });
+                db.DiningAreas.Add(new LocalDiningArea
+                {
+                    Id = "area-1", BranchId = "branch-1", Name = "Main Hall", IsActive = true,
+                });
+                for (var n = 1; n <= 4; n++)
+                {
+                    db.DiningTables.Add(new LocalDiningTable
+                    {
+                        Id = "table-" + n,
+                        DiningAreaId = "area-1",
+                        Code = "T0" + n,
+                        Name = "Table " + n,
+                        Capacity = 4,
+                        Status = "occupied",
+                        IsActive = true,
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+            using var http = new HttpClient(new QueueHandler(
+                Json(HttpStatusCode.OK, """
+                {"data":{"server_time":"2026-10-18T08:00:00Z","cursor":0,"has_more":false,"changes":[]}}
+                """)));
+            var service = new CloudReconciliationService(factory, new CloudReconciliationClient(http));
+            await service.RunOnceAsync(Activation(), Session());
+
+            await using var verify = factory.Create();
+            Assert.Equal(4, await verify.DiningTables.CountAsync(x => x.Status == "available"));
+            Assert.Equal(4, await verify.Changes.CountAsync(x => x.EntityType == "dining_table"));
+            Assert.All(await verify.Changes.ToListAsync(), x => Assert.Contains(
+                "\"status\":\"available\"", x.DataJson!, StringComparison.Ordinal));
+            Assert.Empty(await verify.Orders.ToListAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Empty_cloud_pull_keeps_table_occupied_when_local_order_is_active()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await factory.EnsureCreatedAsync();
+            await using (var db = factory.Create())
+            {
+                db.Branches.Add(new LocalBranch
+                {
+                    Id = "branch-1", Code = "MAIN", Name = "Main Branch", IsActive = true,
+                });
+                db.DiningAreas.Add(new LocalDiningArea
+                {
+                    Id = "area-1", BranchId = "branch-1", Name = "Main Hall", IsActive = true,
+                });
+                db.DiningTables.Add(new LocalDiningTable
+                {
+                    Id = "table-1", DiningAreaId = "area-1", Code = "T01",
+                    Name = "Table One", Capacity = 4, Status = "available", IsActive = true,
+                });
+                db.Orders.Add(new LocalOrder
+                {
+                    Id = "order-1", ClientOrderId = "client-1", DiningTableId = "table-1",
+                    ServiceType = "dine_in", WaiterId = 1, WaiterPublicId = "waiter-1",
+                    WaiterName = "Waiter", Status = "draft", GuestCount = 1,
+                });
+                await db.SaveChangesAsync();
+            }
+            using var http = new HttpClient(new QueueHandler(
+                Json(HttpStatusCode.OK, """
+                {"data":{"server_time":"2026-10-18T08:00:00Z","cursor":0,"has_more":false,"changes":[]}}
+                """)));
+            await new CloudReconciliationService(factory, new CloudReconciliationClient(http))
+                .RunOnceAsync(Activation(), Session());
+
+            await using var verify = factory.Create();
+            Assert.Equal("occupied", (await verify.DiningTables.SingleAsync()).Status);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Accepted_outbox_mutation_is_marked_synced_and_linked()
     {
         var root = CreateTemporaryDirectory();
