@@ -56,6 +56,18 @@ class _OrderScreenState extends State<OrderScreen> {
   bool _refreshAgain = false;
   DateTime? _lastCatalogLoad;
   bool _hasUnsent = false;
+  int _offlineQueued = 0;
+  String? _connectionStatus;
+  String? _syncError;
+
+  bool get _connectionProblem =>
+      _connectionStatus == 'offline' ||
+      _connectionStatus == 'sync_error' ||
+      (_syncError?.isNotEmpty ?? false);
+  bool get _isQueued => _offlineQueued > 0;
+  String get _connectionLabel => _connectionProblem
+      ? 'Offline'
+      : _isQueued ? 'Queued' : 'Synced';
   Timer? _orderRefreshTimer;
   int _rightTab = 0;
   int _phoneTab = 0;
@@ -93,6 +105,9 @@ class _OrderScreenState extends State<OrderScreen> {
         final order = await db.order(widget.localOrderId);
         final items = await db.orderItems(widget.localOrderId);
         final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
+        final queued = await db.pendingCount();
+        final connectionStatus = await db.systemState('active_connection');
+        final syncError = await db.systemState('last_sync_error');
 
         // A full menu query is expensive on older iPhones and need not run
         // every time a KOT line advances from queued to ready.
@@ -121,6 +136,9 @@ class _OrderScreenState extends State<OrderScreen> {
           _order = order;
           _items = items;
           _hasUnsent = hasUnsent;
+          _offlineQueued = queued;
+          _connectionStatus = connectionStatus;
+          _syncError = syncError;
           if (loadCatalog) {
             _imageSession = imageSession;
             _categories = categories;
@@ -930,6 +948,41 @@ class _OrderScreenState extends State<OrderScreen> {
                     fontWeight: FontWeight.w800),
               ),
             ),
+            Tooltip(
+              message: _connectionProblem
+                  ? 'Desktop unreachable or sync error. Changes are saved locally.'
+                  : _isQueued
+                      ? 'Order actions waiting to synchronize.'
+                      : 'Last synchronization succeeded.',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _connectionProblem
+                        ? Icons.wifi_off_rounded
+                        : _isQueued
+                            ? Icons.cloud_upload_outlined
+                            : Icons.check_circle_outline_rounded,
+                    size: 16,
+                    color: _connectionProblem
+                        ? RestaurantColors.warning
+                        : _isQueued
+                            ? RestaurantColors.brandHover
+                            : RestaurantColors.success,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _connectionLabel,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: RestaurantColors.textSecondary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
             Text(
               '${_kotRounds.length} KOT',
               style: const TextStyle(
@@ -997,12 +1050,22 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
           const SizedBox(width: 20),
-          const Icon(Icons.circle, size: 9, color: RestaurantColors.success),
+          Icon(
+            _connectionProblem ? Icons.wifi_off_rounded
+                : _isQueued ? Icons.cloud_upload_outlined
+                    : Icons.check_circle_outline_rounded,
+            size: 15,
+            color: _connectionProblem
+                ? RestaurantColors.warning
+                : _isQueued
+                    ? RestaurantColors.brandHover
+                    : RestaurantColors.success,
+          ),
           const SizedBox(width: 6),
-          const Text(
-            'Connected',
-            style:
-                TextStyle(color: RestaurantColors.textSecondary, fontSize: 12),
+          Text(
+            _connectionLabel,
+            style: const TextStyle(
+              color: RestaurantColors.textSecondary, fontSize: 12),
           ),
           const Spacer(),
           if (_kotRounds.isNotEmpty) ...[
@@ -1134,6 +1197,33 @@ class _OrderScreenState extends State<OrderScreen> {
             ],
           ),
         ),
+        if (_isQueued || _connectionProblem)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 3, 12, 4),
+            child: Row(
+              children: [
+                Icon(
+                  _connectionProblem
+                      ? Icons.warning_amber_rounded
+                      : Icons.cloud_upload_outlined,
+                  size: 16, color: RestaurantColors.warning,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _connectionProblem
+                        ? 'Desktop sync unavailable — orders stay saved locally.'
+                        : '$_offlineQueued pending action(s) waiting for sync.',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: RestaurantColors.warning,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: _phoneTab == 0
               ? Column(
