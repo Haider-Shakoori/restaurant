@@ -971,40 +971,34 @@ internal static class RestaurantOperationalPages
         grid.Columns.Add(Column("Stock value AFN", nameof(InventoryRow.StockValue), 135));
         var panel = Stack();
         panel.Margin = new Thickness(4);
-        panel.Children.Add(Card("Inventory overview",
-            "Search ingredients, review local quantities and costs, and record audited changes. All quantities are stored in each ingredient's base unit."));
-        panel.Children.Add(Card("Ingredient costing mode",
-            modules.AutomaticRecipeConsumptionEnabled
-                ? "Recipe mode: kitchen production automatically consumes recipe ingredients. Physical counts cannot be booked as additional food cost."
-                : "Manual mode: KOT does not deduct ingredients. Count physical stock after service to record actual usage and food cost. Purchases remain stock assets until consumed."));
+        panel.Children.Add(new TextBlock
+        {
+            Name = "InventoryPageHeading",
+            Text = "Stock & Ingredients",
+            FontSize = 24,
+            FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Name = "InventoryModeIndicator",
+            Text = modules.AutomaticRecipeConsumptionEnabled
+                ? "Automatic recipe usage" : "Manual stock counts",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 14),
+            ToolTip = modules.AutomaticRecipeConsumptionEnabled
+                ? "Kitchen production deducts recipe ingredients automatically. Do not record food consumption twice."
+                : "Kitchen tickets do not deduct ingredients. Use Count Remaining Stock after service to record ingredient usage.",
+        });
 
         var lowStockCount = rows.Count(x => x.ReorderLevel > 0 && x.Quantity <= x.ReorderLevel);
         var summaryCards = new WrapPanel { Margin = new Thickness(0, 0, 0, 10) };
-        summaryCards.Children.Add(Card("ACTIVE INGREDIENTS", rows.Count.ToString(), 205));
-        summaryCards.Children.Add(Card("LOW STOCK ALERTS", lowStockCount.ToString(), 205));
+        summaryCards.Children.Add(Card("INGREDIENTS", rows.Count.ToString(), 205));
+        summaryCards.Children.Add(Card("LOW STOCK", lowStockCount.ToString(), 205));
         summaryCards.Children.Add(Card("OUT OF STOCK", rows.Count(x => x.Quantity <= 0).ToString(), 205));
-        summaryCards.Children.Add(Card("STOCK UNITS", rows.Select(x => x.BaseUnit).Distinct().Count().ToString(), 205));
+        summaryCards.Children.Add(Card("STOCK VALUE · AFN",
+            rows.Sum(x => x.StockValue).ToString("N2"), 205));
         panel.Children.Add(summaryCards);
-
-        if (lowStockCount > 0)
-        {
-            var warning = new Border
-            {
-                CornerRadius = new CornerRadius(12),
-                BorderThickness = new Thickness(1),
-                Padding = new Thickness(14, 10, 14, 10),
-                Margin = new Thickness(0, 0, 0, 10),
-                Child = new TextBlock
-                {
-                    Text = $"● {lowStockCount} ingredient(s) need replenishment. Use the Low stock filter to review them.",
-                    FontWeight = FontWeights.SemiBold,
-                    TextWrapping = TextWrapping.Wrap,
-                },
-            };
-            warning.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
-            warning.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
-            panel.Children.Add(warning);
-        }
 
         var actions = new WrapPanel
         {
@@ -1147,8 +1141,21 @@ internal static class RestaurantOperationalPages
                     await vm.RefreshCommand.ExecuteAsync(null);
             }
         };
-        var editInventory = new Button { Content = "Edit Ingredients & Units (Online)", Height = 38, Margin = new Thickness(0, 6, 0, 8) };
-        editInventory.Click += async (_, _) => await OpenCloudManagementAsync("inventory_items");
+        var editInventory = new Button
+        {
+            Content = "Edit Ingredients",
+            Height = 38,
+            Margin = new Thickness(0, 6, 0, 8),
+            ToolTip = "Edit ingredient details and purchase units. Opens the local catalog in standalone mode.",
+        };
+        editInventory.Click += async (_, _) =>
+        {
+            var activation = await new BusinessOS.Restaurant.Licensing.WindowsActivationStore().LoadAsync();
+            if (BusinessOS.Restaurant.Licensing.DesktopOperatingMode.IsStandalone(activation))
+                await OpenStandaloneCatalogAsync();
+            else
+                await OpenCloudManagementAsync("inventory_items");
+        };
         create.HorizontalAlignment = HorizontalAlignment.Left;
         editInventory.HorizontalAlignment = HorizontalAlignment.Left;
         create.MinWidth = 0;
@@ -1259,7 +1266,7 @@ internal static class RestaurantOperationalPages
         var countRemaining = new Button
         {
             Name = "InventoryCountRemainingStock",
-            Content = "Record Consumption / Remaining Stock",
+            Content = "Count Remaining Stock",
             Height = 38, MinWidth = 270,
             Margin = new Thickness(0, 0, 10, 8),
             Visibility = modules.AutomaticRecipeConsumptionEnabled
@@ -1543,10 +1550,12 @@ internal static class RestaurantOperationalPages
         lowStockOnly.Unchecked += (_, _) => ApplyInventoryFilter();
         filters.Children.Add(searchBox);
         filters.Children.Add(lowStockOnly);
-        panel.Children.Add(new TextBlock
+        filters.Children.Insert(0, new TextBlock
         {
-            Text = "Search inventory", FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 7),
+            Text = "Find ingredient",
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 12, 8),
+            FontWeight = FontWeights.SemiBold,
         });
         panel.Children.Add(filters);
 
@@ -1580,14 +1589,8 @@ internal static class RestaurantOperationalPages
         var historyTo = new DatePicker { Height = 34, Margin = new Thickness(0, 4, 8, 4), ToolTip = "Consumed to date" };
         System.Windows.Automation.AutomationProperties.SetName(historyFrom, "Consumption history from date");
         System.Windows.Automation.AutomationProperties.SetName(historyTo, "Consumption history to date");
-        panel.Children.Add(SectionTitle("Consumption history"));
-        panel.Children.Add(new TextBlock
-        {
-            Text = "Each recorded deduction shows the quantity, previous and resulting stock, reason, responsible staff member and the applied inventory cost.",
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 6),
-        });
-        panel.Children.Add(TableToolbar(historySearch, historyMaterial, historyReason, historyStaff, historyFrom, historyTo));
+        var historyPanel = Stack();
+        historyPanel.Children.Add(TableToolbar(historySearch, historyMaterial, historyReason, historyStaff, historyFrom, historyTo));
         var historyGrid = GridFor(history);
         historyGrid.Name = "ConsumptionHistoryGrid";
         historyGrid.MinHeight = 220;
@@ -1619,7 +1622,7 @@ internal static class RestaurantOperationalPages
         historyFrom.SelectedDateChanged += (_, _) => refreshHistory();
         historyTo.SelectedDateChanged += (_, _) => refreshHistory();
         if (history.Count == 0)
-            panel.Children.Add(EmptyState("No consumption recorded yet. Recipe mode adds deductions automatically; manual mode records them from Record Consumption."));
+            historyPanel.Children.Add(EmptyState("No consumption recorded yet."));
         var historyTable = new Border
         {
             CornerRadius = new CornerRadius(16),
@@ -1630,7 +1633,16 @@ internal static class RestaurantOperationalPages
         };
         historyTable.SetResourceReference(Border.BackgroundProperty, "CardBackgroundBrush");
         historyTable.SetResourceReference(Border.BorderBrushProperty, "CardBorderBrush");
-        panel.Children.Add(historyTable);
+        historyPanel.Children.Add(historyTable);
+        panel.Children.Add(new Expander
+        {
+            Name = "InventoryHistoryExpander",
+            Header = $"Consumption history ({history.Count})",
+            IsExpanded = false,
+            ToolTip = "View audited stock deductions, applied costs and staff details.",
+            Content = historyPanel,
+            Margin = new Thickness(0, 14, 0, 6),
+        });
         return Scroll(WorkspaceFrostedSurface.Wrap(panel));
     }
 
