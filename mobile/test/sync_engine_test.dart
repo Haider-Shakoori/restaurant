@@ -604,6 +604,19 @@ class _MemoryCredentials implements CredentialStore {
   SessionCredentials? session;
 
   @override
+  Future<void> saveLocalConnection(String baseUrl) async {
+    final current = session;
+    if (current != null) {
+      session = current.copyWith(
+        baseUrl: baseUrl,
+        localBaseUrl: baseUrl,
+        connectionMode: ConnectionMode.local,
+        activeChannel: ConnectionChannel.local,
+      );
+    }
+  }
+
+  @override
   Future<void> clearSession() async {
     session = null;
   }
