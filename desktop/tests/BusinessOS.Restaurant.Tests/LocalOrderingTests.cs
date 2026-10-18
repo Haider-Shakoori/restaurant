@@ -131,6 +131,53 @@ public sealed class LocalOrderingTests
     }
 
     [Fact]
+    public async Task Cancelled_order_rejects_stale_waiter_requests_with_authoritative_status()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var factory = new LocalDatabaseFactory(root);
+            await new OperationalSnapshotStore(factory).ApplyAsync(Snapshot());
+            var sync = new LocalSyncService(factory, new OperationalSnapshotStore(factory));
+            var waiter = new LocalTerminalPrincipal(
+                "device-1", 1, "waiter-1", "Waiter One", "waiter", "tenant-1");
+
+            var opened = await PushOneAsync(
+                sync, waiter, "M-OPEN-STALE", "order.open",
+                new { client_order_id = "ORDER-STALE", dining_table_id = "table-1" });
+            Assert.Equal("accepted", opened.GetProperty("status").GetString());
+
+            var cancelled = await PushOneAsync(
+                sync, waiter, "M-CANCEL-STALE", "order.cancel",
+                new { client_order_id = "ORDER-STALE", reason = "Customer cancelled" });
+            Assert.Equal("accepted", cancelled.GetProperty("status").GetString());
+
+            var add = await PushOneAsync(
+                sync, waiter, "M-ADD-STALE", "order.item.add",
+                new { client_order_id = "ORDER-STALE", client_line_id = "LINE-STALE",
+                    menu_item_id = "item-1", quantity = 1 });
+            Assert.Equal("conflict", add.GetProperty("status").GetString());
+            Assert.Equal("order_state_conflict", add.GetProperty("code").GetString());
+            Assert.Equal("cancelled", add.GetProperty("server_order_status").GetString());
+            Assert.Equal("ORDER-STALE", add.GetProperty("client_order_id").GetString());
+
+            var submit = await PushOneAsync(
+                sync, waiter, "M-SUBMIT-STALE", "order.submit",
+                new { client_order_id = "ORDER-STALE" });
+            Assert.Equal("conflict", submit.GetProperty("status").GetString());
+            Assert.Equal("cancelled", submit.GetProperty("server_order_status").GetString());
+
+            await using var db = factory.Create();
+            Assert.Equal("cancelled", (await db.Orders.SingleAsync()).Status);
+            Assert.Empty(await db.KitchenTickets.ToArrayAsync());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Mutation_replay_is_safe_and_reuse_with_different_content_is_rejected()
     {
         var root = CreateTemporaryDirectory();
