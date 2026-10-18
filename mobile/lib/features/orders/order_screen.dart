@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -49,6 +50,7 @@ class _OrderScreenState extends State<OrderScreen> {
   String _query = '';
   bool _working = false;
   bool _hasUnsent = false;
+  Timer? _orderRefreshTimer;
   int _rightTab = 0;
   int _phoneTab = 0;
 
@@ -56,6 +58,18 @@ class _OrderScreenState extends State<OrderScreen> {
   void initState() {
     super.initState();
     _refresh();
+    // Stay on the order screen while kitchen completes KOTs: show READY
+    // without requiring a return to the Tables screen.
+    _orderRefreshTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => unawaited(_refresh()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _orderRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _refresh() async {
@@ -1293,9 +1307,11 @@ class _OrderScreenState extends State<OrderScreen> {
                     label: Text(
                       _working
                           ? 'Sending...'
-                          : (_order?['status']?.toString() == 'draft'
-                              ? 'Send to Kitchen'
-                              : 'Send New KOT Round'),
+                          : !_hasUnsent && _kotRounds.isNotEmpty
+                              ? 'All items sent to Kitchen'
+                              : (_order?['status']?.toString() == 'draft'
+                                  ? 'Send to Kitchen'
+                                  : 'Send New KOT Round'),
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                   ),
