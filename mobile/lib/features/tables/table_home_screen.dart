@@ -7,7 +7,6 @@ import '../../app/app_theme.dart';
 import '../../app/dependencies.dart';
 import '../../core/connection/connection_mode.dart';
 import '../../core/api/api_exception.dart';
-import '../../core/format/restaurant_formats.dart';
 import '../../core/models/session_credentials.dart';
 import '../conflicts/conflict_screen.dart';
 import '../orders/menu_browser_screen.dart';
