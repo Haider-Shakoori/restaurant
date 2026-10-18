@@ -1362,7 +1362,7 @@ class LocalDatabase implements SyncStore {
         order.containsKey(key) ? order[key] : existingOrder[column];
     final hasTable = order.containsKey('table');
     final tableId = hasTable
-        ? table?['id']?.toString()
+        ? (table == null ? null : table['id']?.toString())
         : existingOrder['table_id']?.toString();
 
     await txn.insert('orders', <String, Object?>{
