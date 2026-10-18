@@ -498,6 +498,49 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
+  Future<bool> _confirmFloorChange(String title, String detail) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(
+          '$detail\n\nIf the desktop is unreachable, this action will '
+          'be queued for synchronization. Another device may have changed '
+          'the order, so the desktop can still reject it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep order'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<void> _showFloorOperationResult(
+    String label,
+    int conflictsBefore,
+  ) async {
+    final db = widget.dependencies.database;
+    final conflictsAfter = await db.conflictCount();
+    final pending = await db.pendingCount();
+    if (!mounted) return;
+    final message = conflictsAfter > conflictsBefore
+        ? '$label rejected by desktop. Review the Sync conflicts screen.'
+        : pending > 0
+            ? '$label saved locally. Waiting for desktop confirmation.'
+            : '$label synchronized with desktop.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
+    );
+  }
+
   Future<void> _transferTable() async {
     if (_working || _order?['service_type']?.toString() != 'dine_in') return;
 
@@ -565,6 +608,17 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (targetId == null) return;
+    final target = available.firstWhere(
+      (table) => table['id']?.toString() == targetId,
+    );
+    final targetName = target['name']?.toString() ??
+        target['code']?.toString() ?? 'selected table';
+    if (!await _confirmFloorChange(
+      'Confirm table transfer',
+      'Move this order to $targetName? The previous table will become '
+      'available if no other active orders use it.',
+    )) return;
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -574,6 +628,7 @@ class _OrderScreenState extends State<OrderScreen> {
       );
       await widget.dependencies.syncCoordinator.syncNow();
       await _refresh();
+      await _showFloorOperationResult('Table transfer', conflictsBefore);
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -618,6 +673,16 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (result == null) return;
+    final movingItem = unsent.firstWhere(
+      (line) => line['local_line_id']?.toString() == result.localLineId,
+    );
+    final itemName = movingItem['item_name']?.toString() ?? 'item';
+    if (!await _confirmFloorChange(
+      'Confirm item move',
+      'Move ' + result.quantity.toString() + ' × ' + itemName +
+          ' into the selected order? Only unsent items can move.',
+    )) return;
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -629,6 +694,7 @@ class _OrderScreenState extends State<OrderScreen> {
       );
       await widget.dependencies.syncCoordinator.syncNow();
       await _refresh();
+      await _showFloorOperationResult('Item move', conflictsBefore);
     } on Object catch (error) {
       _showError(error);
     } finally {
@@ -713,6 +779,13 @@ class _OrderScreenState extends State<OrderScreen> {
     );
 
     if (targetId == null) return;
+    if (!await _confirmFloorChange(
+      'Confirm order merge',
+      'Move all unsent items into the selected order, cancel this source '
+      'order and release its table? Kitchen history and billed orders '
+      'cannot be merged.',
+    )) return;
+    final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
     try {
@@ -721,6 +794,7 @@ class _OrderScreenState extends State<OrderScreen> {
         targetLocalOrderId: targetId,
       );
       await widget.dependencies.syncCoordinator.syncNow();
+      await _showFloorOperationResult('Order merge', conflictsBefore);
 
       if (mounted) {
         Navigator.of(context).maybePop();
