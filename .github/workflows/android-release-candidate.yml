@@ -98,6 +98,50 @@ jobs:
             adb shell monkey -p af.businessos.businessos_restaurant_waiter -c android.intent.category.LAUNCHER 1
             sleep 12
             adb shell pidof af.businessos.businessos_restaurant_waiter
+            # The hosted emulator may briefly show an Android System ANR
+            # for its own Pixel Launcher, even when our app starts normally.
+            # Dismiss the emulator-only Wait dialog and refuse to upload a
+            # screenshot obscured by any remaining system ANR overlay.
+            python3 - <<'PY'
+            import re
+            import subprocess
+            import time
+            import xml.etree.ElementTree as ET
+
+            def dump():
+                subprocess.run(
+                    ['adb', 'shell', 'uiautomator', 'dump', '/sdcard/restaurant-ui.xml'],
+                    check=True, stdout=subprocess.DEVNULL, timeout=35,
+                )
+                xml = subprocess.check_output(
+                    ['adb', 'shell', 'cat', '/sdcard/restaurant-ui.xml'],
+                    timeout=15,
+                ).decode('utf-8')
+                return list(ET.fromstring(xml).iter('node'))
+
+            for _ in range(4):
+                nodes = dump()
+                anr = [n for n in nodes if "isn't responding" in n.attrib.get('text', '').lower()]
+                if not anr:
+                    break
+                wait = next((n for n in nodes
+                             if n.attrib.get('text') == 'Wait'), None)
+                if wait is None:
+                    raise SystemExit('Android emulator ANR could not be dismissed.')
+                bounds = re.findall(r'\d+', wait.attrib['bounds'])
+                x1, y1, x2, y2 = map(int, bounds)
+                subprocess.run(['adb', 'shell', 'input', 'tap',
+                                str((x1 + x2) // 2), str((y1 + y2) // 2)],
+                               check=True)
+                time.sleep(6)
+            else:
+                raise SystemExit('Android emulator launcher ANR stayed visible.')
+            if any("isn't responding" in n.attrib.get('text', '').lower()
+                   for n in dump()):
+                raise SystemExit('A system error dialog still obscures Restaurant.')
+            print('Android startup screen has no blocking system error.')
+            PY
+            adb shell pidof af.businessos.businessos_restaurant_waiter
             adb shell screencap -p /sdcard/restaurant-launch.png
             mkdir -p emulator-results
             adb pull /sdcard/restaurant-launch.png emulator-results/restaurant-launch.png
