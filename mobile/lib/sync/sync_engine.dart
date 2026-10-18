@@ -128,6 +128,14 @@ class SyncEngine {
         await _store.setSystemState('server_locked', '1');
       }
       rethrow;
+    } on Object catch (error) {
+      // Network availability and payload validity are separate. A malformed
+      // snapshot must not leave the UI claiming its cached floor is current.
+      _lastLanBootstrap = null;
+      await _store.setSystemState('last_sync_error', 'sync_data_error');
+      await _store.setSystemState('last_sync_details', error.toString());
+      await _store.setSystemState('active_connection', 'sync_error');
+      rethrow;
     }
   }
 
