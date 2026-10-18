@@ -877,6 +877,25 @@ class LocalDatabase implements SyncStore {
     return ((rows.first['total'] as num?)?.toInt() ?? 0) > 0;
   }
 
+  /// The latest kitchen-submit mutation stays in the outbox until accepted.
+  /// A null result means no submit remains queued or conflicted for this order.
+  Future<String?> kitchenSubmissionStatus(String localOrderId) async {
+    final rows = await _db.query(
+      'outbox',
+      columns: <String>['payload_json', 'status'],
+      where: "operation = 'order.submit'",
+      orderBy: 'id DESC',
+    );
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload_json']! as String)
+          as Map<String, dynamic>;
+      if (payload['client_order_id'] == localOrderId) {
+        return row['status'] as String?;
+      }
+    }
+    return null;
+  }
+
   Future<int> pendingCount() async {
     final rows = await _db.rawQuery(
       "SELECT COUNT(*) AS total FROM outbox WHERE status = 'pending'",
