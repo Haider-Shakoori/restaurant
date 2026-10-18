@@ -222,8 +222,29 @@ class LocalDatabase implements SyncStore {
           );
         }
         if (oldVersion < 9) {
-          await db.execute('ALTER TABLE conflicts ADD COLUMN resolved_at TEXT');
-          await db.execute('ALTER TABLE conflicts ADD COLUMN resolution TEXT');
+          // Legacy v6 databases can omit the conflicts table altogether.
+          // Add missing columns only when they do not already exist.
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS conflicts (
+              mutation_id TEXT PRIMARY KEY,
+              operation TEXT NOT NULL,
+              code TEXT NOT NULL,
+              message TEXT NOT NULL,
+              payload_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              resolved_at TEXT,
+              resolution TEXT
+            )
+          ''');
+          final fields = (await db.rawQuery('PRAGMA table_info(conflicts)'))
+              .map((row) => row['name']?.toString())
+              .toSet();
+          if (!fields.contains('resolved_at')) {
+            await db.execute('ALTER TABLE conflicts ADD COLUMN resolved_at TEXT');
+          }
+          if (!fields.contains('resolution')) {
+            await db.execute('ALTER TABLE conflicts ADD COLUMN resolution TEXT');
+          }
         }
       },
     );
