@@ -55,11 +55,11 @@ jobs:
       - name: Publish Windows desktop
         shell: pwsh
         run: |
-          $projects = @(Get-ChildItem desktop -Filter *.csproj -Recurse | Where-Object { (Get-Content $_.FullName -Raw) -match 'UseWPF' })
-          if ($projects.Count -ne 1) { throw "Expected one WPF desktop project; found $($projects.Count)." }
-          dotnet publish $projects[0].FullName -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o "$env:GITHUB_WORKSPACE\\publish"
+          $project = "desktop/src/BusinessOS.Restaurant.Desktop/BusinessOS.Restaurant.Desktop.csproj"
+          if (-not (Test-Path $project)) { throw "Restaurant desktop project not found: $project" }
+          dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o "$env:GITHUB_WORKSPACE\\publish"
           if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
-          if (-not (Get-ChildItem publish -Filter *.exe)) { throw "Published executable missing" }
+          if (-not (Test-Path publish/BusinessOS.Restaurant.Desktop.exe)) { throw "Restaurant desktop executable missing" }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
