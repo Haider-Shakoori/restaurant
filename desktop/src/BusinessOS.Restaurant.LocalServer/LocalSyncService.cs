@@ -301,6 +301,7 @@ public sealed class LocalSyncService
                 "course.fire" => await FireCourseAsync(db, principal, mutation, cancellationToken),
                 "order.item.void" => await VoidOrderItemAsync(db, principal, mutation, cancellationToken),
                 "order.cancel" => await CancelOrderAsync(db, principal, mutation, cancellationToken),
+                "order.table.transfer" => await TransferTableAsync(db, principal, mutation, cancellationToken),
                 _ => throw new LocalSyncConflictException(
                     "unsupported_operation",
                     "Unsupported offline operation."),
@@ -1106,6 +1107,97 @@ public sealed class LocalSyncService
             order.Id,
             order.ClientOrderId,
             snapshot);
+    }
+
+    /// Waiter-initiated transfer follows the same authoritative floor rules
+    /// as POS. The mutation wrapper handles transaction rollback, replay
+    /// idempotency, and conflict reporting to the originating device.
+    private async Task<Dictionary<string, object?>> TransferTableAsync(
+        RestaurantDbContext db,
+        LocalTerminalPrincipal principal,
+        LocalSyncMutationRequest mutation,
+        CancellationToken cancellationToken)
+    {
+        EnsureOrderingRole(principal);
+
+        var clientOrderId = RequiredString(mutation.Payload, "client_order_id", 40);
+        var targetTableId = RequiredString(mutation.Payload, "target_table_id", 40);
+        var order = await db.Orders.SingleOrDefaultAsync(
+            value => value.ClientOrderId == clientOrderId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Source order does not exist.");
+        AuthorizeOrder(principal, order);
+
+        if (order.ServiceType != "dine_in" ||
+            string.IsNullOrWhiteSpace(order.DiningTableId) ||
+            order.Status is "served" or "billed" or "closed" or "cancelled")
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "This order can no longer be transferred.");
+        }
+        if (string.Equals(order.DiningTableId, targetTableId, StringComparison.Ordinal))
+        {
+            throw new LocalSyncConflictException(
+                "invalid_payload", "Choose another destination table.");
+        }
+
+        var target = await db.DiningTables.SingleOrDefaultAsync(
+            value => value.Id == targetTableId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Destination table does not exist.");
+        if (!target.IsActive || target.Status != "available")
+        {
+            throw new LocalSyncConflictException(
+                "table_busy", "Destination table is no longer available.");
+        }
+
+        var targetArea = await db.DiningAreas.SingleOrDefaultAsync(
+            value => value.Id == target.DiningAreaId, cancellationToken);
+        if (targetArea is null || targetArea.BranchId != order.BranchId)
+        {
+            throw new LocalSyncConflictException(
+                "order_state_conflict", "Tables cannot be transferred between branches.");
+        }
+
+        if (await db.Orders.AnyAsync(
+            value => value.DiningTableId == target.Id &&
+                     ActiveStatuses.Contains(value.Status),
+            cancellationToken))
+        {
+            throw new LocalSyncConflictException(
+                "table_busy", "A different order already occupies that table.");
+        }
+
+        var source = await db.DiningTables.SingleOrDefaultAsync(
+            value => value.Id == order.DiningTableId, cancellationToken)
+            ?? throw new LocalSyncConflictException(
+                "dependency_missing", "Original dining table no longer exists.");
+        var sourceId = source.Id;
+        order.DiningTableId = target.Id;
+        order.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        target.Status = "occupied";
+        source.Status = await db.Orders.AnyAsync(
+            value => value.DiningTableId == sourceId &&
+                     value.Id != order.Id &&
+                     ActiveStatuses.Contains(value.Status),
+            cancellationToken) ? "occupied" : "available";
+
+        await db.SaveChangesAsync(cancellationToken);
+        var snapshot = await OrderSnapshotAsync(db, order, cancellationToken);
+        AddChange(db, "order", order.Id, order.WaiterId, snapshot);
+        AddChange(db, "dining_table", source.Id, null, TableSnapshot(db, source));
+        AddChange(db, "dining_table", target.Id, null, TableSnapshot(db, target));
+        LocalOperationsControlService.AddAudit(
+            db,
+            principal,
+            "order",
+            "order.transferred",
+            order.BranchId,
+            "order",
+            order.Id,
+            new { order_id = order.Id, from_table_id = sourceId, to_table_id = target.Id });
+
+        return Accepted(mutation, "order", order.Id, order.ClientOrderId, snapshot);
     }
 
     private static Dictionary<string, object?> Accepted(
