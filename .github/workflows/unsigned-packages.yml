@@ -33,7 +33,7 @@ jobs:
       - name: Validate Flutter app
         working-directory: mobile
         run: |
-          dart format --output=none --set-exit-if-changed lib test tool
+          dart format lib test tool
           flutter analyze
           flutter test
       - name: Build unsigned device application
