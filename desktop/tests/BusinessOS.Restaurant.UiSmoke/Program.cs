@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -9,8 +11,10 @@ using System.Windows.Threading;
 using BusinessOS.Restaurant.Authentication;
 using BusinessOS.Restaurant.Desktop;
 using BusinessOS.Restaurant.Desktop.Appearance;
+using BusinessOS.Restaurant.Licensing;
 using BusinessOS.Restaurant.Persistence;
 using Microsoft.EntityFrameworkCore;
+using NSec.Cryptography;
 
 namespace BusinessOS.Restaurant.UiSmoke;
 
@@ -23,6 +27,7 @@ internal static class Program
 {
     private static readonly TimeSpan ActionTimeout = TimeSpan.FromSeconds(25);
     private static int _checks;
+    private static bool _temporaryCiActivationCreated;
 
     // Every image is rendered from the real WPF window on an isolated Windows CI
     // runner. Synthetic staff credentials and an empty local SQLite store are used;
@@ -85,6 +90,13 @@ internal static class Program
                 PrintDiagnostics();
                 application.Shutdown(1);
             }
+            finally
+            {
+                // The isolated runner must not retain a test activation after
+                // a passed or failed smoke run; never clear pre-existing state.
+                if (_temporaryCiActivationCreated)
+                    await new WindowsActivationStore().ClearAsync();
+            }
         };
 
         return application.Run(owner);
@@ -97,6 +109,77 @@ internal static class Program
             new AuthUser(901, "ci-test-operator", "CI " + role, "ci@example.test", role),
             "isolated-test-tenant",
             DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// The smoke runner uses a synthetic operator, so it also needs a valid
+    /// synthetic lease. Generate a new Ed25519 keypair IN MEMORY on the
+    /// disposable CI runner. The production service still verifies genuine
+    /// signatures, tenant ID and validity windows unchanged. Never reuse or
+    /// access a customer's activation or copy its signing credentials.
+    /// </summary>
+    private static async Task CreateTemporaryCiActivationAsync()
+    {
+        var activationPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "BusinessOS", "Restaurant", "licensing", "activation.dat");
+        if (File.Exists(activationPath))
+            throw new InvalidOperationException(
+                "Refusing UI smoke: an activation already exists in the runner.");
+
+        var algorithm = SignatureAlgorithm.Ed25519;
+        using var key = Key.Create(algorithm, new KeyCreationParameters
+        {
+            ExportPolicy = KeyExportPolicies.AllowPlaintextExport,
+        });
+        var publicKey = EncodeTestBase64Url(
+            key.PublicKey.Export(KeyBlobFormat.RawPublicKey));
+        var now = DateTimeOffset.UtcNow;
+        var payload = JsonSerializer.SerializeToElement(new
+        {
+            schema_version = 1,
+            lease_id = "ci-" + Guid.NewGuid().ToString("N"),
+            key_id = "ci-smoke-signing",
+            tenant_id = "isolated-test-tenant",
+            business_id = "ci-test-business",
+            subscription_id = "ci-test-subscription",
+            license_version = 1,
+            device_id = "ci-desktop",
+            device_uid = "ci-ephemeral-runner",
+            plan = new { code = "ci-test", name = "CI smoke only" },
+            features = new { },
+            desktop_mode = "standalone_offline",
+            issued_at = now.AddMinutes(-5).ToString("O"),
+            offline_valid_until = now.AddDays(2).ToString("O"),
+            subscription_ends_at = now.AddDays(3).ToString("O"),
+        });
+        // Call the same canonical serializer used by the verifier so the
+        // fixture exercises the real cryptographic license validation path.
+        var canonicalize = typeof(SignedLeaseVerifier).GetMethod(
+            "Canonicalize", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException(
+                "Cannot create a signed CI fixture: canonicalizer missing.");
+        var canonical = (byte[])canonicalize.Invoke(null, [payload])!;
+        var signature = SignatureAlgorithm.Ed25519.Sign(key, canonical);
+        var lease = new SignedLease(payload,
+            EncodeTestBase64Url(signature), "Ed25519", "ci-smoke-signing");
+        var snapshot = new SignedLeaseVerifier().Verify(lease, publicKey);
+        var store = new WindowsActivationStore();
+        await store.SaveAsync(new ActivationState(
+            "https://restaurant-ci.example.test",
+            "ci-desktop",
+            "ci-ephemeral-runner",
+            "ci-not-a-real-secret",
+            publicKey,
+            "ci-smoke-signing",
+            lease,
+            snapshot,
+            now));
+        _temporaryCiActivationCreated = true;
+    }
+
+    private static string EncodeTestBase64Url(byte[] bytes) =>
+        Convert.ToBase64String(bytes).TrimEnd('=')
+            .Replace('+', '-').Replace('/', '_');
 
     private static void PrintDiagnostics()
     {
@@ -137,6 +220,7 @@ internal static class Program
         // on this disposable runner; production startup remains unchanged.
         var sessions = new WindowsSessionStore();
         await sessions.SaveAsync(TestSession("owner"));
+        await CreateTemporaryCiActivationAsync();
         await CheckPersistentMenuPhotoCacheAsync();
         CheckPhotoCatalogIncrementalRendering();
         CheckDashboardProfitLossCalculation();
