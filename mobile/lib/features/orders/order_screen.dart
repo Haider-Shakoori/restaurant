@@ -11,6 +11,7 @@ import '../../core/models/session_credentials.dart';
 import 'menu_category_top_bar.dart';
 import 'menu_item_photo.dart';
 import 'kot_round_status.dart';
+import 'quick_add_policy.dart';
 
 /// Mirrors the desktop order label: the short `#n` staff number leads, followed
 /// by the service reference (table / takeaway ref) when one is present.
@@ -50,6 +51,10 @@ class _OrderScreenState extends State<OrderScreen> {
   String? _selectedCategoryId;
   String _query = '';
   bool _working = false;
+  bool _itemSelectionPending = false;
+  bool _refreshInProgress = false;
+  bool _refreshAgain = false;
+  DateTime? _lastCatalogLoad;
   bool _hasUnsent = false;
   Timer? _orderRefreshTimer;
   int _rightTab = 0;
@@ -74,61 +79,112 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<void> _refresh() async {
-    final db = widget.dependencies.database;
-    final imageSession = await widget.dependencies.credentials.readSession();
-    final order = await db.order(widget.localOrderId);
-    final items = await db.orderItems(widget.localOrderId);
-    final categories = await db.menuCategories();
-    final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
-    final restaurantSettings = await db.restaurantSettings();
-    final menu = <String, List<Map<String, Object?>>>{};
-
-    for (final category in categories) {
-      final id = category['id']!.toString();
-      menu[id] = await db.menuItems(id);
-    }
-
-    if (!mounted) {
+    // Periodic kitchen refreshes and writes can arrive together. Serialize
+    // reads, coalesce overlapping requests, and avoid stale writes to the UI.
+    if (_refreshInProgress) {
+      _refreshAgain = true;
       return;
     }
+    _refreshInProgress = true;
+    try {
+      do {
+        _refreshAgain = false;
+        final db = widget.dependencies.database;
+        final order = await db.order(widget.localOrderId);
+        final items = await db.orderItems(widget.localOrderId);
+        final hasUnsent = await db.hasUnsentItems(widget.localOrderId);
 
-    setState(() {
-      _order = order;
-      _imageSession = imageSession;
-      _items = items;
-      _categories = categories;
-      _menu = menu;
-      _hasUnsent = hasUnsent;
-      _restaurantSettings = restaurantSettings;
-      _selectedCategoryId ??= categories.isEmpty
-          ? null
-          : categories.first['id']!.toString();
-    });
+        // A full menu query is expensive on older iPhones and need not run
+        // every time a KOT line advances from queued to ready.
+        final now = DateTime.now();
+        final loadCatalog = _lastCatalogLoad == null ||
+            now.difference(_lastCatalogLoad!) > const Duration(minutes: 2);
+        var categories = _categories;
+        var menu = _menu;
+        var settings = _restaurantSettings;
+        var imageSession = _imageSession;
+        if (loadCatalog) {
+          categories = await db.menuCategories();
+          final freshMenu = <String, List<Map<String, Object?>>>{};
+          for (final category in categories) {
+            final id = category['id']?.toString();
+            if (id == null || id.isEmpty) continue;
+            freshMenu[id] = await db.menuItems(id);
+          }
+          menu = freshMenu;
+          settings = await db.restaurantSettings();
+          imageSession = await widget.dependencies.credentials.readSession();
+        }
+
+        if (!mounted) break;
+        setState(() {
+          _order = order;
+          _items = items;
+          _hasUnsent = hasUnsent;
+          if (loadCatalog) {
+            _imageSession = imageSession;
+            _categories = categories;
+            _menu = menu;
+            _restaurantSettings = settings;
+            _lastCatalogLoad = now;
+            if (_selectedCategoryId == null ||
+                !categories.any((c) => c['id']?.toString() == _selectedCategoryId)) {
+              _selectedCategoryId = categories.isEmpty
+                  ? null : categories.first['id']?.toString();
+            }
+          }
+        });
+      } while (_refreshAgain && mounted);
+    } on Object catch (error) {
+      debugPrint('Restaurant order refresh failed: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(
+            'Could not refresh the order. Local data is preserved; retry shortly.',
+          )),
+        );
+      }
+    } finally {
+      _refreshInProgress = false;
+    }
   }
 
-  Future<void> _addItem(Map<String, Object?> item) async {
-    if (_working) return;
-
-    final rawGroups = item['modifier_groups_json']?.toString();
-    final groups = rawGroups == null || rawGroups.isEmpty
-        ? const <Object?>[]
-        : (jsonDecode(rawGroups) as List<Object?>);
-
-    final selected = await showDialog<_OrderItemOptions>(
-      context: context,
-      builder: (context) => _ItemOptionsDialog(
-        itemName: item['name']!.toString(),
-        groups: groups,
-        coursesEnabled: _restaurantSettings['courses_enabled'] == true,
-      ),
-    );
-
-    if (selected == null) return;
-    final options = selected;
-
-    setState(() => _working = true);
-
+  Future<void> _addItem(
+    Map<String, Object?> item, {
+    bool quick = false,
+  }) async {
+    // Lock BEFORE displaying a dialog; otherwise two rapid taps launch two
+    // dialogs and may create duplicate order lines.
+    if (_working || _itemSelectionPending || !_editable) return;
+    setState(() => _itemSelectionPending = true);
     try {
+      _OrderItemOptions? options;
+      if (quick && canQuickAddMenuItem(item)) {
+        options = const _OrderItemOptions();
+      } else {
+        final rawGroups = item['modifier_groups_json'];
+        List<Object?> groups;
+        try {
+          groups = rawGroups == null || rawGroups.toString().trim().isEmpty
+              ? const <Object?>[]
+              : (jsonDecode(rawGroups.toString()) as List<Object?>);
+        } on Object {
+          throw const FormatException(
+            'Invalid modifier configuration. Refresh the restaurant menu.',
+          );
+        }
+        options = await showDialog<_OrderItemOptions>(
+          context: context,
+          builder: (context) => _ItemOptionsDialog(
+            itemName: item['name']?.toString() ?? 'Menu item',
+            groups: groups,
+            coursesEnabled: _restaurantSettings['courses_enabled'] == true,
+          ),
+        );
+      }
+      if (options == null || !mounted) return;
+      setState(() => _working = true);
+
       await widget.dependencies.orders.addItem(
         localOrderId: widget.localOrderId,
         menuItem: item,
@@ -142,10 +198,33 @@ class _OrderScreenState extends State<OrderScreen> {
         kitchenInstructions: options.kitchenInstructions,
       );
       await _refresh();
+      if (mounted && quick && canQuickAddMenuItem(item)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 2),
+            content: Text((item['name']?.toString() ?? 'Item') + ' added to order'),
+            action: SnackBarAction(
+              label: 'View order',
+              onPressed: () => setState(() {
+                _phoneTab = 1;
+                _rightTab = 0;
+              }),
+            ),
+          ),
+        );
+      }
     } on Object catch (error) {
       _showError(error);
     } finally {
-      if (mounted) setState(() => _working = false);
+      if (mounted) {
+        setState(() {
+          _working = false;
+          _itemSelectionPending = false;
+        });
+      } else {
+        _working = false;
+        _itemSelectionPending = false;
+      }
     }
   }
 
@@ -1133,7 +1212,9 @@ class _OrderScreenState extends State<OrderScreen> {
           clipBehavior: Clip.antiAlias,
           borderRadius: BorderRadius.circular(RestaurantRadii.card),
           child: InkWell(
-            onTap: _editable && !_working ? () => _addItem(item) : null,
+            onTap: _editable && !_working && !_itemSelectionPending
+                ? () => _addItem(item)
+                : null,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1174,13 +1255,14 @@ class _OrderScreenState extends State<OrderScreen> {
                         ),
                       ),
                       IconButton.filled(
-                        onPressed: _editable && !_working
-                            ? () => _addItem(item)
+                        onPressed: _editable && !_working && !_itemSelectionPending
+                            ? () => _addItem(item, quick: true)
                             : null,
                         style: IconButton.styleFrom(
                           backgroundColor: RestaurantColors.brand,
                           foregroundColor: RestaurantColors.onBrand,
                         ),
+                        tooltip: 'Quick add; item options open when needed',
                         icon: const Icon(Icons.add_rounded),
                       ),
                     ],
