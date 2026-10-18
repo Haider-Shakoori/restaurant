@@ -617,7 +617,9 @@ class _OrderScreenState extends State<OrderScreen> {
       'Confirm table transfer',
       'Move this order to $targetName? The previous table will become '
       'available if no other active orders use it.',
-    )) return;
+    )) {
+      return;
+    }
     final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
@@ -681,7 +683,9 @@ class _OrderScreenState extends State<OrderScreen> {
       'Confirm item move',
       'Move ' + result.quantity.toString() + ' × ' + itemName +
           ' into the selected order? Only unsent items can move.',
-    )) return;
+    )) {
+      return;
+    }
     final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
@@ -784,7 +788,9 @@ class _OrderScreenState extends State<OrderScreen> {
       'Move all unsent items into the selected order, cancel this source '
       'order and release its table? Kitchen history and billed orders '
       'cannot be merged.',
-    )) return;
+    )) {
+      return;
+    }
     final conflictsBefore = await widget.dependencies.database.conflictCount();
 
     setState(() => _working = true);
