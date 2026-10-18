@@ -54,6 +54,20 @@ bool _configureManifest() {
     );
   }
 
+  // Keep the home-screen label consistent with Windows and iOS. Flutter's
+  // generated default uses the internal project name, not the product name.
+  if (RegExp(r'android:label="[^"]*"').hasMatch(content)) {
+    content = content.replaceFirst(
+      RegExp(r'android:label="[^"]*"'),
+      'android:label="Restaurant"',
+    );
+  } else {
+    content = content.replaceFirst(
+      '<application',
+      '<application android:label="Restaurant"',
+    );
+  }
+
   // Declare the foreground service that keeps LAN ready-for-pickup alerts
   // arriving while the app is backgrounded. `dataSync` matches Android 14's
   // required foreground service type; `stopWithTask=false` lets it outlive a
