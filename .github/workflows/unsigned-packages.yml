@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - '.github/workflows/unsigned-packages.yml'
+      - 'mobile/**'
+      - 'desktop/**'
 
 permissions:
   contents: read
