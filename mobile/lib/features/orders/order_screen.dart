@@ -1231,6 +1231,45 @@ class _OrderScreenState extends State<OrderScreen> {
               ],
             ),
           ),
+        if (_phoneTab == 0 && _items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 3, 12, 7),
+            child: Container(
+              key: const Key('waiter-live-order-summary'),
+              padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+              decoration: BoxDecoration(
+                color: RestaurantColors.brandSoft,
+                borderRadius: BorderRadius.circular(RestaurantRadii.button),
+                border: Border.all(color: RestaurantColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.shopping_bag_outlined,
+                      color: RestaurantColors.brandHover, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_items.length} items · ${formatMoney(order['total'])}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: RestaurantColors.textPrimary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _phoneTab = 1;
+                      _rightTab = 0;
+                    }),
+                    child: const Text('View order'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(
           child: _phoneTab == 0
               ? Column(
