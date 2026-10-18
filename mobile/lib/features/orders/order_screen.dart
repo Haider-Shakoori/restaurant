@@ -663,16 +663,27 @@ class _OrderScreenState extends State<OrderScreen> {
 
     try {
       await widget.dependencies.orders.submit(widget.localOrderId);
-      await _refresh();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(widget.strings.queuedForKitchen)),
-        );
-      }
-
+      // The coordinator deliberately retains network failures for offline
+      // operation. Check the durable per-order outbox before claiming delivery.
       await widget.dependencies.syncCoordinator.syncNow();
+      final status = await widget.dependencies.database
+          .kitchenSubmissionStatus(widget.localOrderId);
       await _refresh();
+
+      if (!mounted) return;
+      final message = switch (status) {
+        'conflict' =>
+          'Kitchen rejected this order. Open Sync Conflicts to resolve it.',
+        'pending' =>
+          'Order saved on this phone, but NOT delivered to desktop/kitchen yet. Check LAN connection and sync status.',
+        _ => widget.strings.queuedForKitchen,
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 6),
+        ),
+      );
     } on Object catch (error) {
       _showError(error);
     } finally {
