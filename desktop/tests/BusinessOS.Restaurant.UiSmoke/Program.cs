@@ -899,8 +899,25 @@ internal static class Program
     {
         Assert(FindButton(owner, "+ Add Ingredient") is not null &&
             FindButton(owner, "+ Adjust Stock Quantity") is not null &&
-            FindButton(owner, "Edit Ingredients & Units (Online)") is not null,
+            FindButton(owner, "Edit Ingredients (Online)") is not null,
             "Inventory compact action toolbar retains all operations");
+        Assert(Descendants<TextBlock>(owner).Any(x =>
+            x.Name == "InventoryPageHeading" && x.Text == "Stock & Ingredients"),
+            "Inventory has one concise page heading");
+        Assert(Descendants<TextBlock>(owner).Any(x =>
+            x.Name == "InventoryModeIndicator" && !string.IsNullOrWhiteSpace(x.Text)),
+            "Inventory clearly labels its stock-consumption mode");
+        Assert(!Descendants<TextBlock>(owner).Any(x =>
+            x.Text == "Ingredient costing mode" || x.Text == "Inventory overview"),
+            "Inventory no longer displays redundant guidance panels");
+        var history = Descendants<Expander>(owner)
+            .Single(x => x.Name == "InventoryHistoryExpander");
+        Assert(!history.IsExpanded, "Inventory audit history stays collapsed by default");
+        history.IsExpanded = true;
+        Assert(Descendants<DataGrid>(owner)
+            .Any(x => x.Name == "ConsumptionHistoryGrid"),
+            "Inventory audit history remains available on demand");
+        history.IsExpanded = false;
         var search = Descendants<TextBox>(owner).Single(x => x.Name == "InventorySearchBox");
         var lowStock = Descendants<CheckBox>(owner)
             .Single(x => x.Name == "InventoryLowStockOnlyToggle");
