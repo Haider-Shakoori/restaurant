@@ -42,6 +42,60 @@ void main() {
     expect(store.states['last_sync_error'], '');
   });
 
+  test('a rejected transfer forces immediate LAN re-bootstrap', () async {
+    final store = _MemorySyncStore(
+      pending: <OutboxMutation>[],
+      cursors: <String, int>{'local': 20},
+    );
+    final api = _FakeApi(
+      pushResponse: const <String, Object?>{
+        'results': <Object?>[
+          <String, Object?>{
+            'mutation_id': 'BAD-TRANSFER',
+            'status': 'conflict',
+            'code': 'table_busy',
+            'message': 'Another waiter occupied this table.',
+          },
+        ],
+      },
+      pullResponses: const <Map<String, Object?>>[
+        <String, Object?>{'cursor': 20, 'has_more': false, 'changes': <Object?>[]},
+        <String, Object?>{'cursor': 23, 'has_more': false, 'changes': <Object?>[]},
+      ],
+    );
+    final engine = SyncEngine(
+      api: api,
+      store: store,
+      credentials: _MemoryCredentials(_session(
+        connectionMode: ConnectionMode.local,
+        activeChannel: ConnectionChannel.local,
+        baseUrl: 'http://192.168.1.11:8787',
+      )),
+      leaseVerifier: const _AlwaysValidLease(),
+    );
+
+    await engine.syncNow();
+    expect(api.bootstrapCalls, 1);
+
+    // The next sync occurs before the normal three-minute refresh window.
+    store._pending.add(OutboxMutation(
+      id: 1,
+      mutationId: 'BAD-TRANSFER',
+      operation: 'order.table.transfer',
+      payload: const <String, Object?>{
+        'client_order_id': 'O1',
+        'target_table_id': 'T2',
+      },
+      occurredAt: DateTime.utc(2026, 10, 18),
+      attempts: 0,
+    ));
+    await engine.syncNow();
+    expect(store.conflicts, <String>['BAD-TRANSFER']);
+    expect(store.retries, isEmpty);
+    expect(api.bootstrapCalls, 2);
+    expect(store.states['active_connection'], 'local');
+  });
+
   test('failed LAN sync is visibly offline and preserves cached state', () async {
     final store = _MemorySyncStore(
       pending: <OutboxMutation>[],
