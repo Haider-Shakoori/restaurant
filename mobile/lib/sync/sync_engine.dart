@@ -28,6 +28,7 @@ class SyncEngine {
 
   Future<void>? _activeSync;
   DateTime? _lastLanBootstrap;
+  bool _needsLanConflictRecovery = false;
   static const Duration _lanSnapshotRefreshInterval = Duration(minutes: 3);
 
   Future<void> bootstrap() async {
@@ -96,7 +97,9 @@ class SyncEngine {
               now.difference(_lastLanBootstrap!) >=
                   _lanSnapshotRefreshInterval);
 
-      if (forceBootstrap || refreshLocalSnapshot) {
+      if (forceBootstrap || refreshLocalSnapshot ||
+          (activeSession.activeChannel == ConnectionChannel.local &&
+              _needsLanConflictRecovery)) {
         // Reconcile from the desktop after any outage and periodically even
         // when there are no new change events (e.g. server cursor reset).
         // The local database retains pending offline mutations and conflicts.
@@ -107,6 +110,7 @@ class SyncEngine {
         );
         if (activeSession.activeChannel == ConnectionChannel.local) {
           _lastLanBootstrap = now;
+          _needsLanConflictRecovery = false;
         }
       }
 
@@ -205,6 +209,13 @@ class SyncEngine {
           case 'conflict':
           case 'rejected':
             await _store.markConflict(mutation, result);
+            // Local optimistic table/item/merge operations may have changed
+            // the waiter UI before the desktop rejected them. Re-bootstrap
+            // from the authoritative LAN on this same sync pass. Keep the
+            // rejection audit and any other pending outbox mutations intact.
+            if (session.activeChannel == ConnectionChannel.local) {
+              _needsLanConflictRecovery = true;
+            }
             break;
           default:
             await _markRetry(mutation, 'unknown_server_result');
