@@ -34,6 +34,10 @@ abstract interface class CredentialStore {
     required ConnectionChannel activeChannel,
   });
 
+  /// Switch the existing authenticated device to a verified restaurant LAN
+  /// without clearing secure credentials or the offline SQLite outbox.
+  Future<void> saveLocalConnection(String baseUrl);
+
   Future<void> clearSession();
 }
 
@@ -169,6 +173,16 @@ class SecureCredentialStore implements CredentialStore {
     await _storage.write(
       key: _activeChannelKey,
       value: activeChannel.storageValue,
+    );
+  }
+
+  @override
+  Future<void> saveLocalConnection(String baseUrl) async {
+    await _storage.write(key: _localBaseUrlKey, value: baseUrl);
+    await _storage.write(key: _connectionModeKey, value: ConnectionMode.local.storageValue);
+    await saveActiveConnection(
+      baseUrl: baseUrl,
+      activeChannel: ConnectionChannel.local,
     );
   }
 
