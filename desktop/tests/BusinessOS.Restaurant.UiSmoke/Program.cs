@@ -147,7 +147,7 @@ internal static class Program
             device_uid = "ci-ephemeral-runner",
             plan = new { code = "ci-test", name = "CI smoke only" },
             features = new { },
-            desktop_mode = "standalone_offline",
+            desktop_mode = "cloud_sync",
             issued_at = now.AddMinutes(-5).ToString("O"),
             offline_valid_until = now.AddDays(2).ToString("O"),
             subscription_ends_at = now.AddDays(3).ToString("O"),
